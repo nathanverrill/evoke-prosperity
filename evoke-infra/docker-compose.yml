@@ -1,0 +1,158 @@
+# Platform dependencies: Storage, message bus, search, identity, and observability.
+#
+# Bring this up first. Your application project should live in a separate
+# compose file and attach to the `evoke-infra-network` created here.
+
+name: evoke-infra
+
+services:
+  minio:
+    image: cgr.dev/chainguard/minio:latest
+    user: root
+    networks:
+      - evoke-infra-network
+    environment:
+      MINIO_ROOT_USER: admin
+      MINIO_ROOT_PASSWORD: ${INFRA_SECRET:-devsecret123}
+    # Self-bootstrapping entrypoint: starts MinIO, waits for readiness, and
+    # creates a generic default bucket.
+    entrypoint: /bin/sh
+    command:
+      - -c
+      - |
+        minio server /data --console-address ":9001" &
+        MINIO_PID=$$!
+
+        until mc alias set local http://localhost:9000 admin "$$MINIO_ROOT_PASSWORD" >/dev/null 2>&1; do
+          sleep 1
+        done
+
+        # Create a standard default bucket
+        mc mb --ignore-existing local/default-bucket
+
+        wait $$MINIO_PID
+    ports:
+      - "${PORT_MINIO_API:-9000}:9000"
+      - "${PORT_MINIO_CONSOLE:-9001}:9001"
+    volumes:
+      - minio-data:/data
+    healthcheck:
+      test: ["CMD", "mc", "ready", "local"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+
+  # Native Redpanda Broker (Replaces Apache Kafka)
+  redpanda:
+    image: docker.redpanda.com/redpandadata/redpanda:v24.1.1
+    restart: always
+    networks:
+      - evoke-infra-network
+    command:
+      - redpanda
+      - start
+      - --smp=1
+      - --memory=1G
+      - --overprovisioned
+      - --kafka-addr=internal://0.0.0.0:29092,external://0.0.0.0:9092
+      - --advertise-kafka-addr=internal://redpanda:29092,external://localhost:9092
+    ports:
+      - "${PORT_REDPANDA_OUTSIDE:-9092}:9092"
+    volumes:
+      - redpanda-data:/var/lib/redpanda/data
+    healthcheck:
+      test: ["CMD", "rpk", "cluster", "health"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+
+  # UI Dashboard for Redpanda (retains connection to the new broker)
+  redpanda-console:
+    image: docker.redpanda.com/redpandadata/console:v2.6.0
+    restart: always
+    networks:
+      - evoke-infra-network
+    environment:
+      KAFKA_BROKERS: redpanda:29092
+    ports:
+      - "${PORT_REDPANDA_UI:-8080}:8080"
+    depends_on:
+      redpanda:
+        condition: service_healthy
+
+  opensearch:
+    image: opensearchproject/opensearch:3.6.0
+    restart: always
+    networks:
+      - evoke-infra-network
+    environment:
+      - cluster.name=opensearch-cluster
+      - node.name=opensearch
+      - discovery.type=single-node
+      - bootstrap.memory_lock=true
+      - "OPENSEARCH_JAVA_OPTS=-Xms512m -Xmx512m"
+      - DISABLE_INSTALL_DEMO_CONFIG=true
+      - DISABLE_SECURITY_PLUGIN=true
+      - path.repo=/mnt/snapshots
+    ulimits:
+      memlock:
+        soft: -1
+        hard: -1
+    volumes:
+      - opensearch-data:/usr/share/opensearch/data
+      - opensearch-snapshots:/mnt/snapshots
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          "curl -fsS http://localhost:9200/_cluster/health || exit 1",
+        ]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
+
+  opensearch-dashboards:
+    image: opensearchproject/opensearch-dashboards:3.6.0
+    restart: always
+    networks:
+      - evoke-infra-network
+    environment:
+      OPENSEARCH_HOSTS: '["http://opensearch:9200"]'
+      DISABLE_SECURITY_DASHBOARDS_PLUGIN: "true"
+    ports:
+      - "${PORT_OS_DASHBOARDS:-5601}:5601"
+    depends_on:
+      opensearch:
+        condition: service_healthy
+
+  keycloak:
+    image: quay.io/keycloak/keycloak:25.0
+    networks:
+      - evoke-infra-network
+    command:
+      [
+        "start-dev",
+        "--import-realm",
+        "--http-enabled=true",
+        "--hostname-strict=false",
+      ]
+    environment:
+      KEYCLOAK_ADMIN: admin
+      KEYCLOAK_ADMIN_PASSWORD: ${INFRA_SECRET:-devsecret123}
+      KC_HTTP_PORT: "8081" # Shifted to avoid conflict with Redpanda Console
+    ports:
+      - "${PORT_KEYCLOAK:-8081}:8081"
+    restart: unless-stopped
+
+networks:
+  evoke-infra-network:
+    name: evoke-infra-network
+
+volumes:
+  minio-data:
+  redpanda-data:
+  opensearch-data:
+  opensearch-snapshots:

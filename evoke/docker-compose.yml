@@ -1,0 +1,22 @@
+name: evoke
+
+services:
+  web:
+    build: .
+    ports:
+      - "8000:8000"
+    networks:
+      - evoke-infra-network
+    environment:
+      - MINIO_ENDPOINT=http://minio:9000
+      - MINIO_ROOT_USER=admin
+      - MINIO_ROOT_PASSWORD=devsecret123
+      - REDPANDA_BROKER=redpanda:29092
+      - OPENSEARCH_NODE=http://opensearch:9200
+      - OLLAMA_BASE_URL=http://host.docker.internal:11434/v1
+      - OLLAMA_MODEL=qwen2.5vl:7b
+      - OLLAMA_API_KEY=local-dev-key
+
+networks:
+  evoke-infra-network:
+    external: true

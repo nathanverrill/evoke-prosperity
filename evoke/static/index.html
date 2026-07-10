@@ -1,0 +1,90 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>EVOKE SPA Experience Engine</title>
+    <link rel="stylesheet" href="/static/style.css?v=1.3" />
+  </head>
+  <body>
+    <div class="app-container">
+      <header class="app-header">
+        <h1>EVOKE Platform Engine</h1>
+        <p class="subtitle">
+          Decoupled event pipeline & asynchronous timeline projections
+        </p>
+      </header>
+
+      <main class="main-content">
+        <section class="card upload-card">
+          <h2>Learner Mission Desk</h2>
+          <p class="card-description">
+            Upload your mission PDF file to broadcast an
+            <code>EvidenceSubmitted</code> event across the platform nervous
+            system.
+          </p>
+
+          <div class="dropzone-area">
+            <label for="evidenceFile" class="file-label">
+              <span class="upload-icon">📄</span>
+              <span class="upload-text">Select Mission Evidence PDF</span>
+            </label>
+            <input type="file" id="evidenceFile" accept="application/pdf" />
+          </div>
+
+          <button class="btn btn-primary" onclick="submitEvokeEvidence()">
+            Upload & Execute Stream
+          </button>
+        </section>
+
+        <div class="grid-split">
+          <section class="card timeline-card">
+            <h2>Mission Progression Timeline</h2>
+            <div id="readmodel-out" class="timeline-placeholder">
+              <p>
+                Submit evidence file to initialize the dynamic projection view.
+              </p>
+            </div>
+          </section>
+
+          <section class="card pipeline-card">
+            <h2>Live Event Pipeline Log</h2>
+            <pre id="stream-out" class="code-block">
+Waiting for stream broadcast activity...</pre
+            >
+          </section>
+        </div>
+      </main>
+
+      <footer class="app-footer">
+        <div class="card diagnostics-card">
+          <h3>Platform Infrastructure Health</h3>
+          <div class="btn-group">
+            <button
+              class="btn btn-secondary"
+              onclick="checkHealth('/api/minio', 'minio-out')"
+            >
+              Verify MinIO
+            </button>
+            <button
+              class="btn btn-secondary"
+              onclick="checkHealth('/api/opensearch', 'os-out')"
+            >
+              Verify OpenSearch
+            </button>
+          </div>
+          <div class="flex-diagnostics">
+            <pre id="minio-out" class="code-block-sm">
+MinIO connectivity state...</pre
+            >
+            <pre id="os-out" class="code-block-sm">
+OpenSearch connectivity state...</pre
+            >
+          </div>
+        </div>
+      </footer>
+    </div>
+
+    <script src="/static/script.js?v=1.3"></script>
+  </body>
+</html>
