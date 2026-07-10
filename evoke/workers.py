@@ -4,30 +4,45 @@ import asyncio
 from io import BytesIO
 from pypdf import PdfReader
 from kafka import KafkaConsumer
-from clients import s3_client, os_client, ai_client, get_producer, REDPANDA_BROKER, AI_MODEL
+from clients import s3_client, os_client, ai_client, get_producer, REDPANDA_BROKER, AI_ENABLED, AI_MODEL
 
 def generate_ai_insight(preview_text: str) -> str:
+
+    if not AI_ENABLED or ai_client is None:
+        return (
+            "AI is disabled for this installation. "
+            "Great job submitting your evidence. An instructor can review it later."
+        )
+
     try:
         response = ai_client.chat.completions.create(
             model=AI_MODEL,
             messages=[
                 {
-                    "role": "system", 
-                    "content": "You are an empathetic, encouraging AI learning coach for EVOKE. Review the student's submission text and provide ONE short, actionable suggestion, question, or observation (maximum 2 sentences total)."
+                    "role": "system",
+                    "content": (
+                        "You are an empathetic learning coach..."
+                    ),
                 },
                 {
-                    "role": "user", 
-                    "content": f"Student submission: {preview_text}"
-                }
+                    "role": "user",
+                    "content": f"Student submission:\n{preview_text}",
+                },
             ],
             max_tokens=150,
-            temperature=0.7
+            temperature=0.7,
         )
-        return response.choices[0].message.content.strip()
-    except Exception as e:
-        print(f"Local LLM Error: {e}")
-        return "Insight pending (Fallback: Amazing grit shown on this submission! Keep refining your prototype workflow.)"
 
+        return response.choices[0].message.content.strip()
+
+    except Exception as e:
+        print(f"AI unavailable: {e}")
+
+        return (
+            "AI feedback is temporarily unavailable. "
+            "Your submission has been received successfully."
+        )
+        
 async def evoke_workers_loop():
     await asyncio.sleep(5)
     

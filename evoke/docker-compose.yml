@@ -16,6 +16,7 @@ services:
       - OLLAMA_BASE_URL=http://host.docker.internal:11434/v1
       - OLLAMA_MODEL=qwen2.5vl:7b
       - OLLAMA_API_KEY=local-dev-key
+      - AI_ENABLED=false
 
 networks:
   evoke-infra-network:

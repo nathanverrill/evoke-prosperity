@@ -12,9 +12,20 @@ MINIO_ENDPOINT = os.getenv("MINIO_ENDPOINT", "http://minio:9000")
 MINIO_ROOT_USER = os.getenv("MINIO_ROOT_USER", "admin")
 MINIO_ROOT_PASSWORD = os.getenv("MINIO_ROOT_PASSWORD", "devsecret123")
 
+
+AI_ENABLED = os.getenv("AI_ENABLED", "false").lower() == "true"
+
+AI_MODEL = os.getenv("OLLAMA_MODEL", "qwen2.5vl:7b")
 OLLAMA_BASE_URL = os.getenv("OLLAMA_BASE_URL", "http://host.docker.internal:11434/v1")
 OLLAMA_API_KEY = os.getenv("OLLAMA_API_KEY", "local-dev-key")
-AI_MODEL = os.getenv("OLLAMA_MODEL", "qwen2.5vl:7b")
+
+ai_client = None
+
+if AI_ENABLED:
+    ai_client = OpenAI(
+        base_url=OLLAMA_BASE_URL,
+        api_key=OLLAMA_API_KEY,
+    )
 
 # --- Infrastructure Clients ---
 s3_client = boto3.client(
