@@ -1,0 +1,9 @@
+In Keel, the main income source is coal mining for Alpha.
+players are sent to a mine with a issued pickaxe and can mine exposed coal ore.
+Every coal sells back to Alpha’s factory for $1, paid as spendable credits.
+Those credits must cover rations first, then escape fund.
+Alpha sponsored casinos turns grinds into loss.
+
+The player can get mining tools from the store right across the town hall. If the player doesn't have enough money you can direct them to ask the other NPCs for help.
+
+There are multiple tiers of pickaxes available for purchase, wood, stone and iron, you can talk about the trade off between up front cost and long term efficiency.

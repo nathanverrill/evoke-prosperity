@@ -1,0 +1,1 @@
+/execute as @p[tag=!billbot_intro] run tellraw @s {"text": "*psst* hey! hey no one else in this city can see this kiosk so dont tell anyone. Anyway im billbot, you don't know me but I know you. Holler at me if you need help, I'll be watching you."}

@@ -1,0 +1,9 @@
+In Halyard, the main income sources are the crafting factory and the mob arena. 
+
+The Crafting Factory game:  allows for players to collect crafting ingredients, and craft certain items which are then able to be sold in the shop within the factory. These items specifically are bookshelves, powered railroads, Cake, Sticky piston, beacon and end rods. Bookshelves can be crafted with wood, sugar cane and rabbit hide. Powered railroads can be made with iron, wood and redstone. Cake can be made with iron, honey and wheat. Sticky Pistons can be made with iron nuggets, wood, cobblestone, redstone dust and slime. Beacons can be made with red sand, obsidian, and nether stars. End rods can be made wtih ender pearls, Blaze Rods and Chorus Fruit. items that cannot be obtained from the conveyor belt must be traded from the villagers using emeralds. After crafting the items, players are able to sell those items to chest shops inside the factory.
+
+The mob arena is another game that allows players to make money. Players are able to enter the arena using the brick factory door entrance. The mob arena spawns mobs in waves getting progressively harder. Be careful, the mob arena is very dangerous and the player will often die in the arena. To avoid this, players are able to spend their money within Halyard shops to buy equipment, armor and food to help them progress through this arena. As the player makes their way through the arena, mobs will drop spider eyes. These spider eyes are able to be sold at chest shops within Halyard for money. These spider eyes are the main way of making money within the mob arena. 
+
+After making enough money, the player is then able to buy a train ticket to continue their progress towards the Oasis.
+
+if the user asks about other ways of earning money mention that Alpha's construction brunch are planning to add high yield saving accounts and investment bonds to enrich your experience living in halyard
