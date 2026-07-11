@@ -22,7 +22,7 @@
 **Check what you have:**
 ```bash
 docker --version
-docker-compose --version
+docker compose --version
 python3 --version
 curl --version
 ```
