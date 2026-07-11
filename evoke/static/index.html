@@ -1,90 +1,109 @@
-<!doctype html>
+<!DOCTYPE html>
 <html lang="en">
-  <head>
-    <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>EVOKE SPA Experience Engine</title>
-    <link rel="stylesheet" href="/static/style.css?v=1.3" />
-  </head>
-  <body>
-    <div class="app-container">
-      <header class="app-header">
-        <h1>EVOKE Platform Engine</h1>
-        <p class="subtitle">
-          Decoupled event pipeline & asynchronous timeline projections
-        </p>
-      </header>
-
-      <main class="main-content">
-        <section class="card upload-card">
-          <h2>Learner Mission Desk</h2>
-          <p class="card-description">
-            Upload your mission PDF file to broadcast an
-            <code>EvidenceSubmitted</code> event across the platform nervous
-            system.
-          </p>
-
-          <div class="dropzone-area">
-            <label for="evidenceFile" class="file-label">
-              <span class="upload-icon">📄</span>
-              <span class="upload-text">Select Mission Evidence PDF</span>
-            </label>
-            <input type="file" id="evidenceFile" accept="application/pdf" />
-          </div>
-
-          <button class="btn btn-primary" onclick="submitEvokeEvidence()">
-            Upload & Execute Stream
-          </button>
-        </section>
-
-        <div class="grid-split">
-          <section class="card timeline-card">
-            <h2>Mission Progression Timeline</h2>
-            <div id="readmodel-out" class="timeline-placeholder">
-              <p>
-                Submit evidence file to initialize the dynamic projection view.
-              </p>
-            </div>
-          </section>
-
-          <section class="card pipeline-card">
-            <h2>Live Event Pipeline Log</h2>
-            <pre id="stream-out" class="code-block">
-Waiting for stream broadcast activity...</pre
-            >
-          </section>
+<head>
+    <meta charset="UTF-8">
+    <title>EVOKE Prosperity</title>
+    <style>
+        body { font-family: Arial; background: #f5f5f5; margin: 0; }
+        header { background: #2c3e50; color: white; padding: 20px; text-align: center; }
+        .container { max-width: 1200px; margin: 20px auto; padding: 20px; }
+        .card { background: white; padding: 15px; margin: 15px 0; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.1); }
+        input, button { padding: 8px; margin: 5px; border-radius: 4px; border: 1px solid #ddd; }
+        button { background: #2196F3; color: white; cursor: pointer; }
+        .mission { background: #fff9e6; border-left: 4px solid #ff9800; padding: 10px; margin: 10px 0; }
+        .notification { background: #e8f5e9; border-left: 4px solid #4caf50; padding: 10px; margin: 10px 0; }
+    </style>
+</head>
+<body>
+    <header><h1>EVOKE Prosperity - Operations Hub</h1></header>
+    <div class="container">
+        <div class="card">
+            <h2>Dev Login</h2>
+            <input type="text" id="userId" placeholder="User ID (optional)">
+            <button onclick="devLogin()">Login</button>
+            <span id="userInfo"></span>
         </div>
-      </main>
-
-      <footer class="app-footer">
-        <div class="card diagnostics-card">
-          <h3>Platform Infrastructure Health</h3>
-          <div class="btn-group">
-            <button
-              class="btn btn-secondary"
-              onclick="checkHealth('/api/minio', 'minio-out')"
-            >
-              Verify MinIO
-            </button>
-            <button
-              class="btn btn-secondary"
-              onclick="checkHealth('/api/opensearch', 'os-out')"
-            >
-              Verify OpenSearch
-            </button>
-          </div>
-          <div class="flex-diagnostics">
-            <pre id="minio-out" class="code-block-sm">
-MinIO connectivity state...</pre
-            >
-            <pre id="os-out" class="code-block-sm">
-OpenSearch connectivity state...</pre
-            >
-          </div>
+        <div class="card">
+            <h2>Missions</h2>
+            <div id="missions">Loading...</div>
         </div>
-      </footer>
+        <div class="card">
+            <h2>Notifications</h2>
+            <div id="notifications">Loading...</div>
+        </div>
     </div>
-
-    <script src="/static/script.js?v=1.3"></script>
-  </body>
+    <script>
+        let currentUserId = null;
+        async function devLogin() {
+            try {
+                const response = await fetch('/api/dev-login', { method: 'POST' });
+                const data = await response.json();
+                currentUserId = data.user_id;
+                document.getElementById('userInfo').textContent = `Logged in as: ${data.display_name}`;
+                loadMissions();
+                loadNotifications();
+            } catch(e) {
+                alert('Login failed: ' + e);
+            }
+        }
+        async function loadMissions() {
+            if (!currentUserId) return;
+            try {
+                const response = await fetch(`/api/missions?user_id=${currentUserId}`);
+                const data = await response.json();
+                document.getElementById('missions').innerHTML = data.missions.map(m => `
+                    <div class="mission">
+                        <h3>${m.title}</h3><p>Week ${m.week} - ${m.arc}</p>
+                        <form onsubmit="return submitEvidence(event, '${m.id}')">
+                            <input type="file" required><button>Submit</button>
+                        </form>
+                    </div>
+                `).join('');
+            } catch(e) {
+                console.error(e);
+            }
+        }
+        async function submitEvidence(event, missionId) {
+            event.preventDefault();
+            const formData = new FormData();
+            formData.append('user_id', currentUserId);
+            formData.append('mission_id', missionId);
+            formData.append('file', event.target.querySelector('input[type=file]').files[0]);
+            try {
+                await fetch('/api/submit-evidence', { method: 'POST', body: formData });
+                alert('Submitted!');
+                loadNotifications();
+                return false;
+            } catch(e) {
+                alert('Error: ' + e);
+                return false;
+            }
+        }
+        async function loadNotifications() {
+            if (!currentUserId) return;
+            try {
+                const response = await fetch(`/api/notifications/${currentUserId}`);
+                const data = await response.json();
+                document.getElementById('notifications').innerHTML = data.notifications.length ? 
+                    data.notifications.map(n => `
+                        <div class="notification">
+                            <p>Award: ${n.award_id.substring(0,8)}</p>
+                            <button onclick="collectAward('${n.award_id}')">Collect</button>
+                        </div>
+                    `).join('') : '<p>No notifications</p>';
+            } catch(e) {
+                console.error(e);
+            }
+        }
+        async function collectAward(awardId) {
+            try {
+                await fetch(`/api/awards/${awardId}/collect`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ user_id: currentUserId }) });
+                alert('Collected!');
+                loadNotifications();
+            } catch(e) {
+                alert('Error: ' + e);
+            }
+        }
+    </script>
+</body>
 </html>

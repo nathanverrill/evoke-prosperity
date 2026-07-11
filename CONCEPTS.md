@@ -6,12 +6,17 @@ Read this first if you are an AI assistant (or a human) picking up this repo col
 
 ## What this project is
 
-**EVOKE Prosperity** is a mission-based learning platform for teaching financial literacy and entrepreneurship to students, wrapped in a transmedia narrative (graphic novel + web app + optional Minecraft). Students aren't "doing assignments" — in the fiction, they're EVOKE Agents completing real-world missions, and the platform (web app, Minecraft, an AI mentor character) presents that work back to them as an unfolding story. See [`docs/canon/thread4.md`](docs/canon/thread4.md) for the full framing.
+**EVOKE** is a mission-based learning platform/engine. **EVOKE Prosperity** is the first *campaign* built on it — a 6-week, 12-mission financial-literacy and entrepreneurship curriculum wrapped in a transmedia narrative (graphic novel + web app + optional Minecraft) about a mountain town called Keel. Students aren't "doing assignments" — in the fiction, they're EVOKE Agents completing real-world missions, and the platform (web app, Minecraft, an AI mentor character) presents that work back to them as an unfolding story. See [`docs/canon/thread4.md`](docs/canon/thread4.md) for the full framing.
+
+**Engine vs. campaign matters architecturally, not just narratively.** The codebase is meant to support future campaigns (different missions, badges, narrative) as swappable content, not by rewriting the app — see `ARCHITECTURE.md`'s "Campaigns" section. Two integrations matter here, but asymmetrically:
+
+- **An LMS is an engine-wide invariant** — every deployment, for any campaign, has exactly one (Brightspace or Moodle). **For Evoke Prosperity, that LMS is Brightspace.**
+- **Minecraft is campaign-specific** — most campaigns won't include it. Evoke Prosperity requires it, at the systems level, even though it's presented to learners as optional enrichment (no grade depends on it).
 
 There are two things being built simultaneously, and they're documented separately:
 
 1. **The product** — a FastAPI backend + event pipeline (currently a working prototype) that will eventually run the real curriculum.
-2. **The story/curriculum** — a 6-week, 12-mission financial-literacy curriculum wrapped in a graphic-novel narrative about a mountain town called Keel.
+2. **The story/curriculum** — the Evoke Prosperity campaign's 6-week, 12-mission financial-literacy curriculum.
 
 ---
 
@@ -40,7 +45,7 @@ Source: [`docs/canon/1.jpg`–`5.jpg`](docs/canon/1.jpg) (the infographics) and 
 | **The Brokers** | A faction that fills the post-Alpha vacuum and weaponizes water access via scarcity. Antagonists — leader/backstory still an open question per stakeholder feedback. |
 | **Alex** | The protagonist, an "EVOKE graduate" builder from Keel. Represents curiosity/agency (exact framing still being refined — see stakeholder feedback). |
 | **Ada** | Alex's remote hacker ally, based in Keel. |
-| **B1llbot** | The AI mentor character, present in both the web app and Minecraft. Modeled on the real philosophy of **Bill Reynolds** ([`docs/canon/billslifeprinciples.pdf`](docs/canon/billslifeprinciples.pdf)) — pragmatic, understated, speaks from experience rather than lecturing. Never a narrator/teacher/quest-giver; a field guide who asks reflective questions. |
+| **B1llbot** | The AI mentor character, present in both the web app and Minecraft. Modeled on the real philosophy of **Bill Reynolds** ([`docs/canon/billslifeprinciples.pdf`](docs/canon/billslifeprinciples.pdf)) — pragmatic, understated, speaks from experience rather than lecturing. Never a narrator/teacher/quest-giver; a field guide who asks reflective questions. Technically: a "custom model" in OpenWebUI (system prompt + knowledge base), not hardcoded application code — see `ARCHITECTURE.md`'s "AI backend: OpenWebUI" section. |
 | **Alchemy** | A mysterious entity that contacts Alex near the end of the story and invites him into the global "EVOKE Network." |
 | **Evokation** | A learner's final project/blueprint — the in-fiction and in-curriculum term for the culmination of the 12 missions. |
 | **Basin Simulation** | The in-fiction name for the Minecraft experience — deliberately never called "the game." Strictly optional; no grade ever depends on it ([`docs/canon/thread5.md`](docs/canon/thread5.md)). |
@@ -54,21 +59,22 @@ Source: [`docs/canon/overview.md`](docs/canon/overview.md) and [`docs/canon/Pros
 
 | Term | Meaning |
 |---|---|
-| **Mission** | One of 12 curriculum activities across 6 weeks. Each has a Superpower, Primary/Secondary Evoke Skill, PFL Domain, PBL description, student-facing brief, and required Evidence. |
+| **Mission** | One of 12 curriculum activities across 6 weeks. **Technically, a mission is a Brightspace assignment** — submitting mission evidence is a normal Brightspace assignment/dropbox submission, gamified by EVOKE's framing, not an EVOKE-only record. Each has a Superpower, Primary/Secondary Evoke Skill, PFL Domain, PBL description, student-facing brief, and required Evidence. |
 | **Arc** | One of 4 phases the 12 missions are grouped into: **Explore** (wk1) → **Imagine** (wk2–3) → **Act** (wk4–5) → **Communicate** (wk6). |
 | **Superpower** | One of 4 badge categories a mission builds toward: Empathetic Changemaker, Systems Thinker, Creative Visionary, Deep Collaborator. |
 | **PFL Domain** | The Personal Financial Literacy concept a mission teaches (Philanthropy, Goal Setting, Budgeting, Investing). |
-| **Evidence** | What a learner/team submits to complete a mission (notes, prototype, budget, pitch, etc.) — uploaded as a file, triggers the feedback loop. |
+| **Evidence** | What a learner/team submits to complete a mission — a real Brightspace assignment submission (notes, prototype, budget, pitch, etc.), which triggers the feedback loop. Not to be confused with the observation/screenshot a player records for a **Minecraft side quest** — that's a separate, Brightspace-unrelated kind of "evidence" purely for the player's own completion record. See `BUILD_PLAN.md`. |
 | **Insight** | A piece of feedback on a submission — from AI Coach, instructor, or peer. Additive; nothing overwrites previous feedback. |
 | **Timeline** | The per-learner, per-mission view of progress: submitted → processing → AI analysis → instructor review → completed. |
 | **XP / Levels / Badges / Streaks** | Progression mechanics. XP is never removed. Streaks pause, never punish, on a missed day. |
 | **Team / Venture Points / Venture Spectrum** | Teams of ~4 collaborate on missions. In the late-game "Worth Backing" / "Craft Your Pitch" missions, teams allocate 100 **Venture Points** (representing ownership/voting power) between themselves and outside backers, and classify their venture as a **Safe Bet / Balanced Bet / Moonshot**. |
+| **Companion Mode** | A narrow, sidebar-style web page meant to be kept open next to the Minecraft client while playing — shows the current mission/quest, notifications, pending awards (with the same **Collect** action as the main site), and a B1llbot chat box. Same backend APIs as the main site; a separate, narrower surface, not a responsive variant. See `UI_SPEC.md`. |
 
 ---
 
 ## Technical architecture
 
-**[`ARCHITECTURE.md`](ARCHITECTURE.md) is the target-state plan — read it before making infrastructure decisions.** Guiding principle: one engineer + an AI coding assistant can understand and run the whole thing; it runs entirely on localhost.
+**[`ARCHITECTURE.md`](ARCHITECTURE.md) is the target-state plan — read it before making infrastructure decisions.** Guiding principle: one senior, highly experienced engineer + an AI coding assistant can understand and run the whole thing; it runs entirely on localhost.
 
 Quick summary of the stack (target state):
 
@@ -78,7 +84,8 @@ Quick summary of the stack (target state):
 - **MinIO** — S3-compatible object storage for evidence files
 - **Postgres** *(planned, not yet in the running prototype)* — identity, organizations, teams, and the mission catalog; CRUD data, not event-sourced
 - **`IdentityProvider` interface** *(planned)* — replaces Keycloak; `LocalIdentityProvider` for dev, `BrightspaceLTIProvider` sketched for later LMS integration
-- **AI client** — OpenAI-compatible, points at Ollama locally or a hosted API, fully optional (`AI_ENABLED=false` by default)
+- **Minecraft Reward Bridge** *(planned, Prosperity-specific)* — a separate small service that consumes `BadgeAwarded` events off Redpanda and grants the matching in-game item/effect/command via RCON, so LMS badges show up as real rewards in Minecraft. Adapts the proven reference implementation at `evoke-cu-internship/badges/Badge-API`. See `ARCHITECTURE.md`'s "Minecraft Reward Bridge" section.
+- **OpenWebUI** *(planned)* — the AI gateway in front of Ollama/hosted models. B1llbot (and any other AI mentor/NPC) is a "custom model" configured inside OpenWebUI — a base model + system prompt + knowledge base(s) for RAG — not a hardcoded prompt string in application code. Fully optional (`AI_ENABLED=false` by default).
 
 **The currently-running code is an earlier prototype**, not yet updated to this plan — see the repo map below for what exists today versus what's planned.
 
@@ -105,6 +112,8 @@ docs/legacy/             Superseded draft material — do not treat as current
 docs/process/            Meeting notes, planning chats — history, not canon
 
 ARCHITECTURE.md          Target-state technical architecture plan
+BUILD_PLAN.md            Active build spec (infra, events, Minecraft container, Brightspace sim)
+UI_SPEC.md               Gamified web experience spec + wireframe skinning contract
 CONCEPTS.md              This file
 ```
 

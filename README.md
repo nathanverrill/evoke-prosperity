@@ -39,6 +39,8 @@ docs/           Narrative, curriculum, and planning source material — see docs
 
 - [`CONCEPTS.md`](CONCEPTS.md) — glossary and orientation (start here)
 - [`ARCHITECTURE.md`](ARCHITECTURE.md) — target-state technical architecture and the reasoning behind it
+- [`BUILD_PLAN.md`](BUILD_PLAN.md) — the active build spec (custom Minecraft container, missions synced from the Brightspace sim, event catalog, profiles)
+- [`UI_SPEC.md`](UI_SPEC.md) — the gamified web experience: mission loop, profile pages, Companion Mode, and the wireframe skinning contract
 - [`docs/README.md`](docs/README.md) — index of narrative/curriculum docs, split into `canon/` (current source of truth), `legacy/` (superseded drafts), and `process/` (meeting notes, planning chats)
 
 ## Status

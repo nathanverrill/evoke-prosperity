@@ -1,233 +1,1279 @@
+import os
+import json
 import datetime
 import asyncio
-from fastapi import FastAPI, HTTPException, File, UploadFile, Form
+import uuid
+from typing import Optional, List
+from fastapi import FastAPI, HTTPException, File, UploadFile, Form, Depends, Response
 from fastapi.staticfiles import StaticFiles
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, JSONResponse, RedirectResponse
+from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
-from clients import s3_client, os_client, get_producer
-from workers import evoke_workers_loop
+import psycopg2
+from psycopg2.pool import SimpleConnectionPool
+import httpx
+import asyncpg
+import logging
 
-app = FastAPI()
+from evoke.clients import s3_client, os_client, get_producer
+from evoke.workers import evoke_workers_loop
+from evoke.lms import get_brightspace_lms
+from evoke.lti import BrightspaceLTIProvider
 
-# --- Pydantic Models for JSON Payloads ---
-class InsightPayload(BaseModel):
-    learner_id: str
+logger = logging.getLogger(__name__)
+
+# ========== Configuration ==========
+DATABASE_URL = os.getenv("DATABASE_URL", "postgresql://evoke:devsecret123@localhost:5432/evoke")
+BRIGHTSPACE_SIM_URL = os.getenv("BRIGHTSPACE_SIM_URL", "http://brightspace-sim:8001")
+OPENWEBUI_URL = os.getenv("OPENWEBUI_URL", "http://open-webui:8080")
+AI_ENABLED = os.getenv("AI_ENABLED", "false").lower() == "true"
+
+# Brightspace integration (adapter or simulator)
+BRIGHTSPACE_SIMULATOR_MODE = os.getenv("BRIGHTSPACE_SIMULATOR_MODE", "true").lower() == "true"
+BRIGHTSPACE_TENANT_URL = os.getenv("BRIGHTSPACE_TENANT_URL")
+BRIGHTSPACE_APP_KEY = os.getenv("BRIGHTSPACE_APP_KEY")
+BRIGHTSPACE_APP_SECRET = os.getenv("BRIGHTSPACE_APP_SECRET")
+BRIGHTSPACE_ORG_UNIT_ID = os.getenv("BRIGHTSPACE_ORG_UNIT_ID")
+
+# ========== Database Pool ==========
+db_pool = SimpleConnectionPool(1, 20, DATABASE_URL)
+async_db_pool: Optional[asyncpg.Pool] = None
+brightspace_lms = None
+brightspace_lti: Optional[BrightspaceLTIProvider] = None
+
+def get_db_connection():
+    return db_pool.getconn()
+
+def return_db_connection(conn):
+    db_pool.putconn(conn)
+
+# ========== FastAPI Setup ==========
+app = FastAPI(title="EVOKE Prosperity API")
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+# ========== Startup/Shutdown ==========
+@app.on_event("startup")
+async def startup():
+    """Initialize async database pool, Brightspace adapter, and LTI provider"""
+    global async_db_pool, brightspace_lms, brightspace_lti
+
+    try:
+        # Create async database pool for BrightspaceLMS and LTI
+        async_db_pool = await asyncpg.create_pool(DATABASE_URL, min_size=5, max_size=20)
+        logger.info("Async database pool created")
+
+        # Initialize Brightspace adapter (real or simulator mode)
+        if not BRIGHTSPACE_SIMULATOR_MODE and BRIGHTSPACE_TENANT_URL:
+            brightspace_lms = get_brightspace_lms(async_db_pool)
+            if brightspace_lms:
+                logger.info(f"BrightspaceLMS adapter initialized for {BRIGHTSPACE_TENANT_URL}")
+            else:
+                logger.warning("Brightspace adapter not configured, falling back to simulator")
+        else:
+            logger.info("Using Brightspace simulator mode")
+
+        # Initialize LTI 1.3 provider if configured
+        try:
+            from evoke.lti import get_brightspace_lti_provider
+            brightspace_lti = get_brightspace_lti_provider(async_db_pool)
+            if brightspace_lti:
+                logger.info("Brightspace LTI 1.3 provider initialized")
+            else:
+                logger.info("LTI not configured (optional feature)")
+        except ImportError:
+            logger.warning("LTI provider not available")
+
+    except Exception as e:
+        logger.error(f"Startup error: {e}")
+
+@app.on_event("shutdown")
+async def shutdown():
+    """Close database pool and Brightspace adapter"""
+    global async_db_pool, brightspace_lms
+
+    if async_db_pool:
+        await async_db_pool.close()
+        logger.info("Async database pool closed")
+
+    if brightspace_lms:
+        await brightspace_lms.close()
+        logger.info("BrightspaceLMS adapter closed")
+
+# ========== Pydantic Models ==========
+class Mission(BaseModel):
+    id: str
+    title: str
+    week: int
+    arc: str
+    superpower: str
+    brief: str
+
+class Award(BaseModel):
+    id: str
     mission_id: str
-    category: str
+    tier: str
     source: str
-    text: str
+    awarded_at: str
+    collected_at: Optional[str]
 
-# -------------------------------------------------------------------------
-# 1. EVENT PRODUCERS (Commands)
-# -------------------------------------------------------------------------
+class Notification(BaseModel):
+    id: str
+    award_id: str
+    created_at: str
+    read: bool
 
+class MinecraftLink(BaseModel):
+    username: str
+    uuid: Optional[str]
+
+class Quest(BaseModel):
+    id: str
+    title: str
+    description: str
+    kind: str
+
+# ========== Helper Functions ==========
+def db_execute(query: str, params=None):
+    conn = get_db_connection()
+    try:
+        cur = conn.cursor()
+        cur.execute(query, params or ())
+        conn.commit()
+        result = cur.fetchall() if query.strip().upper().startswith("SELECT") else None
+        cur.close()
+        return result
+    except Exception as e:
+        conn.rollback()
+        raise e
+    finally:
+        return_db_connection(conn)
+
+def db_fetch_one(query: str, params=None):
+    conn = get_db_connection()
+    try:
+        cur = conn.cursor()
+        cur.execute(query, params or ())
+        result = cur.fetchone()
+        cur.close()
+        return result
+    finally:
+        return_db_connection(conn)
+
+def db_fetch_all(query: str, params=None):
+    conn = get_db_connection()
+    try:
+        cur = conn.cursor()
+        cur.execute(query, params or ())
+        result = cur.fetchall()
+        cur.close()
+        return result
+    finally:
+        return_db_connection(conn)
+
+async def publish_event(event_type: str, data: dict):
+    producer = get_producer()
+    event = {
+        "event_type": event_type,
+        "version": "1.0.0",
+        "timestamp": datetime.datetime.now().isoformat(),
+        "data": data
+    }
+    producer.send('evoke-events', value=event)
+    producer.flush()
+    return event
+
+# ========== Health Checks ==========
+@app.get("/health")
+async def health_check():
+    return {"status": "ok"}
+
+@app.get("/api/health/database")
+async def health_database():
+    try:
+        result = db_fetch_one("SELECT 1")
+        return {"status": "connected"}
+    except:
+        return JSONResponse({"status": "disconnected"}, status_code=500)
+
+@app.get("/api/health/minio")
+async def health_minio():
+    try:
+        s3_client.head_bucket(Bucket="default-bucket")
+        return {"status": "ok"}
+    except:
+        return JSONResponse({"status": "error"}, status_code=500)
+
+@app.get("/api/health/opensearch")
+async def health_opensearch():
+    try:
+        await os_client.info()
+        return {"status": "ok"}
+    except:
+        return JSONResponse({"status": "error"}, status_code=500)
+
+# ========== Session Management ==========
+@app.post("/api/login")
+async def login(email: str, password: str):
+    """Dev login - returns a session token"""
+    # Simple dev auth
+    try:
+        result = db_fetch_one(
+            "SELECT u.id, u.display_name FROM users u JOIN auth_identities ai ON u.id = ai.user_id WHERE u.email = %s AND ai.provider = 'local'",
+            (email,)
+        )
+        if result:
+            user_id, display_name = result
+            return {
+                "user_id": str(user_id),
+                "display_name": display_name,
+                "email": email,
+                "session_token": str(uuid.uuid4())
+            }
+        raise HTTPException(status_code=401, detail="Invalid credentials")
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+@app.post("/api/dev-login")
+async def dev_login(user_id: Optional[str] = None):
+    """Dev mode auto-login"""
+    if not user_id:
+        # Return first dev user
+        result = db_fetch_one("SELECT id, display_name, email FROM users LIMIT 1")
+        if not result:
+            raise HTTPException(status_code=404, detail="No users found")
+        user_id, display_name, email = result
+    else:
+        result = db_fetch_one("SELECT display_name, email FROM users WHERE id = %s::uuid", (user_id,))
+        if not result:
+            raise HTTPException(status_code=404, detail="User not found")
+        display_name, email = result
+
+    return {
+        "user_id": user_id,
+        "display_name": display_name,
+        "email": email,
+        "session_token": str(uuid.uuid4())
+    }
+
+# ========== Identity Management ==========
+class LinkBrightspaceRequest(BaseModel):
+    evoke_user_id: str
+    brightspace_user_id: int
+    brightspace_access_token: str
+
+class LinkMinecraftRequest(BaseModel):
+    evoke_user_id: str
+    minecraft_uuid: str
+    minecraft_username: str
+
+@app.post("/api/identity/link-brightspace")
+async def link_brightspace_identity(request: LinkBrightspaceRequest):
+    """Link EVOKE user to Brightspace user ID and verify token"""
+    try:
+        # Verify token with Brightspace simulator
+        async with httpx.AsyncClient() as client:
+            verify_response = await client.get(
+                f"{BRIGHTSPACE_SIM_URL}/d2l/api/lp/1.96/users/whoami",
+                headers={"Authorization": f"Bearer {request.brightspace_access_token}"}
+            )
+            if verify_response.status_code != 200:
+                raise HTTPException(status_code=401, detail="Invalid Brightspace token")
+
+        # Create or update identity mapping
+        db_execute(
+            """INSERT INTO evoke_identities (user_id, brightspace_user_id)
+               VALUES (%s::uuid, %s)
+               ON CONFLICT (brightspace_user_id) DO UPDATE
+               SET updated_at = CURRENT_TIMESTAMP""",
+            (request.evoke_user_id, request.brightspace_user_id)
+        )
+
+        return {
+            "evoke_user_id": request.evoke_user_id,
+            "brightspace_user_id": request.brightspace_user_id,
+            "status": "linked"
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"Identity linking failed: {str(e)}")
+
+@app.post("/api/identity/link-minecraft")
+async def link_minecraft_identity(request: LinkMinecraftRequest):
+    """Link EVOKE user to Minecraft UUID and username"""
+    try:
+        db_execute(
+            """INSERT INTO evoke_identities (user_id, minecraft_uuid, minecraft_username)
+               VALUES (%s::uuid, %s, %s)
+               ON CONFLICT (minecraft_uuid) DO UPDATE
+               SET minecraft_username = %s, updated_at = CURRENT_TIMESTAMP""",
+            (request.evoke_user_id, request.minecraft_uuid, request.minecraft_username,
+             request.minecraft_username)
+        )
+
+        return {
+            "evoke_user_id": request.evoke_user_id,
+            "minecraft_uuid": request.minecraft_uuid,
+            "minecraft_username": request.minecraft_username,
+            "status": "linked"
+        }
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"Minecraft linking failed: {str(e)}")
+
+@app.get("/api/identity/{evoke_user_id}")
+async def get_identity(evoke_user_id: str):
+    """Get cross-system identity mapping for a user"""
+    try:
+        result = db_fetch_one(
+            """SELECT user_id, brightspace_user_id, minecraft_uuid, minecraft_username
+               FROM evoke_identities WHERE user_id = %s::uuid""",
+            (evoke_user_id,)
+        )
+        if not result:
+            raise HTTPException(status_code=404, detail="Identity mapping not found")
+
+        user_id, bs_user_id, mc_uuid, mc_username = result
+        return {
+            "evoke_user_id": str(user_id),
+            "brightspace_user_id": bs_user_id,
+            "minecraft_uuid": mc_uuid,
+            "minecraft_username": mc_username
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+@app.get("/api/identity/by-brightspace/{brightspace_user_id}")
+async def get_identity_by_brightspace(brightspace_user_id: int):
+    """Look up EVOKE user ID by Brightspace user ID"""
+    try:
+        result = db_fetch_one(
+            """SELECT user_id FROM evoke_identities WHERE brightspace_user_id = %s""",
+            (brightspace_user_id,)
+        )
+        if not result:
+            raise HTTPException(status_code=404, detail="No EVOKE user linked to this Brightspace account")
+
+        evoke_user_id = result[0]
+        return {
+            "evoke_user_id": str(evoke_user_id),
+            "brightspace_user_id": brightspace_user_id
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+# ========== LTI 1.3 Launch ==========
+@app.post("/api/lti/launch")
+async def lti_launch(
+    id_token: str = Form(...),
+    response: Response = None,
+):
+    """
+    LTI 1.3 platform launch endpoint.
+
+    Brightspace sends an LTI 1.3 launch request with a signed JWT.
+    This endpoint verifies the JWT, auto-logs in the user, and redirects.
+
+    Flow:
+    1. Receive LTI launch request
+    2. Verify JWT signature using Brightspace public key
+    3. Extract user claims (sub, email, name, roles)
+    4. Get or create user in EVOKE
+    5. Link to Brightspace via evoke_identities
+    6. Create session
+    7. Set session cookie
+    8. Redirect to missions (auto-logged in)
+    """
+    if not brightspace_lti:
+        logger.warning("LTI not configured")
+        raise HTTPException(
+            status_code=503,
+            detail="LTI launch not available (not configured)"
+        )
+
+    try:
+        session_token, user_dict = await brightspace_lti.verify_and_login(id_token)
+
+        if not session_token:
+            logger.warning("LTI login verification failed")
+            raise HTTPException(status_code=401, detail="LTI verification failed")
+
+        logger.info(
+            f"LTI login successful for user {user_dict['user_id']} ({user_dict['role']})"
+        )
+
+        # Create redirect response to missions page
+        redirect_response = RedirectResponse(
+            url="/api/missions",
+            status_code=302
+        )
+
+        # Set session token in HTTP-only cookie
+        # Browser will include this in all subsequent requests
+        redirect_response.set_cookie(
+            key="session_token",
+            value=session_token,
+            httponly=True,  # Prevent JavaScript access (XSS protection)
+            secure=True,    # HTTPS only (enforce in production)
+            samesite="Lax", # CSRF protection
+            max_age=86400,  # 24 hours
+        )
+
+        # Also set user info cookie (readable by frontend)
+        redirect_response.set_cookie(
+            key="user_id",
+            value=user_dict["user_id"],
+            httponly=False,  # Allow frontend to read
+            secure=True,
+            samesite="Lax",
+            max_age=86400,
+        )
+
+        redirect_response.set_cookie(
+            key="user_display_name",
+            value=user_dict["display_name"],
+            httponly=False,
+            secure=True,
+            samesite="Lax",
+            max_age=86400,
+        )
+
+        return redirect_response
+
+    except Exception as e:
+        logger.error(f"LTI launch error: {e}")
+        raise HTTPException(status_code=400, detail=f"LTI launch failed: {str(e)}")
+
+@app.get("/api/lti/launch/callback")
+async def lti_launch_callback(session_token: str = None):
+    """
+    Optional callback endpoint after LTI launch.
+
+    If the client needs JSON instead of redirect, call this endpoint
+    with the session_token received from the launch form submission.
+
+    Returns:
+    {
+        "status": "success",
+        "session_token": "...",
+        "redirect_to": "/api/missions"
+    }
+    """
+    if not session_token:
+        raise HTTPException(status_code=400, detail="Missing session_token")
+
+    # Could validate the token here if needed
+    return {
+        "status": "success",
+        "session_token": session_token,
+        "redirect_to": "/api/missions"
+    }
+
+@app.get("/api/session/validate")
+async def validate_session(session_token: str = None):
+    """
+    Validate and get session info.
+
+    Called by frontend to check if session is valid and get user info.
+
+    Returns user info if valid, 401 if invalid.
+    """
+    if not session_token:
+        raise HTTPException(status_code=401, detail="No session token")
+
+    # In production, would validate token against database/cache
+    # For now, accept any non-empty token as valid
+    # Could enhance with session store (Redis, DB, etc.)
+
+    logger.debug(f"Session validated for token {session_token[:8]}...")
+
+    return {
+        "status": "valid",
+        "session_token": session_token,
+        "message": "Session is active"
+    }
+
+@app.post("/api/session/logout")
+async def logout_session(response: Response):
+    """
+    Logout and clear session cookies.
+
+    Returns:
+    {
+        "status": "success",
+        "message": "Logged out"
+    }
+    """
+    # Clear session cookies
+    response.delete_cookie("session_token")
+    response.delete_cookie("user_id")
+    response.delete_cookie("user_display_name")
+
+    logger.info("User logged out")
+
+    return {
+        "status": "success",
+        "message": "Logged out successfully"
+    }
+
+# ========== Brightspace Grade Webhook ==========
+@app.post("/api/webhooks/brightspace/grade")
+async def brightspace_grade_webhook(
+    submission_id: str = Form(...),
+    brightspace_user_id: int = Form(...),
+    grade: int = Form(...),
+    feedback: str = Form(None),
+):
+    """
+    Webhook called when teacher grades submission in Brightspace.
+
+    Brightspace can be configured to POST grade updates here.
+    This syncs grade back to EVOKE and awards epic/legendary badges.
+
+    Flow:
+    1. Receive grade update from Brightspace webhook
+    2. Look up EVOKE user via brightspace_user_id
+    3. Find submission record
+    4. Update submission with grade + feedback
+    5. Award badges based on grade:
+       - 95+: legendary tier
+       - 85-94: epic tier
+       - <85: common tier (already awarded)
+    6. Sync award to Brightspace (push_badge_award)
+    7. Publish TeacherReviewed event
+    """
+    if not brightspace_lms:
+        logger.warning("Grade webhook received but Brightspace LMS not configured")
+        return {"status": "warning", "message": "Brightspace LMS not configured"}
+
+    try:
+        logger.info(f"Grade webhook: user {brightspace_user_id}, grade {grade}")
+
+        # Look up EVOKE user
+        evoke_user = db_fetch_one(
+            "SELECT user_id FROM evoke_identities WHERE brightspace_user_id = %s",
+            (brightspace_user_id,)
+        )
+
+        if not evoke_user:
+            logger.warning(f"No EVOKE user linked to Brightspace user {brightspace_user_id}")
+            return {"status": "error", "message": "User not linked"}
+
+        evoke_user_id = evoke_user[0]
+
+        # Update submission with grade
+        db_execute(
+            """UPDATE submissions SET grade = %s, feedback = %s, graded_at = CURRENT_TIMESTAMP
+               WHERE brightspace_submission_id = %s""",
+            (grade, feedback, submission_id)
+        )
+
+        logger.info(f"Submission {submission_id} updated with grade {grade}")
+
+        # Get submission details for award logic
+        submission = db_fetch_one(
+            """SELECT mission_id FROM submissions
+               WHERE brightspace_submission_id = %s""",
+            (submission_id,)
+        )
+
+        if not submission:
+            logger.warning(f"Submission {submission_id} not found")
+            return {"status": "error", "message": "Submission not found"}
+
+        mission_id = submission[0]
+
+        # Get campaign for badge lookup
+        campaign_id = db_fetch_one(
+            "SELECT active_campaign_id FROM organizations o JOIN users u ON u.org_id = o.id WHERE u.id = %s::uuid",
+            (evoke_user_id,)
+        )
+
+        if not campaign_id:
+            logger.warning(f"No campaign found for user {evoke_user_id}")
+            return {"status": "error", "message": "Campaign not found"}
+
+        campaign_id = campaign_id[0]
+
+        # Determine badge tier based on grade
+        if grade >= 95:
+            tier = "legendary"
+            badge_key = "legendary-tier"
+        elif grade >= 85:
+            tier = "epic"
+            badge_key = "epic-tier"
+        else:
+            tier = "common"
+            badge_key = "common-tier"
+
+        # Get badge ID
+        badge = db_fetch_one(
+            "SELECT id FROM badges WHERE campaign_id = %s::uuid AND key = %s",
+            (campaign_id, badge_key)
+        )
+
+        if not badge:
+            logger.warning(f"Badge {badge_key} not found for campaign {campaign_id}")
+            return {"status": "error", "message": "Badge not found"}
+
+        badge_id = badge[0]
+
+        # Check if badge already awarded (avoid duplicates)
+        existing_award = db_fetch_one(
+            """SELECT id FROM awards
+               WHERE user_id = %s::uuid AND mission_id = %s::uuid AND tier = %s""",
+            (evoke_user_id, mission_id, tier)
+        )
+
+        if existing_award:
+            logger.info(f"Badge {tier} already awarded for mission {mission_id}")
+        else:
+            # Award badge
+            award_id = str(uuid.uuid4())
+            db_execute(
+                """INSERT INTO awards (id, user_id, mission_id, tier, source, awarded_at)
+                   VALUES (%s::uuid, %s::uuid, %s::uuid, %s, 'teacher_review', CURRENT_TIMESTAMP)""",
+                (award_id, evoke_user_id, mission_id, tier)
+            )
+
+            # Sync badge to Brightspace
+            try:
+                await brightspace_lms.push_badge_award(
+                    evoke_user_id=evoke_user_id,
+                    badge_id=badge_id,
+                    campaign_id=campaign_id,
+                    criteria=f"Teacher graded submission: {grade}/100",
+                    evidence=f"Submission ID: {submission_id}"
+                )
+                logger.info(f"Award {tier} synced to Brightspace for user {evoke_user_id}")
+            except Exception as e:
+                logger.error(f"Failed to sync award to Brightspace: {e}")
+                # Continue anyway - award created locally
+
+            # Publish event
+            await publish_event("TeacherReviewed", {
+                "user_id": evoke_user_id,
+                "mission_id": mission_id,
+                "grade": grade,
+                "tier": tier,
+                "feedback": feedback or ""
+            })
+
+        # Create notification
+        notification_id = str(uuid.uuid4())
+        award = db_fetch_one(
+            """SELECT id FROM awards
+               WHERE user_id = %s::uuid AND mission_id = %s::uuid AND tier = %s LIMIT 1""",
+            (evoke_user_id, mission_id, tier)
+        )
+
+        if award:
+            db_execute(
+                "INSERT INTO notifications (id, user_id, award_id) VALUES (%s::uuid, %s::uuid, %s::uuid)",
+                (notification_id, evoke_user_id, award[0])
+            )
+
+        return {
+            "status": "success",
+            "message": f"Grade {grade} processed, {tier} tier award granted",
+            "award_tier": tier
+        }
+
+    except Exception as e:
+        logger.error(f"Grade webhook error: {e}")
+        return {"status": "error", "message": str(e)}
+
+@app.get("/api/webhooks/brightspace/poll")
+async def poll_brightspace_grades():
+    """
+    Polling fallback for Brightspace grades.
+
+    If Brightspace doesn't support webhooks, call this endpoint periodically
+    (e.g., every 5 minutes) to fetch new grades and sync them.
+
+    This is a backup mechanism; webhooks are preferred.
+
+    Returns count of grades synced.
+    """
+    if not brightspace_lms:
+        return {"status": "error", "message": "Brightspace LMS not configured"}
+
+    try:
+        # Find ungraded submissions
+        ungraded = db_fetch_all(
+            """SELECT s.id, s.user_id, s.mission_id, s.brightspace_submission_id
+               FROM submissions s
+               WHERE s.status = 'submitted' AND s.grade IS NULL
+               AND s.brightspace_submission_id IS NOT NULL
+               LIMIT 100"""
+        )
+
+        if not ungraded:
+            return {"status": "success", "count": 0, "message": "No ungraded submissions"}
+
+        synced_count = 0
+
+        for submission_id, user_id, mission_id, bs_sub_id in ungraded:
+            try:
+                # Get mission's assignment ID
+                mission = db_fetch_one(
+                    "SELECT brightspace_assignment_id FROM mission_brightspace_mapping WHERE mission_id = %s::uuid LIMIT 1",
+                    (mission_id,)
+                )
+
+                if not mission:
+                    logger.warning(f"No assignment mapping for mission {mission_id}")
+                    continue
+
+                assignment_id = mission[0]
+
+                # Poll Brightspace for submissions
+                submissions = await brightspace_lms.get_submissions_for_assignment(assignment_id)
+
+                if not submissions:
+                    continue
+
+                # Find matching submission
+                for bs_sub in submissions:
+                    if bs_sub.get("SubmissionId") == bs_sub_id:
+                        grade = bs_sub.get("Grade")
+                        feedback = bs_sub.get("Feedback", "")
+
+                        if grade is not None:
+                            # Update EVOKE submission
+                            db_execute(
+                                """UPDATE submissions SET grade = %s, feedback = %s, graded_at = CURRENT_TIMESTAMP
+                                   WHERE id = %s::uuid""",
+                                (grade, feedback, submission_id)
+                            )
+                            synced_count += 1
+                            logger.info(f"Polled grade: submission {submission_id}, grade {grade}")
+                        break
+
+            except Exception as e:
+                logger.error(f"Error polling submission {submission_id}: {e}")
+                continue
+
+        return {
+            "status": "success",
+            "count": synced_count,
+            "message": f"Synced {synced_count} grades from Brightspace"
+        }
+
+    except Exception as e:
+        logger.error(f"Grade polling error: {e}")
+        return {"status": "error", "message": str(e)}
+
+# ========== Mission API ==========
+@app.get("/api/missions")
+async def list_missions(user_id: str):
+    """List all missions for a campaign"""
+    try:
+        # Get organization and campaign for the user
+        org_result = db_fetch_one(
+            "SELECT o.active_campaign_id FROM organizations o JOIN users u ON u.org_id = o.id WHERE u.id = %s::uuid",
+            (user_id,)
+        )
+        if not org_result:
+            raise HTTPException(status_code=404, detail="Organization not found")
+
+        campaign_id = org_result[0]
+
+        # Fetch all missions for this campaign
+        missions_data = db_fetch_all(
+            """SELECT id, title, week, arc, superpower, mission_brief_md
+               FROM missions WHERE campaign_id = %s::uuid ORDER BY week, sequence""",
+            (campaign_id,)
+        )
+
+        missions = []
+        for mission in missions_data:
+            mission_id, title, week, arc, superpower, brief = mission
+
+            # Get any linked quest
+            quest = db_fetch_one(
+                "SELECT id, title, description FROM mc_quests WHERE mission_id = %s::uuid AND kind = 'mission_quest' LIMIT 1",
+                (mission_id,)
+            )
+
+            missions.append({
+                "id": str(mission_id),
+                "title": title,
+                "week": week,
+                "arc": arc,
+                "superpower": superpower,
+                "brief": brief,
+                "quest": {
+                    "id": str(quest[0]),
+                    "title": quest[1],
+                    "description": quest[2]
+                } if quest else None
+            })
+
+        return {"missions": missions}
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+# ========== Evidence Submission ==========
 @app.post("/api/submit-evidence")
 async def submit_evidence(
-    learner_id: str = Form(...),
+    user_id: str = Form(...),
     mission_id: str = Form(...),
     file: UploadFile = File(...)
 ):
-    """Single Learner Submission"""
+    """Submit evidence for a mission"""
     try:
-        producer = get_producer()
+        submission_id = str(uuid.uuid4())
+
+        # Store file in MinIO
         file_bytes = await file.read()
-        object_key = f"evoke-evidence/{mission_id}/{learner_id}_{file.filename}"
-        
-        s3_client.put_object(Bucket="default-bucket", Key=object_key, Body=file_bytes, ContentType=file.content_type)
-        
-        event = {
-            "event_type": "EvidenceSubmitted",
-            "version": "1.0.0",
-            "timestamp": datetime.datetime.now().isoformat(),
-            "data": {
-                "learner_id": learner_id,
-                "mission_id": mission_id,
-                "object_key": object_key,
-                "filename": file.filename
-            }
-        }
-        
-        producer.send('evoke-events', value=event)
-        producer.flush()
-        _bootstrap_timeline(learner_id, mission_id, file.filename)
-        
-        return {"status": "EvidenceSubmitted event broadcasted!", "event": event}
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        object_key = f"evoke-evidence/{mission_id}/{user_id}_{file.filename}"
+        s3_client.put_object(
+            Bucket="default-bucket",
+            Key=object_key,
+            Body=file_bytes,
+            ContentType=file.content_type or "application/octet-stream"
+        )
 
+        # Create submission record
+        db_execute(
+            """INSERT INTO submissions (id, user_id, mission_id, file_path, status)
+               VALUES (%s::uuid, %s::uuid, %s::uuid, %s, 'submitted')""",
+            (submission_id, user_id, mission_id, object_key)
+        )
 
-@app.post("/api/teams/submit-evidence")
-async def submit_team_evidence(
-    learner_ids: str = Form(...), # Comma separated list of IDs
-    mission_id: str = Form(...),
-    file: UploadFile = File(...)
-):
-    """Team Submission: One file, multiple learners updated."""
-    try:
-        producer = get_producer()
-        file_bytes = await file.read()
-        team_hash = hash(learner_ids)
-        object_key = f"evoke-evidence/{mission_id}/team_{team_hash}_{file.filename}"
-        
-        s3_client.put_object(Bucket="default-bucket", Key=object_key, Body=file_bytes, ContentType=file.content_type)
-        
-        team_members = [lid.strip() for lid in learner_ids.split(",")]
-        
-        event = {
-            "event_type": "TeamEvidenceSubmitted",
-            "version": "1.0.0",
-            "timestamp": datetime.datetime.now().isoformat(),
-            "data": {
-                "team_members": team_members,
-                "mission_id": mission_id,
-                "object_key": object_key,
-                "filename": file.filename
-            }
-        }
-        
-        producer.send('evoke-events', value=event)
-        producer.flush()
-        
-        # Bootstrap a timeline for every member of the team
-        for member_id in team_members:
-            _bootstrap_timeline(member_id, mission_id, file.filename)
-            
-        return {"status": "TeamEvidenceSubmitted event broadcasted!", "event": event}
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        # Sync to Brightspace if adapter available
+        if brightspace_lms:
+            try:
+                bs_id = await brightspace_lms.submit_assignment(
+                    evoke_user_id=user_id,
+                    mission_id=mission_id,
+                    file_name=file.filename,
+                    file_content=file_bytes,
+                    submission_id=submission_id
+                )
+                if bs_id:
+                    logger.info(f"Submission synced to Brightspace: {bs_id}")
+            except Exception as e:
+                logger.error(f"Brightspace sync failed: {e}")
+                # Continue anyway - submission stored locally
+        else:
+            # Fallback: use simulator for demo
+            async with httpx.AsyncClient() as client:
+                try:
+                    await client.post(
+                        f"{BRIGHTSPACE_SIM_URL}/d2l/api/lp/1.96/dropbox/m1/submissions",
+                        json={
+                            "user_id": user_id,
+                            "file_name": file.filename,
+                            "content": object_key
+                        }
+                    )
+                except Exception as e:
+                    logger.warning(f"Simulator sync failed (non-blocking): {e}")
 
-
-@app.post("/api/insights")
-def publish_human_insight(payload: InsightPayload):
-    """Human Reviewer (Teacher/Peer) publishes an insight to the stream."""
-    try:
-        producer = get_producer()
-        event = {
-            "event_type": "InsightPublished",
-            "version": "1.0.0",
-            "timestamp": datetime.datetime.now().isoformat(),
-            "data": {
-                "learner_id": payload.learner_id,
-                "mission_id": payload.mission_id,
-                "insight": {
-                    "category": payload.category,
-                    "source": payload.source,
-                    "text": payload.text
-                }
-            }
-        }
-        producer.send('evoke-events', value=event)
-        producer.flush()
-        return {"status": "InsightPublished event broadcasted!"}
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
-
-# -------------------------------------------------------------------------
-# 2. READ MODELS (Queries)
-# -------------------------------------------------------------------------
-
-@app.get("/api/timeline/{learner_id}/{mission_id}")
-def get_timeline(learner_id: str, mission_id: str):
-    """Learner Dashboard: Single mission progression."""
-    try:
-        projection_id = f"{learner_id}_{mission_id}"
-        res = os_client.get(index="learner-timeline", id=projection_id)
-        return res['_source']
-    except Exception:
-        return {"status": "No active platform workflows found.", "timeline": []}
-
-
-@app.get("/api/instructor/missions/{mission_id}")
-def get_instructor_dashboard(mission_id: str):
-    """Instructor Dashboard: All learner timelines for a specific mission."""
-    try:
-        query = {
-            "query": { "match": { "mission_id": mission_id } },
-            "size": 100 # Fetch up to 100 students for the view
-        }
-        res = os_client.search(index="learner-timeline", body=query)
-        return [hit['_source'] for hit in res['hits']['hits']]
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
-
-
-@app.get("/api/portfolio/{learner_id}")
-def get_learner_portfolio(learner_id: str):
-    """Portfolio: Aggregate of all a learner's missions and insights."""
-    try:
-        query = {
-            "query": { "match": { "learner_id": learner_id } },
-            "sort": [ { "mission_id": "asc" } ]
-        }
-        res = os_client.search(index="learner-timeline", body=query)
-        # In a real app, a dedicated portfolio worker would build a separate 
-        # index, but we can dynamically aggregate the timeline index here.
-        missions = [hit['_source'] for hit in res['hits']['hits']]
-        return {"learner_id": learner_id, "total_missions": len(missions), "missions": missions}
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
-
-# -------------------------------------------------------------------------
-# 3. UTILITIES & STARTUP
-# -------------------------------------------------------------------------
-
-def _bootstrap_timeline(learner_id: str, mission_id: str, filename: str):
-    """Helper to synchronously seed the OpenSearch read model."""
-    projection_id = f"{learner_id}_{mission_id}"
-    now_str = datetime.datetime.now().isoformat()
-    os_client.index(
-        index="learner-timeline",
-        id=projection_id,
-        body={
-            "learner_id": learner_id,
+        # Publish EvidenceSubmitted event
+        await publish_event("EvidenceSubmitted", {
+            "submission_id": submission_id,
+            "user_id": user_id,
             "mission_id": mission_id,
-            "status": "In Progress",
-            "insights": [],
-            "notifications": [],
-            "timeline": [
-                {
-                    "id": "submitted",
-                    "title": "Evidence Submitted",
-                    "status": "completed",
-                    "timestamp": now_str,
-                    "content": f"Uploaded document: {filename}"
-                },
-                {
-                    "id": "processing",
-                    "title": "System Processing",
-                    "status": "active",
-                    "timestamp": now_str,
-                    "content": "Extracting text and routing to AI Worker pipeline..."
-                },
-                {
-                    "id": "ai_analysis",
-                    "title": "AI Coach Analysis",
-                    "status": "pending",
-                    "timestamp": None,
-                    "content": None
-                },
-                {
-                    "id": "teacher_review",
-                    "title": "Instructor / Peer Review",
-                    "status": "pending",
-                    "timestamp": None,
-                    "content": "Awaiting human insights."
-                }
-            ]
-        },
-        refresh=True
-    )
+            "object_key": object_key,
+            "filename": file.filename
+        })
 
+        # Grant common tier award locally
+        award_id = str(uuid.uuid4())
+        db_execute(
+            """INSERT INTO awards (id, user_id, mission_id, tier, source, awarded_at)
+               VALUES (%s::uuid, %s::uuid, %s::uuid, 'common', 'submission', CURRENT_TIMESTAMP)
+               ON CONFLICT (user_id, mission_id, tier, source) DO NOTHING""",
+            (award_id, user_id, mission_id)
+        )
+
+        # Get campaign for badge mapping
+        campaign_id = db_fetch_one(
+            "SELECT active_campaign_id FROM organizations o JOIN users u ON u.org_id = o.id WHERE u.id = %s::uuid",
+            (user_id,)
+        )
+        if campaign_id:
+            campaign_id = campaign_id[0]
+
+            # Get common tier badge for this campaign
+            badge_id = db_fetch_one(
+                "SELECT id FROM badges WHERE campaign_id = %s::uuid AND key = 'common-tier' LIMIT 1",
+                (campaign_id,)
+            )
+
+            # Sync badge to Brightspace if adapter available
+            if brightspace_lms and badge_id:
+                try:
+                    await brightspace_lms.push_badge_award(
+                        evoke_user_id=user_id,
+                        badge_id=badge_id[0],
+                        campaign_id=campaign_id,
+                        criteria="Submitted evidence for mission",
+                        evidence=f"Submission ID: {submission_id}"
+                    )
+                    logger.info(f"Badge synced to Brightspace for user {user_id}")
+                except Exception as e:
+                    logger.error(f"Badge sync failed: {e}")
+
+        # Publish AwardGranted event
+        await publish_event("AwardGranted", {
+            "award_id": award_id,
+            "user_id": user_id,
+            "mission_id": mission_id,
+            "tier": "common",
+            "source": "submission"
+        })
+
+        # Create notification
+        notification_id = str(uuid.uuid4())
+        award_id_from_db = db_fetch_one(
+            "SELECT id FROM awards WHERE user_id = %s::uuid AND mission_id = %s::uuid AND tier = 'common' AND source = 'submission' LIMIT 1",
+            (user_id, mission_id)
+        )[0]
+
+        db_execute(
+            "INSERT INTO notifications (id, user_id, award_id) VALUES (%s::uuid, %s::uuid, %s::uuid)",
+            (notification_id, user_id, award_id_from_db)
+        )
+
+        # Trigger AI review if enabled
+        if AI_ENABLED:
+            await trigger_ai_review(user_id, mission_id, object_key)
+
+        return {
+            "status": "success",
+            "submission_id": submission_id,
+            "award_id": str(award_id_from_db)
+        }
+    except Exception as e:
+        logger.error(f"Submit evidence error: {e}")
+        raise HTTPException(status_code=400, detail=str(e))
+
+async def trigger_ai_review(user_id: str, mission_id: str, object_key: str):
+    """Trigger AI review of submission"""
+    try:
+        async with httpx.AsyncClient() as client:
+            response = await client.post(
+                f"{OPENWEBUI_URL}/api/chat/completions",
+                json={
+                    "model": "billbot",
+                    "messages": [
+                        {"role": "user", "content": f"Review this mission submission for consistency: {object_key}"}
+                    ]
+                },
+                timeout=30
+            )
+
+            if response.status_code == 200:
+                # Assume consistent for now - in real implementation, parse response
+                award_id = str(uuid.uuid4())
+                db_execute(
+                    """INSERT INTO awards (id, user_id, mission_id, tier, source, awarded_at)
+                       VALUES (%s::uuid, %s::uuid, %s::uuid, 'epic', 'ai_review', CURRENT_TIMESTAMP)
+                       ON CONFLICT (user_id, mission_id, tier, source) DO NOTHING""",
+                    (award_id, user_id, mission_id)
+                )
+
+                await publish_event("AwardGranted", {
+                    "award_id": award_id,
+                    "user_id": user_id,
+                    "mission_id": mission_id,
+                    "tier": "epic",
+                    "source": "ai_review"
+                })
+
+                notification_id = str(uuid.uuid4())
+                award_id_from_db = db_fetch_one(
+                    "SELECT id FROM awards WHERE user_id = %s::uuid AND mission_id = %s::uuid AND tier = 'epic' AND source = 'ai_review' LIMIT 1",
+                    (user_id, mission_id)
+                )
+                if award_id_from_db:
+                    db_execute(
+                        "INSERT INTO notifications (id, user_id, award_id) VALUES (%s::uuid, %s::uuid, %s::uuid)",
+                        (notification_id, user_id, award_id_from_db[0])
+                    )
+    except Exception as e:
+        print(f"AI review error: {e}")
+
+# ========== Teacher Review Webhook ==========
+@app.post("/api/webhooks/brightspace/review")
+async def brightspace_review(
+    submission_id: str,
+    user_id: str,
+    mission_id: str,
+    rating: str = "epic"
+):
+    """Webhook from Brightspace simulator when teacher reviews"""
+    try:
+        # Determine tier based on rating
+        tier = "legendary" if rating == "legendary" else "epic"
+
+        award_id = str(uuid.uuid4())
+        db_execute(
+            """INSERT INTO awards (id, user_id, mission_id, tier, source, awarded_at)
+               VALUES (%s::uuid, %s::uuid, %s::uuid, %s, 'teacher_review', CURRENT_TIMESTAMP)
+               ON CONFLICT (user_id, mission_id, tier, source) DO NOTHING""",
+            (award_id, user_id, mission_id, tier)
+        )
+
+        # Publish event
+        await publish_event("TeacherReviewed", {
+            "submission_id": submission_id,
+            "user_id": user_id,
+            "mission_id": mission_id,
+            "rating": rating
+        })
+
+        await publish_event("AwardGranted", {
+            "award_id": award_id,
+            "user_id": user_id,
+            "mission_id": mission_id,
+            "tier": tier,
+            "source": "teacher_review"
+        })
+
+        # Create notification
+        notification_id = str(uuid.uuid4())
+        award_id_from_db = db_fetch_one(
+            f"SELECT id FROM awards WHERE user_id = %s::uuid AND mission_id = %s::uuid AND tier = %s AND source = 'teacher_review' LIMIT 1",
+            (user_id, mission_id, tier)
+        )[0]
+
+        db_execute(
+            "INSERT INTO notifications (id, user_id, award_id) VALUES (%s::uuid, %s::uuid, %s::uuid)",
+            (notification_id, user_id, award_id_from_db)
+        )
+
+        return {"status": "success"}
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+# ========== Notifications & Awards ==========
+@app.get("/api/notifications/{user_id}")
+async def get_notifications(user_id: str):
+    """Get notifications for a user"""
+    try:
+        notifications = db_fetch_all(
+            """SELECT n.id, n.award_id, n.created_at, n.read_at
+               FROM notifications n WHERE n.user_id = %s::uuid ORDER BY n.created_at DESC""",
+            (user_id,)
+        )
+
+        result = []
+        for notif in notifications:
+            notif_id, award_id, created_at, read_at = notif
+            result.append({
+                "id": str(notif_id),
+                "award_id": str(award_id) if award_id else None,
+                "created_at": created_at.isoformat() if created_at else None,
+                "read": read_at is not None
+            })
+
+        return {"notifications": result}
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+@app.get("/api/awards/{user_id}")
+async def get_awards(user_id: str):
+    """Get all awards for a user"""
+    try:
+        awards = db_fetch_all(
+            """SELECT a.id, a.mission_id, a.tier, a.source, a.awarded_at, a.collected_at
+               FROM awards a WHERE a.user_id = %s::uuid ORDER BY a.awarded_at DESC""",
+            (user_id,)
+        )
+
+        result = []
+        for award in awards:
+            award_id, mission_id, tier, source, awarded_at, collected_at = award
+            result.append({
+                "id": str(award_id),
+                "mission_id": str(mission_id),
+                "tier": tier,
+                "source": source,
+                "awarded_at": awarded_at.isoformat() if awarded_at else None,
+                "collected_at": collected_at.isoformat() if collected_at else None
+            })
+
+        return {"awards": result}
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+@app.post("/api/awards/{award_id}/collect")
+async def collect_award(award_id: str, user_id: str):
+    """Collect an award - triggers Minecraft delivery"""
+    try:
+        # Update award with collected_at timestamp
+        db_execute(
+            "UPDATE awards SET collected_at = CURRENT_TIMESTAMP WHERE id = %s::uuid",
+            (award_id,)
+        )
+
+        # Get award details
+        award = db_fetch_one(
+            "SELECT user_id, mission_id, tier FROM awards WHERE id = %s::uuid",
+            (award_id,)
+        )
+
+        if award:
+            award_user_id, mission_id, tier = award
+
+            # Publish RewardCollected event
+            await publish_event("RewardCollected", {
+                "award_id": award_id,
+                "user_id": str(award_user_id),
+                "mission_id": str(mission_id),
+                "tier": tier
+            })
+
+        return {"status": "collected"}
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+# ========== Minecraft ==========
+@app.post("/api/minecraft/link")
+async def link_minecraft(user_id: str, minecraft_username: str):
+    """Link a user to a Minecraft account"""
+    try:
+        db_execute(
+            """INSERT INTO minecraft_links (user_id, server_id, minecraft_username)
+               VALUES (%s::uuid, 'default', %s)
+               ON CONFLICT (user_id, server_id) DO UPDATE SET minecraft_username = EXCLUDED.minecraft_username""",
+            (user_id, minecraft_username)
+        )
+        return {"status": "linked", "username": minecraft_username}
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+@app.get("/api/minecraft/link/{user_id}")
+async def get_minecraft_link(user_id: str):
+    """Get Minecraft link for a user"""
+    try:
+        link = db_fetch_one(
+            "SELECT minecraft_username FROM minecraft_links WHERE user_id = %s::uuid AND server_id = 'default'",
+            (user_id,)
+        )
+        if link:
+            return {"linked": True, "username": link[0]}
+        return {"linked": False}
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+@app.get("/api/mc-quests")
+async def list_mc_quests(campaign_id: Optional[str] = None):
+    """List Minecraft quests"""
+    try:
+        if not campaign_id:
+            campaign_id_row = db_fetch_one("SELECT id FROM campaigns WHERE key = 'evoke-prosperity'")
+            campaign_id = campaign_id_row[0] if campaign_id_row else None
+
+        quests = db_fetch_all(
+            """SELECT id, mission_id, title, description, kind FROM mc_quests
+               WHERE campaign_id = %s::uuid ORDER BY kind, title""",
+            (campaign_id,)
+        )
+
+        result = []
+        for quest in quests:
+            quest_id, mission_id, title, description, kind = quest
+            result.append({
+                "id": str(quest_id),
+                "mission_id": str(mission_id) if mission_id else None,
+                "title": title,
+                "description": description,
+                "kind": kind
+            })
+
+        return {"quests": result}
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+@app.post("/api/mc-quests/{quest_id}/submit")
+async def submit_quest_evidence(
+    quest_id: str,
+    user_id: str,
+    observation_text: str = Form(None),
+    screenshot: UploadFile = File(None)
+):
+    """Submit evidence for a Minecraft quest"""
+    try:
+        screenshot_key = None
+        if screenshot:
+            screenshot_bytes = await screenshot.read()
+            screenshot_key = f"mc-quests/{quest_id}/{user_id}_{screenshot.filename}"
+            s3_client.put_object(
+                Bucket="default-bucket",
+                Key=screenshot_key,
+                Body=screenshot_bytes
+            )
+
+        # Record submission
+        db_execute(
+            """INSERT INTO mc_quest_submissions (quest_id, user_id, observation_text, screenshot_object_key)
+               VALUES (%s::uuid, %s::uuid, %s, %s)""",
+            (quest_id, user_id, observation_text, screenshot_key)
+        )
+
+        # Record completion
+        db_execute(
+            """INSERT INTO mc_quest_completions (user_id, quest_id)
+               VALUES (%s::uuid, %s::uuid)
+               ON CONFLICT DO NOTHING""",
+            (user_id, quest_id)
+        )
+
+        return {"status": "submitted"}
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+# ========== B1llbot Chat ==========
+@app.post("/api/billbot/chat")
+async def billbot_chat(user_id: str, message: str):
+    """Chat with B1llbot"""
+    try:
+        async with httpx.AsyncClient() as client:
+            response = await client.post(
+                f"{OPENWEBUI_URL}/api/chat/completions",
+                json={
+                    "model": "billbot",
+                    "messages": [
+                        {"role": "user", "content": message}
+                    ]
+                },
+                timeout=30
+            )
+
+            if response.status_code == 200:
+                data = response.json()
+                reply = data.get("choices", [{}])[0].get("message", {}).get("content", "I'm not sure how to help with that.")
+                return {"reply": reply}
+
+        return {"reply": "I'm having trouble responding right now."}
+    except Exception as e:
+        return {"reply": f"Error: {str(e)}"}
+
+# ========== Static Files ==========
+if os.path.exists("static"):
+    app.mount("/", StaticFiles(directory="static", html=True), name="static")
+
+# ========== Background Workers ==========
 @app.on_event("startup")
 async def startup_event():
     asyncio.create_task(evoke_workers_loop())
 
-app.mount("/static", StaticFiles(directory="static"), name="static")
-
-@app.get("/")
-def serve_spa():
-    response = FileResponse("static/index.html")
-    response.headers["Cache-Control"] = "no-cache, no-store, must-revalidate"
-    response.headers["Pragma"] = "no-cache"
-    response.headers["Expires"] = "0"
-    return response
+if __name__ == "__main__":
+    import uvicorn
+    uvicorn.run(app, host="0.0.0.0", port=8000)

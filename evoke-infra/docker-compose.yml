@@ -128,24 +128,60 @@ services:
       opensearch:
         condition: service_healthy
 
-  keycloak:
-    image: quay.io/keycloak/keycloak:25.0
+  postgres:
+    image: postgres:16
     networks:
       - evoke-infra-network
-    command:
-      [
-        "start-dev",
-        "--import-realm",
-        "--http-enabled=true",
-        "--hostname-strict=false",
-      ]
     environment:
-      KEYCLOAK_ADMIN: admin
-      KEYCLOAK_ADMIN_PASSWORD: ${INFRA_SECRET:-devsecret123}
-      KC_HTTP_PORT: "8081" # Shifted to avoid conflict with Redpanda Console
+      POSTGRES_USER: evoke
+      POSTGRES_PASSWORD: ${INFRA_SECRET:-devsecret123}
+      POSTGRES_DB: evoke
     ports:
-      - "${PORT_KEYCLOAK:-8081}:8081"
-    restart: unless-stopped
+      - "${PORT_POSTGRES:-5432}:5432"
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+      - ./init-db.sql:/docker-entrypoint-initdb.d/01-init.sql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U evoke"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  open-webui:
+    image: ghcr.io/open-webui/open-webui:main
+    networks:
+      - evoke-infra-network
+    environment:
+      OLLAMA_BASE_URL: http://host.docker.internal:11434
+    ports:
+      - "${PORT_OPENWEBUI:-3000}:8080"
+    volumes:
+      - openwebui-data:/app/backend/data
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  minecraft:
+    image: itzg/minecraft-server:latest
+    networks:
+      - evoke-infra-network
+    environment:
+      EULA: "TRUE"
+      ENABLE_RCON: "true"
+      RCON_PASSWORD: ${INFRA_SECRET:-devsecret123}
+      RCON_PORT: 25575
+      SERVER_PORT: 25565
+    ports:
+      - "${PORT_MINECRAFT:-25565}:25565"
+      - "${PORT_MINECRAFT_RCON:-25575}:25575"
+    volumes:
+      - minecraft-data:/data
+    healthcheck:
+      test: ["CMD", "rcon-cli", "list"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
 
 networks:
   evoke-infra-network:
@@ -156,3 +192,6 @@ volumes:
   redpanda-data:
   opensearch-data:
   opensearch-snapshots:
+  postgres-data:
+  openwebui-data:
+  minecraft-data:

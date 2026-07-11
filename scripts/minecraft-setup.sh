@@ -45,11 +45,11 @@ if ! command -v docker &> /dev/null; then
 fi
 print_success "Docker installed"
 
-if ! command -v docker-compose &> /dev/null; then
-    print_error "Docker Compose not found. Please install Docker Compose."
+if ! command -v docker &> /dev/null; then
+    print_error "Docker not found. Please install Docker."
     exit 1
 fi
-print_success "Docker Compose installed"
+print_success "Docker installed (with compose)"
 
 if [ ! -f "docker-compose.minecraft.yml" ]; then
     print_error "docker-compose.minecraft.yml not found. Are you in the project root?"

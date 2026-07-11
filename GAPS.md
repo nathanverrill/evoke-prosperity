@@ -1,0 +1,77 @@
+# GAPS.md — what this build is still missing
+
+An honest audit of the gamified transmedia experience as specified in [`BUILD_PLAN.md`](BUILD_PLAN.md) + [`UI_SPEC.md`](UI_SPEC.md), against the ambition in `docs/canon/` and the Urgent Evoke lineage. Four lenses: technical, narrative, UX, gamification. Each item is tagged **[decision]** (needs Nathan/stakeholder call before anyone builds) or **[build]** (scoped work), with the ones that can sink the pilot called out first.
+
+---
+
+## The five that matter most
+
+1. **~~Minecraft Java vs. Bedrock~~ [RESOLVED → build risk]** — decided: the server is Java (Fabric) modified to accept Bedrock clients via **Geyser + Floodgate**, per `BUILD_PLAN.md`. The residual risks to engineer around: Floodgate players have prefixed usernames and non-Mojang UUIDs (the reward bridge's username matching and the account-linking flow must handle both identity shapes); Geyser is version-locked to specific Minecraft/Fabric builds (pin everything, upgrade deliberately); and some Java-side visuals/interactions degrade on Bedrock clients — test the actual quest locations in `true_oasis` from a Bedrock device, not just a Java client.
+2. **No social layer [decision → build]** — Urgent Evoke's engine was *peers seeing each other's work*: blog posts, comments, hearts, remixing. This build has teams, but no learner ever sees another team's evidence, evokation, or activity. The canon's Insight concept explicitly includes peer feedback; nothing emits or displays it. Without any peer visibility, the "game" is single-player homework with better wallpaper. Minimum viable: a class-wide gallery of collected awards + completed evokations, and peer reactions on debrief pages (an `InsightPublished(source=peer)` event — the pipeline already supports it).
+3. **No revise-and-resubmit loop [build]** — the pipeline is one-way: submit → AI → teacher → done. PBL pedagogy (and plain fairness) needs "needs revision → improve → resubmit" as a first-class path: a `RevisionRequested` event, a resubmission state in the timeline, and award logic that rewards improvement rather than punishing the first draft. Right now a weak first submission is a dead end.
+4. **Graphic-novel content pipeline is undefined [decision + build]** — `UI_SPEC.md` says panels load from `static/content/`, but nothing defines how many chapters exist, who produces the art, what format/resolution, or the chapter↔mission unlock map. The transmedia promise dies without this. Needed: a `chapters.json` manifest schema (panels, captions, unlock conditions), placeholder chapters for all 6 weeks, and an authoring convention the narrative team can fill without engineering help.
+5. **Collective world-state is missing [decision → build]** — the story is about *Keel recovering*. Nothing in the product makes the class's combined effort visible: no town-repair meter, no shared map that improves as missions complete, no "the water is flowing again" moment when the cohort hits a milestone. This is the single strongest transmedia glue available — the same `MissionCompleted` events could drive a class-wide progress visual on the Hub *and* physical changes in the Minecraft world (RCON `setblock`/`fill` region swaps). It's also the piece that makes Minecraft and the web app feel like one world instead of two products.
+
+---
+
+## Technical
+
+| Gap | Why it matters | Tag |
+|---|---|---|
+| **B1llbot Fabric mod integration unverified** — the in-game chat mod exists (`evoke-prosperity-files/…/billbot-1.0.1.jar`) but lives outside the repo, and its OpenWebUI endpoint/model config, persona consistency with the web surfaces, and behavior for Bedrock-connected players are all unconfirmed | The three-surface mentor is the flagship transmedia feature; migrate the mod source into the repo and wire its config to the same env contract as the web app | [build] |
+| **OpenWebUI persona setup is manual** — B1llbot's custom model (system prompt + the `kbs/` knowledge files: `keel.md`, `alpha_dynamics.md`, `lore.md`, plus `billslifeprinciples.pdf`) is click-configured, unreproducible | A rebuilt box loses the character; needs an idempotent bootstrap script hitting OpenWebUI's API to create the model + upload the KBs | [build] |
+| **Minecraft assets live outside the repo** — worlds, datapacks, the B1llbot mod, and lore KBs sit in `~/evoke-prosperity-files/` with no version control; `Savs-Common-Economy` and `SecondBrain` dirs are empty (unfetched submodules?) | One laptop is the single copy of the Basin Simulation; migrating into the repo (or its own repo + LFS for region files) is part of the container work | [build] |
+| **No projection rebuild/replay tooling** — when `player-profile` projection code changes, there's no way to replay `evoke-events` from offset 0 into a fresh index | Event sourcing without replay is just a queue; profiles will drift from truth after the first bug | [build] |
+| **No event schema contracts** — events are ad-hoc dicts; no versioned JSON schemas, no validation at produce/consume, no dead-letter handling | Five consumers (workers, bridge, LMS sync, profiles) silently diverge; one malformed event stalls a consumer group | [build] |
+| **Auth is dev-grade outside LTI** — session cookies exist for LTI launches, but the SPA still assumes a picked/hardcoded user in places; no roster import for non-LTI pilots | Can't put real students on it beyond a demo | [build] |
+| **No backup story for the one-box deployment** — Postgres WAL scripts exist in ops docs, but MinIO evidence, OpenSearch indices, OpenWebUI config, and the Minecraft world have no scheduled backup | A pilot classroom's semester of work on one disk | [build] |
+| **Screenshot uploads are unmoderated** — quest evidence images go straight to MinIO and render on profiles | Minors + user-generated images = at minimum teacher visibility/removal tooling, ideally review-before-display | [decision] |
+| **Chromebook/mobile rendering untested** — the SPA spec assumes desktop; school reality is managed Chromebooks and phones | The Hub and novel reader must work at 1366×768 and touch | [build] |
+| **FERPA/COPPA posture undefined** — student PII (names, emails, work product, images) across Postgres/MinIO/OpenSearch/logs, plus AI processing of student work | Customer's district will ask; needs a data inventory + retention/deletion answer before a real school pilots | [decision] |
+| **AI cost/rate control** — every submission triggers an LLM call with no rate limit, queue depth cap, or per-org budget | One stuck retry loop = a big bill or a dead Ollama box | [build] |
+
+## Narrative
+
+| Gap | Why it matters | Tag |
+|---|---|---|
+| **Chapter scripts don't exist** — canon has world/characters/arc, but no written panel-by-panel chapters for the 6 weeks | Everything in `/novel` is placeholder until someone writes it; longest lead time of anything here | [decision — who writes it] |
+| **The Brokers are unresolved** — canon flags the antagonist's leader/backstory as an open question | Weeks 4–6 (Act/Communicate) need an antagonist applying pressure for missions to feel like missions | [decision] |
+| **Teacher has no in-fiction role** — students are Agents, B1llbot is the field guide… and the teacher is a person in a gradebook | A one-line framing ("Handler", "Mission Command") makes teacher feedback part of the story instead of a fourth-wall break; costs nothing | [decision] |
+| **Team fiction is missing** — canon follows Alex, a solo protagonist; the product is team-based | Need the narrative device for "your cell of four Agents" — names, team identity ritual at onboarding, how the story addresses a group | [decision] |
+| **The ending isn't a product feature** — Evokation (final project) and Alchemy's invitation to the EVOKE Network are canon, but nothing specifies the finale: where evokations are presented, what the last chapter unlocks, what "graduating" looks like on-screen | The campaign needs a landing, not a fade-out; strongest candidate: evokation showcase gallery + a final Alchemy chapter gated on team completion | [decision → build] |
+| **Falling-behind narrative** — streaks pause kindly, but the story has no recap/catch-up device for a student who missed two weeks | Transmedia punishes absence worse than a textbook does; a "mission debrief archive" / B1llbot recap prompt is cheap insurance | [build] |
+| **B1llbot guardrails** — the persona is defined by vibe (`billslifeprinciples.pdf`) but has no written boundaries: what he does when asked for answers, off-topic use, self-harm disclosures, or attempts to break character | A mentor character talking to minors needs an explicit safety spec, not just a personality | [decision + build] |
+
+## User experience
+
+| Gap | Why it matters | Tag |
+|---|---|---|
+| **No onboarding** — first login lands where? Nothing specifies the first-run flow: story cold-open, account/Minecraft linking moment, team formation, "Mission Zero" tutorial | First 10 minutes decide whether students buy the fiction; needs a scripted Week-0 sequence | [build] |
+| **No instructor UI** — the sim's review screen stands in for Brightspace grading (fine), but a teacher also needs a class overview: who's stuck, who hasn't submitted, quest activity, pending reviews. The `instructor-dashboard` projection exists with no page on it | Teachers are the ones who renew pilots | [build] |
+| **Non-Minecraft students are second-class in the UI** — Minecraft is optional per canon, but quest cards, link-account prompts, and Companion Mode all assume participation; there's no designed "web-only agent" experience | The optionality promise must be visible, or it's a lie kids notice; give web-only students an alternate quest form ("field observations" in the real world?) | [decision] |
+| **Class-period reality** — 45-minute sessions on shared machines: no session resume design, no "what do I do in 10 minutes" affordance on the Hub | The Hub's "Now" zone should always answer "you have time for X" | [build] |
+| **Accessibility/reading level unaddressed** — narrative copy reading level, dyslexia-friendly type option, alt text for panels, keyboard nav | Public-school procurement asks; retrofitting costs 5× | [build] |
+| **Notification dead-ends** — bell + toasts exist, but nothing defines what happens for students who don't log in (no email/digest), or teacher nudges | Awards nobody sees don't motivate; even a teacher-visible "3 students have uncollected awards" nudge closes the loop | [decision] |
+| **Evidence submission has no scaffolding** — a bare file upload + optional reflection field; missions' PBL structure (superpower, skills, domain) never shapes the form | A reflective prompt per mission (2 questions from the mission record) doubles pedagogical value for near-zero build cost | [build] |
+
+## Gamification
+
+| Gap | Why it matters | Tag |
+|---|---|---|
+| **XP economy is undesigned** — `XPGranted` exists, but no XP values per action, no level curve, and levels *do nothing* (no unlocks, titles, or privileges) | Numbers that don't buy anything stop motivating in week 2; even cosmetic ranks (Agent → Field Agent → Operative…) with Minecraft title broadcasts would land | [decision → build] |
+| **Badge criteria undefined** — four Superpowers exist as rows; nothing specifies what earns one (all missions tagged with it? a threshold? teacher discretion?) | The 2×2 badge wall is the profile centerpiece and currently can never light up | [decision] |
+| **Streaks don't fit school time** — daily streaks assume daily play; class meets ~2×/week | Redefine streak unit as "class sessions in a row with activity" or weekly, or it demotivates by design | [decision] |
+| **No mastery loop** — (same as #3 above) awards are one-shot per submission; improvement is invisible | The strongest game loop education has is "try again, visibly better"; tie an upgraded award tier to a resubmission that flips the AI consistency check | [build] |
+| **Quest XP is unbounded and unverified** — self-report honor system is fine per canon, but nothing caps quest XP or applies diminishing returns | One kid self-reports 40 quests, tops every number on the team page, and the system's credibility is gone; cap XP-bearing quests per week, unlimited for the log itself | [build] |
+| **Rewards aren't wired into the world's economy** — economy mechanics already exist in the world (`halyard_rent_functions`, `custom_drops` loot tables), but the tier-reward catalog (pickaxe, potion) isn't connected to them | Connect the reward catalog to the existing rent/currency mechanics (e.g., legendary = rent relief or currency grants) and to the collective world-state (#5); otherwise expect novelty decay by week 3 | [decision → build] |
+| **No team-level play** — teams share a profile but have no mechanics: no team goals, no team streak, no inter-team dynamics (friendly rivalry or shared class goal), and Venture Points — the actual economics endgame — is deferred with no design doc | Weeks 4–6 are *built around* team venture mechanics; the Venture Points allocation UI + Safe Bet/Balanced/Moonshot classification needs a spec now to land by the Act arc | [decision → build] |
+| **No celebration moments** — badge earn, level up, chapter unlock, and campaign finale all currently render as… a toast | Cheap, high-yield: full-screen badge ceremony, class-wide Minecraft broadcast on legendary collections, end-of-arc recap screens | [build] |
+| **No choice or expression** — 12 linear missions, no player agency: no mission order choice, no role specialization beyond a text label, no profile customization (avatar/agent codename) | Agency is the difference between a game and a workbook; cheapest wins: agent codenames + avatar pick at onboarding, team-chosen venture identity | [build] |
+
+---
+
+## Suggested sequencing
+
+- **Answer before building deeper:** badge criteria, streak unit, screenshot moderation, chapter authorship, teacher fiction role. (Java-vs-Bedrock is resolved: Geyser/Floodgate on Fabric.)
+- **Fold into the current build order** (cheap while the code is open): revise-and-resubmit events, peer insights, XP values + level titles, quest XP caps, reflective submission prompts, celebration screens, projection replay tooling, OpenWebUI bootstrap script.
+- **Design docs needed next** (before the Act arc lands): Venture Points mechanics, collective world-state ("Rebuild Keel" meter + world mutations), finale/evokation showcase, onboarding Mission Zero script.
