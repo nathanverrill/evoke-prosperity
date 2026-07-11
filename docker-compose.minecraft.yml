@@ -1,0 +1,90 @@
+# Docker Compose for Local Minecraft Server (for development)
+#
+# Usage:
+#   docker compose -f docker-compose.minecraft.yml up -d
+#
+# This creates a local Minecraft Java Edition server with RCON enabled
+# Accessible at localhost:25565 (game) and localhost:25575 (RCON)
+
+version: '3.8'
+
+services:
+
+  # ========================================================================
+  # Minecraft Server (Java Edition)
+  # ========================================================================
+  minecraft:
+    image: itzg/minecraft-server:latest
+    container_name: minecraft-server-dev
+    ports:
+      # Game port
+      - "25565:25565"
+      # RCON port (used by EVOKE bridge)
+      - "25575:25575"
+    environment:
+      # Server properties
+      EULA: "TRUE"
+      SERVER_NAME: "EVOKE Dev Server"
+      SERVER_PORT: 25565
+      DIFFICULTY: "1"  # Normal difficulty
+      GAMEMODE: "0"    # Survival mode
+      PVP: "false"
+      ONLINE_MODE: "false"  # Allow offline mode for local testing
+
+      # RCON configuration
+      ENABLE_RCON: "true"
+      RCON_PASSWORD: "minecraft"
+      RCON_PORT: 25575
+
+      # Performance
+      MEMORY: "2G"
+      JVM_OPTS: "-Xmx2G -Xms2G"
+
+      # World settings
+      LEVEL_NAME: "evoke-world"
+      LEVEL_SEED: ""  # Random seed
+      SPAWN_PROTECTION: "0"  # Allow building at spawn
+
+      # Op players (have admin permissions)
+      OPS: "Steve,Alex"  # Can override with other names
+
+    volumes:
+      # Persist world data
+      - minecraft-data:/data
+
+    healthcheck:
+      test: ["CMD", "mc-health"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+
+    restart: unless-stopped
+
+    networks:
+      - evoke-network
+
+  # ========================================================================
+  # Minecraft Exporter (optional monitoring)
+  # ========================================================================
+  minecraft-exporter:
+    image: sladyn/minecraft-exporter:latest
+    container_name: minecraft-exporter
+    ports:
+      - "9150:9150"
+    environment:
+      SERVER_ADDRESS: "minecraft:25565"
+      JAVA_OPTS: "-Xmx512m"
+    depends_on:
+      - minecraft
+    restart: unless-stopped
+    networks:
+      - evoke-network
+
+volumes:
+  minecraft-data:
+    driver: local
+
+networks:
+  evoke-network:
+    driver: bridge
