@@ -1,0 +1,85 @@
+# Prometheus Configuration for EVOKE LMS Integration
+#
+# Collects metrics from EVOKE backend, PostgreSQL, and Redpanda
+#
+# Usage:
+#   docker run -d --name prometheus \
+#     -p 9090:9090 \
+#     -v ./config/prometheus.yml:/etc/prometheus/prometheus.yml \
+#     prom/prometheus:latest
+
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+  external_labels:
+    monitor: 'evoke-lms'
+    environment: 'production'
+
+# Alerting configuration
+alerting:
+  alertmanagers:
+    - static_configs:
+        - targets:
+            - 'alertmanager:9093'
+
+# Load alert rules
+rule_files:
+  - 'alerts.yml'
+
+scrape_configs:
+
+  # ========================================================================
+  # EVOKE Application Metrics
+  # ========================================================================
+  - job_name: 'evoke-app'
+    static_configs:
+      - targets: ['localhost:8000']
+    metrics_path: '/metrics'
+    scrape_interval: 10s
+    scrape_timeout: 5s
+
+    # Relabel to add instance labels
+    relabel_configs:
+      - source_labels: [__address__]
+        target_label: instance
+        replacement: 'evoke-prod'
+
+  # ========================================================================
+  # PostgreSQL Exporter
+  # ========================================================================
+  - job_name: 'postgresql'
+    static_configs:
+      - targets: ['postgres-exporter:9187']
+    scrape_interval: 15s
+
+    # Custom queries for EVOKE-specific metrics
+    metric_relabel_configs:
+      - source_labels: [__name__]
+        regex: 'pg_stat_.*'
+        action: keep
+
+  # ========================================================================
+  # Node Exporter (System Metrics)
+  # ========================================================================
+  - job_name: 'node'
+    static_configs:
+      - targets: ['node-exporter:9100']
+    scrape_interval: 15s
+
+  # ========================================================================
+  # Redpanda Metrics
+  # ========================================================================
+  - job_name: 'redpanda'
+    static_configs:
+      - targets: ['redpanda-broker:9644']
+    scrape_interval: 15s
+
+  # ========================================================================
+  # MinIO Metrics
+  # ========================================================================
+  - job_name: 'minio'
+    bearer_token: 'evoke-minio-token'
+    static_configs:
+      - targets: ['minio:9000']
+    metrics_path: '/minio/v2/metrics/cluster'
+    scrape_interval: 15s

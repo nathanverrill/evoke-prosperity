@@ -1,0 +1,290 @@
+# Alert Rules for EVOKE LMS Integration
+#
+# Critical alerts trigger immediate notifications
+# Warning alerts create tickets for investigation
+
+groups:
+  - name: evoke.lms
+    interval: 30s
+    rules:
+
+      # ====================================================================
+      # LTI Launch Alerts
+      # ====================================================================
+      - alert: HighLTILaunchErrorRate
+        expr: rate(launches_errors_total[5m]) > 0.05
+        for: 5m
+        labels:
+          severity: critical
+          component: lti
+        annotations:
+          summary: "High LTI launch error rate (> 5%)"
+          description: "Error rate: {{ $value | humanizePercentage }}"
+          runbook_url: "http://wiki.internal/runbook/lti-errors"
+
+      - alert: LTILaunchSlowResponse
+        expr: histogram_quantile(0.95, launches_duration_seconds) > 0.5
+        for: 5m
+        labels:
+          severity: warning
+          component: lti
+        annotations:
+          summary: "LTI launches slow (p95 > 500ms)"
+          description: "Response time: {{ $value }}s"
+
+      # ====================================================================
+      # Evidence Submission Alerts
+      # ====================================================================
+      - alert: SubmissionSyncFailures
+        expr: rate(submissions_brightspace_sync_errors[5m]) > 0.1
+        for: 5m
+        labels:
+          severity: critical
+          component: submissions
+        annotations:
+          summary: "Evidence sync to Brightspace failing"
+          description: "Error rate: {{ $value | humanizePercentage }}"
+
+      - alert: SubmissionSlowResponse
+        expr: histogram_quantile(0.95, submissions_duration_seconds) > 1.0
+        for: 5m
+        labels:
+          severity: warning
+          component: submissions
+        annotations:
+          summary: "Evidence submissions slow (p95 > 1s)"
+          description: "Response time: {{ $value }}s"
+
+      # ====================================================================
+      # Grade Webhook Alerts
+      # ====================================================================
+      - alert: GradeWebhookFailures
+        expr: rate(grade_webhooks_errors_total[5m]) > 0.1
+        for: 5m
+        labels:
+          severity: critical
+          component: grading
+        annotations:
+          summary: "Grade webhook processing failing"
+          description: "Error rate: {{ $value | humanizePercentage }}"
+          action: "Check Brightspace connection and webhook logs"
+
+      - alert: GradeWebhookBacklog
+        expr: redpanda_lag > 30000  # 30 seconds lag
+        for: 5m
+        labels:
+          severity: warning
+          component: grading
+        annotations:
+          summary: "Grade webhook queue backing up"
+          description: "Queue lag: {{ $value }}ms"
+
+      # ====================================================================
+      # Database Alerts
+      # ====================================================================
+      - alert: DatabaseConnectionPoolExhausted
+        expr: pg_stat_database_connections >= 40  # of 50 pool size
+        for: 2m
+        labels:
+          severity: critical
+          component: database
+        annotations:
+          summary: "Database connection pool nearly exhausted"
+          description: "Active connections: {{ $value }}/50"
+          action: "Restart app or increase pool size"
+
+      - alert: DatabaseHighQueryDuration
+        expr: histogram_quantile(0.95, pg_query_duration_seconds) > 0.5
+        for: 5m
+        labels:
+          severity: warning
+          component: database
+        annotations:
+          summary: "Database queries slow (p95 > 500ms)"
+          description: "Query duration: {{ $value }}s"
+
+      - alert: DatabaseNotResponding
+        expr: pg_up == 0
+        for: 1m
+        labels:
+          severity: critical
+          component: database
+        annotations:
+          summary: "PostgreSQL not responding"
+          description: "Database down for {{ $value }} minute(s)"
+          action: "Check database server status"
+
+      - alert: DatabaseReplicationLag
+        expr: pg_replication_lag_bytes > 1000000000  # 1GB
+        for: 5m
+        labels:
+          severity: warning
+          component: database
+        annotations:
+          summary: "Database replication lag high"
+          description: "Lag: {{ $value | humanize }}B"
+
+      # ====================================================================
+      # Brightspace Integration Alerts
+      # ====================================================================
+      - alert: BrightspaceAPIDown
+        expr: rate(brightspace_api_errors_total[5m]) > 0.5
+        for: 2m
+        labels:
+          severity: critical
+          component: brightspace
+        annotations:
+          summary: "Brightspace API unavailable"
+          description: "Error rate: {{ $value | humanizePercentage }}"
+          action: "Check Brightspace status page"
+
+      - alert: BrightspaceAPIRateLimitApproaching
+        expr: brightspace_api_rate_limit_remaining < 100
+        for: 2m
+        labels:
+          severity: warning
+          component: brightspace
+        annotations:
+          summary: "Brightspace API rate limit approaching"
+          description: "Remaining requests: {{ $value }}"
+          action: "May need to reduce API call frequency"
+
+      - alert: BrightspaceAPIHighLatency
+        expr: histogram_quantile(0.95, brightspace_api_duration_seconds) > 2.0
+        for: 5m
+        labels:
+          severity: warning
+          component: brightspace
+        annotations:
+          summary: "Brightspace API high latency (p95 > 2s)"
+          description: "Latency: {{ $value }}s"
+
+      # ====================================================================
+      # Message Queue Alerts
+      # ====================================================================
+      - alert: RedpandaBrokerDown
+        expr: redpanda_up == 0
+        for: 1m
+        labels:
+          severity: critical
+          component: redpanda
+        annotations:
+          summary: "Redpanda broker down"
+          description: "Broker: {{ $labels.broker }}"
+
+      - alert: RedpandaDiskUsageHigh
+        expr: redpanda_disk_free_bytes / redpanda_disk_total_bytes < 0.1
+        for: 5m
+        labels:
+          severity: warning
+          component: redpanda
+        annotations:
+          summary: "Redpanda disk space low (< 10%)"
+          description: "Free space: {{ $value | humanizePercentage }}"
+
+      # ====================================================================
+      # Session & Authentication Alerts
+      # ====================================================================
+      - alert: SessionCreationFailures
+        expr: rate(session_creation_errors_total[5m]) > 0.05
+        for: 5m
+        labels:
+          severity: warning
+          component: sessions
+        annotations:
+          summary: "Session creation failures detected"
+          description: "Error rate: {{ $value | humanizePercentage }}"
+
+      - alert: JWTVerificationFailures
+        expr: rate(jwt_verification_errors_total[5m]) > 0.1
+        for: 5m
+        labels:
+          severity: warning
+          component: auth
+        annotations:
+          summary: "JWT verification failures detected"
+          description: "Error rate: {{ $value | humanizePercentage }}"
+          action: "Check Brightspace public key configuration"
+
+      # ====================================================================
+      # SSL/TLS Certificate Alerts
+      # ====================================================================
+      - alert: SSLCertificateExpiringSoon
+        expr: (node_textfile_mtime_seconds{filename=~"/var/lib/textfile_collector/ssl_cert_expire_time.*"} - time()) / 86400 < 7
+        for: 1h
+        labels:
+          severity: warning
+          component: ssl
+        annotations:
+          summary: "SSL certificate expiring in < 7 days"
+          description: "Days until expiry: {{ (($value) / 86400) | humanize }}"
+          action: "Renew certificate immediately"
+
+      - alert: SSLCertificateExpired
+        expr: (node_textfile_mtime_seconds{filename=~"/var/lib/textfile_collector/ssl_cert_expire_time.*"} - time()) < 0
+        for: 1m
+        labels:
+          severity: critical
+          component: ssl
+        annotations:
+          summary: "SSL certificate has expired"
+          description: "Certificate expired"
+          action: "CRITICAL: Renew certificate now"
+
+      # ====================================================================
+      # Resource Utilization Alerts
+      # ====================================================================
+      - alert: HighMemoryUsage
+        expr: (1 - (node_memory_MemAvailable_bytes / node_memory_MemTotal_bytes)) > 0.9
+        for: 5m
+        labels:
+          severity: warning
+          component: system
+        annotations:
+          summary: "High memory usage (> 90%)"
+          description: "Memory usage: {{ $value | humanizePercentage }}"
+
+      - alert: HighCPUUsage
+        expr: rate(node_cpu_seconds_total[5m]) > 0.8
+        for: 5m
+        labels:
+          severity: warning
+          component: system
+        annotations:
+          summary: "High CPU usage (> 80%)"
+          description: "CPU usage: {{ $value | humanizePercentage }}"
+
+      - alert: DiskSpaceRunningLow
+        expr: (node_filesystem_avail_bytes{fstype="ext4"} / node_filesystem_size_bytes) < 0.1
+        for: 5m
+        labels:
+          severity: critical
+          component: system
+        annotations:
+          summary: "Disk space < 10%"
+          description: "Free space: {{ $value | humanizePercentage }}"
+
+      # ====================================================================
+      # Application Health Alerts
+      # ====================================================================
+      - alert: ApplicationHealthCheckFailing
+        expr: http_requests_total{endpoint="/api/health", status_code!="200"} > 0
+        for: 2m
+        labels:
+          severity: critical
+          component: app
+        annotations:
+          summary: "Application health check failing"
+          description: "Health endpoint returning errors"
+          action: "Check application logs"
+
+      - alert: ApplicationReadinessCheckFailing
+        expr: http_requests_total{endpoint="/api/ready", status_code!="200"} > 0
+        for: 5m
+        labels:
+          severity: critical
+          component: app
+        annotations:
+          summary: "Application readiness check failing"
+          description: "Application dependencies not available"
+          action: "Check database, Brightspace, and other dependencies"
