@@ -1,6 +1,6 @@
 # GAPS.md — what this build is still missing
 
-An honest audit of the gamified transmedia experience as specified in [`BUILD_PLAN.md`](BUILD_PLAN.md) + [`UI_SPEC.md`](UI_SPEC.md), against the ambition in `docs/canon/` and the Urgent Evoke lineage. Four lenses: technical, narrative, UX, gamification. Each item is tagged **[decision]** (needs Nathan/stakeholder call before anyone builds) or **[build]** (scoped work), with the ones that can sink the pilot called out first.
+An honest audit of the gamified transmedia experience as specified in [`BUILD_PLAN.md`](BUILD_PLAN.md) + [`UI_SPEC.md`](UI_SPEC.md) + [`GAME_DESIGN.md`](GAME_DESIGN.md), against the ambition in `docs/canon/` and the Urgent Evoke lineage. Five lenses: technical, narrative, UX, gamification, business & adoption. Each item is tagged **[decision]** (needs Nathan/stakeholder call before anyone builds) or **[build]** (scoped work), with the ones that can sink the pilot called out first.
 
 ---
 
@@ -29,6 +29,9 @@ An honest audit of the gamified transmedia experience as specified in [`BUILD_PL
 | **Chromebook/mobile rendering untested** — the SPA spec assumes desktop; school reality is managed Chromebooks and phones | The Hub and novel reader must work at 1366×768 and touch | [build] |
 | **FERPA/COPPA posture undefined** — student PII (names, emails, work product, images) across Postgres/MinIO/OpenSearch/logs, plus AI processing of student work | Customer's district will ask; needs a data inventory + retention/deletion answer before a real school pilots | [decision] |
 | **AI cost/rate control** — every submission triggers an LLM call with no rate limit, queue depth cap, or per-org budget | One stuck retry loop = a big bill or a dead Ollama box | [build] |
+| **Minors' work may reach a third-party LLM vendor** — sharper than the FERPA/COPPA row above: `AI_ENABLED` can point `OPENWEBUI_BASE_URL` at any OpenAI-compatible endpoint, not just self-hosted Ollama, and nothing in `ARCHITECTURE.md`/`GAME_DESIGN.md` requires a no-training-on-data DPA or vendor disclosure before that happens | A district asking "does our students' reflection text train someone else's model" needs a contractual answer, not a config default | [decision] |
+| **B1llbot has no jailbreak/prompt-injection defense or teacher escape hatch** — `GAME_DESIGN.md` §10 now gives him a written system prompt and content guardrails (no politics, no real financial advice, crisis redirect), but nothing addresses a student trying to extract the system prompt, talk him out of character, or get him to do the assignment outright, and there's no mechanism to flag a concerning conversation for a teacher | A mentor character with 12 weeks of unsupervised chat access to minors needs defense in depth, not just a well-written persona | [build] |
+| **Minecraft has no social-safety tooling for a shared world** — griefing, chat moderation, and player-reporting aren't addressed anywhere; distinct from the "screenshot uploads are unmoderated" row above, which is about self-reported evidence, not live multiplayer interaction | A shared server with minors needs griefing protection (region protection / rollback) and a reporting path before it's "the flagship transmedia feature" and not a liability | [decision + build] |
 
 ## Narrative
 
@@ -40,7 +43,7 @@ An honest audit of the gamified transmedia experience as specified in [`BUILD_PL
 | **Team fiction is missing** — canon follows Alex, a solo protagonist; the product is team-based | Need the narrative device for "your cell of four Agents" — names, team identity ritual at onboarding, how the story addresses a group | [decision] |
 | **The ending isn't a product feature** — Evokation (final project) and Alchemy's invitation to the EVOKE Network are canon, but nothing specifies the finale: where evokations are presented, what the last chapter unlocks, what "graduating" looks like on-screen | The campaign needs a landing, not a fade-out; strongest candidate: evokation showcase gallery + a final Alchemy chapter gated on team completion | [decision → build] |
 | **Falling-behind narrative** — streaks pause kindly, but the story has no recap/catch-up device for a student who missed two weeks | Transmedia punishes absence worse than a textbook does; a "mission debrief archive" / B1llbot recap prompt is cheap insurance | [build] |
-| **B1llbot guardrails** — the persona is defined by vibe (`billslifeprinciples.pdf`) but has no written boundaries: what he does when asked for answers, off-topic use, self-harm disclosures, or attempts to break character | A mentor character talking to minors needs an explicit safety spec, not just a personality | [decision + build] |
+| **B1llbot guardrails — persona decided, technical hardening still open** — `GAME_DESIGN.md` §10 resolved the persona/voice half of this (a written system prompt, an explicit note excluding `billslifeprinciples.pdf`'s partisan content, a crisis-redirect rule) — see the Technical section's jailbreak/prompt-injection row for what's still missing | The "what should he say" decision is made; "how do we stop him being talked out of it" is now a scoped build item, not an open decision | [build] |
 
 ## User experience
 
@@ -67,11 +70,25 @@ An honest audit of the gamified transmedia experience as specified in [`BUILD_PL
 | **No team-level play** — teams share a profile but have no mechanics: no team goals, no team streak, no inter-team dynamics (friendly rivalry or shared class goal), and Venture Points — the actual economics endgame — is deferred with no design doc | Weeks 4–6 are *built around* team venture mechanics; the Venture Points allocation UI + Safe Bet/Balanced/Moonshot classification needs a spec now to land by the Act arc | [decision → build] |
 | **No celebration moments** — badge earn, level up, chapter unlock, and campaign finale all currently render as… a toast | Cheap, high-yield: full-screen badge ceremony, class-wide Minecraft broadcast on legendary collections, end-of-arc recap screens | [build] |
 | **No choice or expression** — 12 linear missions, no player agency: no mission order choice, no role specialization beyond a text label, no profile customization (avatar/agent codename) | Agency is the difference between a game and a workbook; cheapest wins: agent codenames + avatar pick at onboarding, team-chosen venture identity | [build] |
+| **Mission skill-tags drift from the framework they're supposed to come from** — `GAME_DESIGN.md` §4 audits the 12 missions' Primary/Secondary Evoke Skill fields against the World Bank Social Innovators' Framework (Freeman & Hawkins 2016) the Superpower system is actually built on, and finds terms that aren't among the framework's 16 canonical "Powers" at all (`Research & Analysis`, `Creativity`, `Relationship Management`), plus several Powers tagged under a different Quality than the source paper assigns them | Badges can't credibly claim to build a named skill if the mission tagging doesn't match the skill's own source definition — worth fixing before the mission catalog is finalized in Brightspace, not after | [decision] |
+
+---
+
+## Business & adoption
+
+Missing lens in earlier passes of this doc — these are less "will the pilot work" and more "will anyone beyond one classroom ever run this," which matters because `ARCHITECTURE.md` is explicitly scoped to a single technical operator.
+
+| Gap | Why it matters | Tag |
+|---|---|---|
+| **No operating model for a non-technical school** — `ARCHITECTURE.md`'s guiding principle is "one senior, highly experienced engineer... runs the whole thing." Real districts don't have that person. Nothing defines who keeps Postgres/Redpanda/OpenSearch/OpenWebUI/the Minecraft server alive when it breaks mid-class, or what a radically simplified/managed-hosting mode would look like | This is the difference between "a demo one engineer can run" and "a product a school can buy" — currently there's no path from one to the other | [decision] |
+| **No standards alignment or gradebook translation** — missions carry ad hoc codes (`CES 5.1`, `FL.HS.5.1`) but nothing maps the campaign to an actual state financial-literacy graduation requirement, and AI/instructor feedback never resolves into a number a teacher can put in a gradebook | This is what a district procures against; without it, EVOKE Prosperity is enrichment, not curriculum, in a purchasing conversation | [decision] |
+| **No efficacy/research validation plan** — the Superpower framework this campaign is built on (Freeman & Hawkins 2016, `GAME_DESIGN.md` §4) is literally the first of a three-paper World Bank series whose second installment is an experimental research study on a real pilot (Colombia, human trafficking/displacement challenge). EVOKE Prosperity has rubrics but no equivalent plan — no pre/post skill assessment, no control comparison, no way to demonstrate the financial-literacy claim actually landed | Needed before anyone pitches this with an efficacy claim, and ironic to skip given the source framework's own rigor | [decision] |
 
 ---
 
 ## Suggested sequencing
 
-- **Answer before building deeper:** badge criteria, streak unit, screenshot moderation, chapter authorship, teacher fiction role. (Java-vs-Bedrock is resolved: Geyser/Floodgate on Fabric.)
-- **Fold into the current build order** (cheap while the code is open): revise-and-resubmit events, peer insights, XP values + level titles, quest XP caps, reflective submission prompts, celebration screens, projection replay tooling, OpenWebUI bootstrap script.
-- **Design docs needed next** (before the Act arc lands): Venture Points mechanics, collective world-state ("Rebuild Keel" meter + world mutations), finale/evokation showcase, onboarding Mission Zero script.
+- **Answer before building deeper:** badge criteria, streak unit, screenshot moderation, chapter authorship, teacher fiction role, mission skill-tag reconciliation, third-party LLM vendor posture. (Java-vs-Bedrock is resolved: Geyser/Floodgate on Fabric. B1llbot's persona/voice is resolved: see `GAME_DESIGN.md` §10.)
+- **Fold into the current build order** (cheap while the code is open): revise-and-resubmit events, peer insights, XP values + level titles, quest XP caps, reflective submission prompts, celebration screens, projection replay tooling, OpenWebUI bootstrap script, B1llbot jailbreak/escape-hatch hardening.
+- **Design docs needed next** (before the Act arc lands): Venture Points mechanics, collective world-state ("Rebuild Keel" meter + world mutations), finale/evokation showcase, onboarding Mission Zero script, Minecraft social-safety tooling.
+- **Decide before any real pilot conversation:** operating model for non-technical schools, standards alignment, efficacy/research plan.
