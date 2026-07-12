@@ -290,6 +290,47 @@ def _process_event(event: dict, producer):
             team_profile["updated_at"] = now_str
             os_client.index(index="team-profile", id=team_id, body=team_profile, refresh=True)
 
+    # -------------------------------------------------------------
+    # 4. ACTIVITY WORKER
+    # -------------------------------------------------------------
+    # Class-wide social layer: GAPS.md's #2 flagged gap ("no social layer...
+    # the game is single-player homework with better wallpaper") and the
+    # reason a real feed matters more here than in a typical app -- missions
+    # are paced weekly, so any one learner's personal activity is sparse most
+    # days, but a whole cohort's combined activity (everyone's submissions,
+    # awards, quests) is not. AwardGranted + QuestCompleted only (not
+    # MissionCompleted/BadgeAwarded/XPGranted, which fire at the same moment
+    # as AwardGranted for the same underlying action and would just be
+    # redundant noise in a public feed).
+    #
+    # Deliberately a standalone `if`, not chained onto the elif above:
+    # QuestCompleted is also handled by the PROFILE WORKER's elif branch, and
+    # elif chains are mutually exclusive -- as elif this never ran for
+    # QuestCompleted at all (caught and fixed by actually testing the feed,
+    # not just reading the code back).
+    if event_type in ["AwardGranted", "QuestCompleted"]:
+        user_id = event['data']['user_id']
+        now_str = datetime.datetime.now().isoformat()
+        name_row = _db_fetch_one("SELECT display_name FROM users WHERE id = %s", (user_id,))
+        display_name = name_row[0] if name_row else "An agent"
+
+        if event_type == "AwardGranted":
+            tier = event['data']['tier']
+            mission_row = _db_fetch_one("SELECT title FROM missions WHERE id = %s", (event['data']['mission_id'],))
+            mission_title = mission_row[0] if mission_row else "a mission"
+            message = f"{display_name} earned a {tier} award for {mission_title}"
+            kind, tier_out = "award_granted", tier
+        else:  # QuestCompleted
+            quest_row = _db_fetch_one("SELECT title FROM mc_quests WHERE id = %s", (event['data']['quest_id'],))
+            quest_title = quest_row[0] if quest_row else "a Basin Simulation quest"
+            message = f"{display_name} completed {quest_title} in the Basin Simulation"
+            kind, tier_out = "quest_completed", None
+
+        os_client.index(index="activity-feed", body={
+            "timestamp": now_str, "user_id": user_id, "display_name": display_name,
+            "kind": kind, "tier": tier_out, "message": message,
+        })
+
 
 async def evoke_workers_loop():
     await asyncio.sleep(5)

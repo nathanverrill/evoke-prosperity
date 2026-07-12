@@ -45,6 +45,8 @@ const Evoke = (() => {
     submitQuest: (questId, formData) => apiPostForm(`/api/mc-quests/${questId}/submit`, formData),
     billbotChat: (userId, message) => apiPostJSON(`/api/billbot/chat?user_id=${userId}&message=${encodeURIComponent(message)}`, {}),
     devLogin: () => fetch("/api/dev-login", { method: "POST" }).then(r => r.json()),
+    checkin: (userId) => fetch(`/api/checkin?user_id=${userId}`, { method: "POST" }).then(r => r.json()),
+    activity: (limit) => apiGet(`/api/activity${limit ? "?limit=" + limit : ""}`),
   };
 
   // ---------- Auth (dev-login only; see CONCEPTS.md's known gaps) ----------
@@ -175,6 +177,10 @@ const Evoke = (() => {
 
   async function boot() {
     await ensureLoggedIn();
+    // Fire-and-forget: the backend dedupes to one grant per calendar day, so
+    // calling this on every boot is safe and simplest (no client-side
+    // "have I already checked in" tracking to keep in sync with the server).
+    api.checkin(state.userId).then(r => { state.checkinResult = r; }).catch(() => {});
     renderBillbotDrawer();
     await renderTopbar();
     window.addEventListener("hashchange", router);

@@ -203,3 +203,7 @@ input, textarea, select {
 .empty-state { color: var(--color-text-muted); font-size: var(--text-sm); font-style: italic; }
 .feed-item { padding: var(--space-2) 0; border-bottom: var(--border-width) solid var(--color-border); font-size: var(--text-sm); }
 .feed-item:last-child { border-bottom: none; }
+.feed-item[data-tier] .award__tier { margin-right: var(--space-2); }
+.feed-item[data-tier="common"] .award__tier { background: var(--tier-common); }
+.feed-item[data-tier="epic"] .award__tier { background: var(--tier-epic); }
+.feed-item[data-tier="legendary"] .award__tier { background: var(--tier-legendary); }

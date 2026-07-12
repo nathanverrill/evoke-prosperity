@@ -15,21 +15,38 @@ function missionState(mission, profile) {
   // than fabricating a lock mechanic the backend doesn't enforce.
 }
 
+function timeAgo(isoTimestamp) {
+  const seconds = Math.floor((Date.now() - new Date(isoTimestamp)) / 1000);
+  if (seconds < 60) return "just now";
+  if (seconds < 3600) return `${Math.floor(seconds / 60)}m ago`;
+  if (seconds < 86400) return `${Math.floor(seconds / 3600)}h ago`;
+  return `${Math.floor(seconds / 86400)}d ago`;
+}
+
 Evoke.screens.hub = async function hub() {
   const { api, state, mount } = Evoke;
-  const [missionsRes, notifRes] = await Promise.all([
+  const [missionsRes, notifRes, activityRes, checkinRes] = await Promise.all([
     api.missions(state.userId),
     api.notifications(state.userId).catch(() => ({ notifications: [] })),
+    api.activity(20).catch(() => ({ activity: [] })),
+    api.checkin(state.userId).catch(() => null),
   ]);
   const missions = missionsRes.missions || [];
   const profile = state.profile;
   const completedCount = (profile && profile.missions_completed_count) || 0;
   const nextMission = missions.find(m => missionState(m, profile) === "available");
   const pendingAwards = (notifRes.notifications || []).filter(n => !n.read);
+  const activity = activityRes.activity || [];
 
   const byArc = {};
   ARC_ORDER.forEach(a => byArc[a] = []);
   missions.forEach(m => { if (byArc[m.arc]) byArc[m.arc].push(m); });
+
+  const checkinLine = checkinRes
+    ? (checkinRes.status === "checked_in"
+        ? `✓ Checked in today (+${checkinRes.xp_granted} XP${checkinRes.minecraft_reward ? " · a reward is waiting in the Basin" : ""})`
+        : "✓ Already checked in today")
+    : "";
 
   mount(`
     <div class="hub-layout">
@@ -42,6 +59,7 @@ Evoke.screens.hub = async function hub() {
                <a class="btn btn-primary" href="#/mission/${nextMission.id}">Open Mission Brief →</a>`
             : `<p class="empty-state">All missions complete. New chapters coming soon.</p>`}
           <p style="margin-top:var(--space-3)">${completedCount}/12 missions complete · ${pendingAwards.length} pending award${pendingAwards.length === 1 ? "" : "s"}</p>
+          ${checkinLine ? `<p class="empty-state" style="margin-top:var(--space-2)">${checkinLine}</p>` : ""}
         </section>
 
         <section>
@@ -63,10 +81,16 @@ Evoke.screens.hub = async function hub() {
         </section>
 
         <section class="card">
-          <div class="card__eyebrow">Feed</div>
-          ${pendingAwards.length
-            ? pendingAwards.map(n => `<div class="feed-item">Award pending collection — <a href="#/profile">view</a></div>`).join("")
-            : `<p class="empty-state">Nothing new yet.</p>`}
+          <div class="card__eyebrow">Feed — what's happening across the cohort</div>
+          ${activity.length
+            ? activity.map(a => `
+                <div class="feed-item" data-tier="${a.tier || ""}">
+                  ${a.tier ? `<span class="award__tier">${a.tier}</span> ` : ""}
+                  ${Evoke.escapeHtml(a.message)}
+                  <span class="empty-state"> · ${timeAgo(a.timestamp)}</span>
+                </div>
+              `).join("")
+            : `<p class="empty-state">Nothing yet — the first submission of the campaign will show up here.</p>`}
         </section>
       </div>
 

@@ -1389,6 +1389,67 @@ async def get_team_profile(team_id: str):
         raise HTTPException(status_code=400, detail=str(e))
 
 
+# ========== Check-In & Activity Feed ==========
+@app.post("/api/checkin")
+async def checkin(user_id: str):
+    """Visiting the Operations Hub is itself a small, repeatable reward loop,
+    not just a portal for submitting missions -- missions are paced weekly,
+    so personal activity is otherwise sparse most days. One grant per
+    calendar day per user (checkins.UNIQUE(user_id, checkin_date)) --
+    non-punitive by construction: there's no streak counter here to break,
+    just whether today's check-in has already happened. Publishes a real
+    RewardCollected event, reusing the exact same tier-keyed RCON delivery
+    pipeline mission awards use (a 'checkin' entry in mc_reward_catalog) --
+    so opening the website is a genuine way to earn something in Minecraft,
+    not just a cosmetic gesture."""
+    try:
+        already = db_fetch_one(
+            "SELECT 1 FROM checkins WHERE user_id = %s::uuid AND checkin_date = CURRENT_DATE", (user_id,)
+        )
+        if already:
+            return {"status": "already_checked_in"}
+
+        db_execute(
+            "INSERT INTO checkins (user_id, checkin_date) VALUES (%s::uuid, CURRENT_DATE) ON CONFLICT DO NOTHING",
+            (user_id,)
+        )
+
+        await publish_event("XPGranted", {"user_id": user_id, "amount": 10, "reason": "checkin"})
+
+        has_minecraft_link = db_fetch_one(
+            "SELECT 1 FROM minecraft_links WHERE user_id = %s::uuid", (user_id,)
+        )
+        minecraft_reward = bool(has_minecraft_link)
+        if minecraft_reward:
+            await publish_event("RewardCollected", {
+                "award_id": str(uuid.uuid4()),  # synthetic -- the bridge never looks up a real awards row for this
+                "user_id": user_id,
+                "mission_id": None,
+                "tier": "checkin",
+            })
+
+        return {"status": "checked_in", "xp_granted": 10, "minecraft_reward": minecraft_reward}
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@app.get("/api/activity")
+async def get_activity(limit: int = 30):
+    """Class-wide activity stream -- the social layer GAPS.md flags as
+    missing ("the game is single-player homework with better wallpaper").
+    Reads the activity-feed OpenSearch index the ACTIVITY WORKER maintains
+    from AwardGranted/QuestCompleted events across every learner, not just
+    the caller."""
+    try:
+        result = os_client.search(
+            index="activity-feed",
+            body={"query": {"match_all": {}}, "sort": [{"timestamp": {"order": "desc"}}], "size": limit},
+        )
+        return {"activity": [hit["_source"] for hit in result["hits"]["hits"]]}
+    except Exception:
+        return {"activity": []}
+
+
 # ========== Timeline ==========
 @app.get("/api/timeline/{user_id}/{mission_id}")
 async def get_timeline(user_id: str, mission_id: str):

@@ -226,6 +226,19 @@ CREATE TABLE mission_brightspace_mapping (
     UNIQUE(mission_id, campaign_id)
 );
 
+-- Web Check-Ins (a reason to open the Operations Hub between missions --
+-- weekly-paced missions mean personal activity is sparse most days; this
+-- and the activity feed are what make visiting the site worthwhile anyway.
+-- One row per user per calendar day -- non-punitive by construction, since
+-- there's no streak counter here to break, just "did you check in today".)
+CREATE TABLE checkins (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    user_id UUID NOT NULL REFERENCES users(id),
+    checkin_date DATE NOT NULL DEFAULT CURRENT_DATE,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE(user_id, checkin_date)
+);
+
 -- Indexes for common queries
 CREATE INDEX idx_users_org_id ON users(org_id);
 CREATE INDEX idx_teams_org_id ON teams(org_id);
@@ -239,6 +252,7 @@ CREATE INDEX idx_mc_quest_completions_user_id ON mc_quest_completions(user_id);
 CREATE INDEX idx_evoke_identities_user_id ON evoke_identities(user_id);
 CREATE INDEX idx_evoke_identities_brightspace ON evoke_identities(brightspace_user_id);
 CREATE INDEX idx_evoke_identities_minecraft ON evoke_identities(minecraft_uuid);
+CREATE INDEX idx_checkins_user_date ON checkins(user_id, checkin_date);
 CREATE INDEX idx_submissions_user_mission ON submissions(user_id, mission_id);
 CREATE INDEX idx_submissions_brightspace_id ON submissions(brightspace_submission_id);
 

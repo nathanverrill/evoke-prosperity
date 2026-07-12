@@ -178,6 +178,15 @@ def seed_database(db_url):
                 ('item', 'minecraft:netherite_pickaxe', 1, None, False),
                 ('command', 'give <player> minecraft:enchanted_golden_apple', 1, None, False),
             ],
+            # Not a mission-tier award -- delivered by the daily web check-in
+            # (POST /api/checkin), reusing this exact same tier-keyed reward
+            # pipeline. Deliberately a single small/cosmetic entry (a compass
+            # -- "find your way back to the mission"), not a duplicate-tier
+            # ambiguity like the pairs above where the bridge's "LIMIT 1"
+            # query arbitrarily picks one of two rows.
+            'checkin': [
+                ('item', 'minecraft:compass', 1, None, False),
+            ],
         }
 
         for tier, reward_list in rewards.items():
