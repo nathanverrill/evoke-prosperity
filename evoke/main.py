@@ -19,6 +19,7 @@ from evoke.clients import s3_client, os_client, get_producer
 from evoke.workers import evoke_workers_loop
 from evoke.lms import get_brightspace_lms
 from evoke.lti import BrightspaceLTIProvider
+from evoke import skills_framework
 
 logger = logging.getLogger(__name__)
 
@@ -1056,20 +1057,31 @@ async def submit_evidence(
             "mission_id": mission_id
         })
 
-        mission_superpower = db_fetch_one(
-            "SELECT superpower FROM missions WHERE id = %s::uuid", (mission_id,)
+        # Achievements are Power-level (GAME_DESIGN.md §4.1), not just the 4
+        # Quality badges: each of the mission's Primary/Secondary tags
+        # resolves (via skills_framework.resolve_power, which also handles
+        # the 3 non-canonical mission-tag terms) to one of the 16 real
+        # Powers, and a Quality badge only "earns" once all 4 of its
+        # constituent Powers are unlocked. Route by the Power's own Table 1
+        # Quality, never the mission's labeled `superpower` field — those
+        # disagree in real cases (e.g. mission-09's primary tag, Courage, is
+        # a Creative Visionary Power despite that mission being headlined
+        # "Empathetic Changemaker").
+        mission_tags = db_fetch_one(
+            "SELECT primary_skill, secondary_skill FROM missions WHERE id = %s::uuid", (mission_id,)
         )
-        if mission_superpower and mission_superpower[0]:
-            # badge_key = the Superpower this mission builds toward. Criteria
-            # for what "earns" a badge (every tagged mission vs. a threshold)
-            # is explicitly flagged undecided in GAPS.md — this just makes
-            # every mission-completion count as one step of progress, so
-            # profiles have something to render.
-            await publish_event("BadgeAwarded", {
-                "user_id": user_id,
-                "badge_key": mission_superpower[0],
-                "mission_id": mission_id
-            })
+        if mission_tags:
+            for raw_tag, tag_type in [(mission_tags[0], "primary"), (mission_tags[1], "secondary")]:
+                power_key = skills_framework.resolve_power(raw_tag)
+                if not power_key:
+                    continue
+                await publish_event("BadgeAwarded", {
+                    "user_id": user_id,
+                    "badge_key": skills_framework.POWER_TO_QUALITY[power_key],
+                    "power_key": power_key,
+                    "tag_type": tag_type,
+                    "mission_id": mission_id
+                })
 
         # Create notification
         notification_id = str(uuid.uuid4())
@@ -1351,6 +1363,47 @@ async def get_player_profile(user_id: str):
         raise HTTPException(status_code=400, detail=str(e))
 
 
+@app.get("/api/achievements/{user_id}")
+async def get_achievements(user_id: str):
+    """The 16 Powers as individually-unlockable achievements (GAME_DESIGN.md
+    §4.1) -- canon's Profile-screen "Achievements" section, distinct from
+    the 4 Quality badges. Merges the always-16 static framework (so unearned
+    Powers still render, grouped correctly under their real Quality) with
+    whatever's actually been earned in the player-profile projection's
+    `badges.*.powers` sub-structure."""
+    try:
+        try:
+            profile = os_client.get(index="player-profile", id=user_id)["_source"]
+        except Exception:
+            profile = {"badges": {}}
+
+        badges = profile.get("badges", {})
+        powers = {}
+        for power_key, (quality, definition) in skills_framework.POWERS.items():
+            earned_state = badges.get(quality, {}).get("powers", {}).get(power_key)
+            powers[power_key] = {
+                "quality": quality,
+                "definition": definition,
+                "earned": bool(earned_state and earned_state.get("earned")),
+                "earned_at": earned_state.get("earned_at") if earned_state else None,
+                "tag_type": earned_state.get("tag_type") if earned_state else None,
+                "behavioral": power_key in skills_framework.BEHAVIORAL_POWERS,
+            }
+
+        qualities = {}
+        for quality in skills_framework.QUALITIES:
+            badge = badges.get(quality, {})
+            qualities[quality] = {
+                "earned": bool(badge.get("earned")),
+                "powers_earned": badge.get("progress", 0),
+                "powers_total": 4,
+            }
+
+        return {"user_id": user_id, "qualities": qualities, "powers": powers}
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
 @app.get("/api/profile/team/{team_id}")
 async def get_team_profile(team_id: str):
     """Team profile. Aggregated from members' individual events (missions
@@ -1514,6 +1567,30 @@ async def add_peer_insight(
                 "text": text,
             },
         })
+
+        # Behavioral achievement trigger (GAME_DESIGN.md §4.1): Generosity of
+        # Spirit ("collaborates, gives, and shares one's time... with
+        # others") has zero coverage in the fixed 12 missions' tags, so it's
+        # unlocked by the act of giving peer feedback instead. Fire exactly
+        # once, at the threshold -- the worker is idempotent on repeats, but
+        # there's no reason to keep publishing after the Power is earned.
+        db_execute(
+            "INSERT INTO peer_insights_given (id, from_user_id, target_user_id, mission_id) VALUES (%s::uuid, %s::uuid, %s::uuid, %s::uuid)",
+            (str(uuid.uuid4()), from_user_id, target_user_id, mission_id)
+        )
+        given_count = db_fetch_one(
+            "SELECT COUNT(*) FROM peer_insights_given WHERE from_user_id = %s::uuid", (from_user_id,)
+        )[0]
+        threshold = skills_framework.BEHAVIORAL_POWERS["Generosity of Spirit"]["threshold"]
+        if given_count == threshold:
+            await publish_event("BadgeAwarded", {
+                "user_id": from_user_id,
+                "badge_key": skills_framework.POWER_TO_QUALITY["Generosity of Spirit"],
+                "power_key": "Generosity of Spirit",
+                "tag_type": "behavioral",
+                "mission_id": None
+            })
+
         return {"status": "posted"}
     except HTTPException:
         raise
@@ -1683,6 +1760,28 @@ async def submit_quest_evidence(
 async def billbot_chat(user_id: str, message: str):
     """Chat with B1llbot"""
     try:
+        # Behavioral achievement trigger (GAME_DESIGN.md §4.1): Curiosity
+        # ("asks good questions") has zero coverage in the fixed 12
+        # missions' tags, so it's unlocked by chat volume instead. Logged
+        # before the OpenWebUI call so the count reflects messages sent
+        # regardless of whether B1llbot's reply succeeds.
+        db_execute(
+            "INSERT INTO billbot_chat_log (id, user_id, message) VALUES (%s::uuid, %s::uuid, %s)",
+            (str(uuid.uuid4()), user_id, message)
+        )
+        sent_count = db_fetch_one(
+            "SELECT COUNT(*) FROM billbot_chat_log WHERE user_id = %s::uuid", (user_id,)
+        )[0]
+        threshold = skills_framework.BEHAVIORAL_POWERS["Curiosity"]["threshold"]
+        if sent_count == threshold:
+            await publish_event("BadgeAwarded", {
+                "user_id": user_id,
+                "badge_key": skills_framework.POWER_TO_QUALITY["Curiosity"],
+                "power_key": "Curiosity",
+                "tag_type": "behavioral",
+                "mission_id": None
+            })
+
         async with httpx.AsyncClient() as client:
             response = await client.post(
                 f"{OPENWEBUI_URL}/api/chat/completions",

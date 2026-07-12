@@ -370,8 +370,12 @@ Evoke.screens.gallery = async function gallery() {
 Evoke.screens.playerProfile = async function playerProfile(userId) {
   const { api, state, mount } = Evoke;
   const id = userId || state.userId;
-  const profile = await api.playerProfile(id);
+  const [profile, achievementsRes] = await Promise.all([
+    api.playerProfile(id),
+    api.achievements(id).catch(() => ({ qualities: {}, powers: {} })),
+  ]);
   const badgeKeys = ["Empathetic Changemaker", "Systems Thinker", "Creative Visionary", "Deep Collaborator"];
+  const powers = achievementsRes.powers || {};
 
   mount(`
     <div class="stack">
@@ -386,14 +390,33 @@ Evoke.screens.playerProfile = async function playerProfile(userId) {
         <div class="badge-wall">
           ${badgeKeys.map(key => {
             const b = (profile.badges || {})[key];
+            const powersEarned = b ? b.progress : 0;
             return `
               <div class="badge-tile ${b && b.earned ? "is-earned" : "is-dimmed"}">
                 <div class="badge-tile__name">${key}</div>
-                <div class="badge-tile__progress">${b ? `${b.progress} mission${b.progress === 1 ? "" : "s"}` : "not started"}</div>
+                <div class="badge-tile__progress">${powersEarned} of 4 Powers</div>
               </div>
             `;
           }).join("")}
         </div>
+      </section>
+
+      <section>
+        <h2 class="section-title">Achievements</h2>
+        <p class="empty-state">The 16 Powers behind the 4 Superpowers (World Bank EVOKE framework). Hover a tile for what it means.</p>
+        ${badgeKeys.map(quality => `
+          <div class="stack-sm">
+            <div class="card__eyebrow">${quality}</div>
+            <div class="badge-wall">
+              ${Object.entries(powers).filter(([, p]) => p.quality === quality).map(([powerKey, p]) => `
+                <div class="badge-tile ${p.earned ? "is-earned" : "is-dimmed"}" title="${Evoke.escapeHtml(p.definition)}">
+                  <div class="badge-tile__name">${Evoke.escapeHtml(powerKey)}</div>
+                  <div class="badge-tile__progress">${p.earned ? (p.tag_type === "behavioral" ? "earned" : `earned · ${p.tag_type}`) : "locked"}</div>
+                </div>
+              `).join("")}
+            </div>
+          </div>
+        `).join("")}
       </section>
 
       <section class="card">

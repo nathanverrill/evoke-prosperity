@@ -39,6 +39,7 @@ const Evoke = (() => {
     awards: (userId) => apiGet(`/api/awards/${userId}`),
     collectAward: (awardId, userId) => fetch(`/api/awards/${awardId}/collect?user_id=${userId}`, { method: "POST" }).then(r => r.json()),
     playerProfile: (userId) => apiGet(`/api/profile/player/${userId}`),
+    achievements: (userId) => apiGet(`/api/achievements/${userId}`),
     teamProfile: (teamId) => apiGet(`/api/profile/team/${teamId}`),
     timeline: (userId, missionId) => apiGet(`/api/timeline/${userId}/${missionId}`),
     mcQuests: (campaignId) => apiGet(`/api/mc-quests${campaignId ? "?campaign_id=" + campaignId : ""}`),

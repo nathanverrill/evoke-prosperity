@@ -8,6 +8,7 @@ from kafka import KafkaConsumer
 import psycopg2
 from psycopg2.pool import SimpleConnectionPool
 from evoke.clients import s3_client, os_client, ai_client, get_producer, REDPANDA_BROKER, AI_ENABLED, AI_MODEL
+from evoke import skills_framework
 
 # Small, self-contained Postgres pool for the PROFILE WORKER's team-membership
 # lookups. Deliberately not shared with main.py's db_pool (a separate pool
@@ -235,14 +236,33 @@ def _process_event(event: dict, producer):
                 profile["missions_completed"].append(mission_id)
 
         elif event_type == "BadgeAwarded":
+            # Power-level achievements (GAME_DESIGN.md §4.1): a Quality
+            # badge is a derived rollup over its 4 constituent Powers, not
+            # its own independent counter. `power_key` names which of the
+            # 16 real Powers this event demonstrates (already resolved by
+            # the publisher via skills_framework.resolve_power, including
+            # the 3 non-canonical mission-tag aliases); `badge_key` is that
+            # Power's own Table 1 Quality, not the mission's labeled
+            # Superpower field.
             badge_key = event['data']['badge_key']
+            power_key = event['data'].get('power_key')
+            tag_type = event['data'].get('tag_type')
             badge = profile["badges"].setdefault(
-                badge_key, {"earned": False, "progress": 0, "earned_at": None}
+                badge_key, {"earned": False, "progress": 0, "earned_at": None, "powers": {}}
             )
-            badge["progress"] += 1
-            if not badge["earned"]:
-                badge["earned"] = True
-                badge["earned_at"] = now_str
+            badge.setdefault("powers", {})
+            if power_key:
+                power_state = badge["powers"].setdefault(
+                    power_key, {"earned": False, "earned_at": None, "tag_type": None}
+                )
+                if not power_state["earned"]:
+                    power_state["earned"] = True
+                    power_state["earned_at"] = now_str
+                    power_state["tag_type"] = tag_type
+                badge["progress"] = len(badge["powers"])
+                if not badge["earned"] and badge["progress"] >= 4:
+                    badge["earned"] = True
+                    badge["earned_at"] = now_str
 
         elif event_type == "XPGranted":
             profile["xp"] = profile.get("xp", 0) + event['data']['amount']

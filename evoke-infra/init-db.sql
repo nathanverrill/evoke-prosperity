@@ -239,6 +239,27 @@ CREATE TABLE checkins (
     UNIQUE(user_id, checkin_date)
 );
 
+-- GAME_DESIGN.md §4.1: Generosity of Spirit and Curiosity have zero
+-- coverage in the 12 missions' fixed Primary/Secondary tags, so they're
+-- unlocked by behavior instead. These two tables give a reliable count to
+-- threshold against (an OpenSearch query over InsightPublished-derived
+-- projections would work for the peer-insight count, but not for chat
+-- volume, which nothing else logs at all).
+CREATE TABLE peer_insights_given (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    from_user_id UUID NOT NULL REFERENCES users(id),
+    target_user_id UUID NOT NULL REFERENCES users(id),
+    mission_id UUID NOT NULL REFERENCES missions(id),
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE billbot_chat_log (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    user_id UUID NOT NULL REFERENCES users(id),
+    message TEXT NOT NULL,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
 -- Indexes for common queries
 CREATE INDEX idx_users_org_id ON users(org_id);
 CREATE INDEX idx_teams_org_id ON teams(org_id);
@@ -253,6 +274,8 @@ CREATE INDEX idx_evoke_identities_user_id ON evoke_identities(user_id);
 CREATE INDEX idx_evoke_identities_brightspace ON evoke_identities(brightspace_user_id);
 CREATE INDEX idx_evoke_identities_minecraft ON evoke_identities(minecraft_uuid);
 CREATE INDEX idx_checkins_user_date ON checkins(user_id, checkin_date);
+CREATE INDEX idx_peer_insights_from_user ON peer_insights_given(from_user_id);
+CREATE INDEX idx_billbot_chat_log_user ON billbot_chat_log(user_id);
 CREATE INDEX idx_submissions_user_mission ON submissions(user_id, mission_id);
 CREATE INDEX idx_submissions_brightspace_id ON submissions(brightspace_submission_id);
 
