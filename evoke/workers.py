@@ -161,7 +161,22 @@ def _process_event(event: dict, producer):
         try:
             current = os_client.get(index="learner-timeline", id=projection_id)['_source']
         except Exception:
-            current = {"learner_id": learner_id, "mission_id": mission_id, "insights": [], "timeline": []}
+            # Nothing previously initialized the actual timeline step
+            # scaffold (submitted/processing/ai_analysis/teacher_review) that
+            # UI_SPEC.md's timeline strip and the step-matching logic below
+            # both assume exists -- "timeline": [] meant the for loop below
+            # had nothing to iterate and no step ever advanced past nothing.
+            # By the time any event reaches this branch, evidence has always
+            # already been submitted, so "submitted" starts complete.
+            current = {
+                "learner_id": learner_id, "mission_id": mission_id, "insights": [],
+                "timeline": [
+                    {"id": "submitted", "label": "Submitted", "status": "completed", "timestamp": now_str, "content": "Evidence received."},
+                    {"id": "processing", "label": "Processing", "status": "active", "timestamp": None, "content": "Awaiting processing."},
+                    {"id": "ai_analysis", "label": "AI Analysis", "status": "pending", "timestamp": None, "content": "Awaiting AI analysis."},
+                    {"id": "teacher_review", "label": "Instructor Review", "status": "pending", "timestamp": None, "content": "Awaiting human insights."},
+                ]
+            }
 
         if "insights" not in current:
             current["insights"] = []

@@ -1389,6 +1389,39 @@ async def get_team_profile(team_id: str):
         raise HTTPException(status_code=400, detail=str(e))
 
 
+# ========== Timeline ==========
+@app.get("/api/timeline/{user_id}/{mission_id}")
+async def get_timeline(user_id: str, mission_id: str):
+    """The learner-timeline projection (submitted/processing/ai_analysis/
+    teacher_review steps + insights) that workers.py's SEARCH & TIMELINE
+    WORKER maintains -- UI_SPEC.md's mission brief/debrief screens poll this
+    for the live timeline strip, but no read API existed for it at all until
+    now."""
+    projection_id = f"{user_id}_{mission_id}"
+    try:
+        doc = os_client.get(index="learner-timeline", id=projection_id)["_source"]
+    except Exception:
+        # No feedback event has landed yet -- valid pre-processing state, not
+        # an error. "Submitted" only reflects reality if a submission row
+        # actually exists; otherwise this is a mission the learner hasn't
+        # touched yet and the timeline shouldn't claim otherwise.
+        has_submission = db_fetch_one(
+            "SELECT 1 FROM submissions WHERE user_id = %s::uuid AND mission_id = %s::uuid LIMIT 1",
+            (user_id, mission_id)
+        )
+        submitted_status = "completed" if has_submission else "pending"
+        doc = {
+            "learner_id": user_id, "mission_id": mission_id, "insights": [],
+            "timeline": [
+                {"id": "submitted", "label": "Submitted", "status": submitted_status, "timestamp": None, "content": "Evidence received." if has_submission else ""},
+                {"id": "processing", "label": "Processing", "status": "pending", "timestamp": None, "content": ""},
+                {"id": "ai_analysis", "label": "AI Analysis", "status": "pending", "timestamp": None, "content": ""},
+                {"id": "teacher_review", "label": "Instructor Review", "status": "pending", "timestamp": None, "content": ""},
+            ]
+        }
+    return doc
+
+
 # ========== Minecraft ==========
 @app.post("/api/minecraft/link")
 async def link_minecraft(user_id: str, minecraft_username: str):
@@ -1540,8 +1573,16 @@ async def billbot_chat(user_id: str, message: str):
         return {"reply": f"Error: {str(e)}"}
 
 # ========== Static Files ==========
-if os.path.exists("static"):
-    app.mount("/", StaticFiles(directory="static", html=True), name="static")
+# Resolved relative to this file, not the process's working directory --
+# CWD is /app (so main.py can import itself as the evoke.* package, per the
+# Dockerfile), but the actual static/ directory lives at /app/evoke/static.
+# A CWD-relative check here silently mounted nothing and every request to
+# "/" 404'd, which broke serving the SPA built for this build step (steps 1
+# and 2's Dockerfile fix for the package-import issue introduced this
+# regression without anyone noticing until the SPA was actually loaded).
+_static_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "static")
+if os.path.exists(_static_dir):
+    app.mount("/", StaticFiles(directory=_static_dir, html=True), name="static")
 
 # ========== Background Workers ==========
 @app.on_event("startup")

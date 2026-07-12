@@ -1,96 +1,142 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-    <meta charset="UTF-8">
-    <title>EVOKE Companion Mode</title>
-    <style>
-        body { font-family: Arial; margin: 0; background: #2c3e50; color: white; padding: 10px; }
-        h1 { font-size: 18px; margin: 0 0 15px 0; }
-        .section { margin-bottom: 15px; }
-        .section h3 { font-size: 14px; margin: 10px 0 5px 0; }
-        .notification { background: #4caf50; padding: 8px; margin: 5px 0; border-radius: 4px; font-size: 12px; }
-        button { background: #2196F3; color: white; border: none; padding: 6px 10px; border-radius: 4px; cursor: pointer; width: 100%; margin-top: 5px; font-size: 12px; }
-        .chat { background: #1a252f; padding: 10px; border-radius: 4px; height: 200px; overflow-y: auto; margin-bottom: 10px; font-size: 11px; }
-        .chat-msg { margin: 5px 0; }
-        input { width: 100%; padding: 5px; border-radius: 4px; border: none; font-size: 12px; }
-    </style>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>EVOKE Companion</title>
+  <link rel="stylesheet" href="tokens.css">
+  <link rel="stylesheet" href="layout.css">
+  <link rel="stylesheet" href="theme.css">
 </head>
 <body>
-    <h1>🌲 EVOKE Companion</h1>
-    
-    <div class="section">
-        <h3>Current Mission</h3>
-        <div id="mission" style="font-size: 12px;">Loading...</div>
-    </div>
-    
-    <div class="section">
-        <h3>Pending Awards</h3>
-        <div id="awards"></div>
-    </div>
-    
-    <div class="section">
-        <h3>B1llbot Chat</h3>
-        <div class="chat" id="chat"></div>
-        <div style="display: flex; gap: 5px;">
-            <input type="text" id="chatInput" placeholder="Ask B1llbot..." onkeypress="if(event.key==='Enter') chatWithBillbot()">
-            <button style="width: 30px;" onclick="chatWithBillbot()">→</button>
-        </div>
-    </div>
+  <div class="companion-page stack" id="companion-root">
+    <h1 class="card__title">EVOKE Companion</h1>
 
-    <script>
-        let currentUserId = null;
-        async function init() {
-            try {
-                const response = await fetch('/api/dev-login', { method: 'POST' });
-                const data = await response.json();
-                currentUserId = data.user_id;
-                loadData();
-                setInterval(loadData, 10000);
-            } catch(e) {
-                console.error(e);
-            }
-        }
-        async function loadData() {
-            if (!currentUserId) return;
-            try {
-                const missions = await fetch(`/api/missions?user_id=${currentUserId}`);
-                const missionsData = await missions.json();
-                if (missionsData.missions.length > 0) {
-                    const m = missionsData.missions[0];
-                    document.getElementById('mission').textContent = m.title;
-                }
-                const notifs = await fetch(`/api/notifications/${currentUserId}`);
-                const notifsData = await notifs.json();
-                document.getElementById('awards').innerHTML = notifsData.notifications.map(n => `
-                    <div class="notification">
-                        <p>${n.award_id.substring(0,8)} <button onclick="collectAward('${n.award_id}')">Collect</button></p>
-                    </div>
-                `).join('');
-            } catch(e) {
-                console.error(e);
-            }
-        }
-        async function collectAward(awardId) {
-            try {
-                await fetch(`/api/awards/${awardId}/collect`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ user_id: currentUserId }) });
-                loadData();
-            } catch(e) {}
-        }
-        async function chatWithBillbot() {
-            const input = document.getElementById('chatInput');
-            const msg = input.value;
-            if (!msg) return;
-            const chat = document.getElementById('chat');
-            chat.innerHTML += `<div class="chat-msg"><strong>You:</strong> ${msg}</div>`;
-            input.value = '';
-            try {
-                const response = await fetch('/api/billbot/chat', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ user_id: currentUserId, message: msg }) });
-                const data = await response.json();
-                chat.innerHTML += `<div class="chat-msg"><strong>B1llbot:</strong> ${data.reply}</div>`;
-                chat.scrollTop = chat.scrollHeight;
-            } catch(e) {}
-        }
-        init();
-    </script>
+    <section class="card">
+      <div class="card__eyebrow">Current Mission</div>
+      <div id="mission">Loading...</div>
+    </section>
+
+    <section class="card">
+      <div class="card__eyebrow">Pending Awards</div>
+      <div id="awards" class="stack-sm"></div>
+    </section>
+
+    <section class="card">
+      <div class="card__eyebrow">Report Quest Complete</div>
+      <form id="quest-form" class="stack-sm">
+        <select id="quest-select"></select>
+        <textarea id="quest-observation" placeholder="What did you observe? (optional)" rows="2"></textarea>
+        <button type="submit" class="btn btn-primary">Report Complete</button>
+      </form>
+      <p id="quest-status" class="empty-state"></p>
+    </section>
+
+    <section class="card">
+      <div class="card__eyebrow">B1llbot</div>
+      <div class="billbot-drawer__log" id="chat"></div>
+      <form id="chat-form" class="row">
+        <input type="text" id="chat-input" placeholder="Ask B1llbot..." style="flex:1" autocomplete="off">
+        <button type="submit">→</button>
+      </form>
+    </section>
+  </div>
+
+  <script>
+    let userId = null;
+
+    function escapeHtml(s) {
+      const div = document.createElement("div");
+      div.textContent = s;
+      return div.innerHTML;
+    }
+
+    async function init() {
+      const res = await fetch("/api/dev-login", { method: "POST" }).then(r => r.json());
+      userId = res.user_id;
+      await loadData();
+      setInterval(loadData, 10000);
+    }
+
+    async function loadData() {
+      if (!userId) return;
+      try {
+        const missions = await fetch(`/api/missions?user_id=${userId}`).then(r => r.json());
+        const m = (missions.missions || [])[0];
+        document.getElementById("mission").innerHTML = m
+          ? `<strong>${escapeHtml(m.title)}</strong><br><span class="empty-state">Week ${m.week} · ${m.arc}</span>`
+          : `<span class="empty-state">No missions yet.</span>`;
+
+        const questOptions = (missions.missions || [])
+          .filter(mm => mm.quest)
+          .map(mm => `<option value="${mm.quest.id}">${escapeHtml(mm.quest.title)}</option>`)
+          .join("");
+        document.getElementById("quest-select").innerHTML = questOptions || `<option disabled>No quests available</option>`;
+
+        const notifs = await fetch(`/api/notifications/${userId}`).then(r => r.json());
+        const pending = (notifs.notifications || []).filter(n => !n.read);
+        document.getElementById("awards").innerHTML = pending.length
+          ? pending.map(n => `
+              <div class="award is-pending">
+                <span>Award pending</span>
+                <button data-award-id="${n.award_id}" class="btn collect-btn">Collect</button>
+              </div>
+            `).join("")
+          : `<p class="empty-state">Nothing pending.</p>`;
+
+        document.querySelectorAll(".collect-btn").forEach(btn => {
+          btn.addEventListener("click", async () => {
+            // Query params, not a JSON body -- /api/awards/{id}/collect reads
+            // user_id as a query param (previously this page sent a JSON
+            // body here, which the endpoint never reads, so Collect silently
+            // 422'd every time).
+            await fetch(`/api/awards/${btn.dataset.awardId}/collect?user_id=${userId}`, { method: "POST" });
+            loadData();
+          });
+        });
+      } catch (e) { console.error(e); }
+    }
+
+    document.getElementById("quest-form").addEventListener("submit", async (e) => {
+      e.preventDefault();
+      const questId = document.getElementById("quest-select").value;
+      const observation = document.getElementById("quest-observation").value;
+      const statusEl = document.getElementById("quest-status");
+      if (!questId) return;
+      const formData = new FormData();
+      formData.append("observation_text", observation);
+      statusEl.textContent = "Reporting...";
+      try {
+        await fetch(`/api/mc-quests/${questId}/submit?user_id=${userId}`, { method: "POST", body: formData });
+        statusEl.textContent = "Logged — self-reported, never graded, never required.";
+        document.getElementById("quest-observation").value = "";
+      } catch (err) {
+        statusEl.textContent = "Couldn't report that just now.";
+      }
+    });
+
+    document.getElementById("chat-form").addEventListener("submit", async (e) => {
+      e.preventDefault();
+      const input = document.getElementById("chat-input");
+      const msg = input.value.trim();
+      if (!msg) return;
+      const chat = document.getElementById("chat");
+      chat.insertAdjacentHTML("beforeend", `<div class="billbot-msg" data-from="user">${escapeHtml(msg)}</div>`);
+      input.value = "";
+      chat.scrollTop = chat.scrollHeight;
+      try {
+        // Query params, not a JSON body -- /api/billbot/chat reads user_id
+        // and message as query params (previously this page sent a JSON
+        // body here too, which 422'd every time).
+        const res = await fetch(`/api/billbot/chat?user_id=${userId}&message=${encodeURIComponent(msg)}`, { method: "POST" }).then(r => r.json());
+        chat.insertAdjacentHTML("beforeend", `<div class="billbot-msg" data-from="billbot">${escapeHtml(res.reply)}</div>`);
+      } catch (err) {
+        chat.insertAdjacentHTML("beforeend", `<div class="billbot-msg" data-from="billbot">Having trouble hearing you right now.</div>`);
+      }
+      chat.scrollTop = chat.scrollHeight;
+    });
+
+    init();
+  </script>
 </body>
 </html>
