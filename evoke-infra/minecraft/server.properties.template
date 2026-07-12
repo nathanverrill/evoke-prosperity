@@ -1,0 +1,11 @@
+motd=__MOTD__
+level-name=__LEVEL_NAME__
+max-players=__MAX_PLAYERS__
+server-port=25565
+online-mode=false
+enable-rcon=true
+rcon.port=25575
+rcon.password=__RCON_PASSWORD__
+broadcast-rcon-to-ops=false
+white-list=false
+enforce-secure-profile=false

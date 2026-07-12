@@ -162,26 +162,34 @@ services:
         condition: service_healthy
 
   minecraft:
-    image: itzg/minecraft-server:latest
+    build:
+      context: ./minecraft
+      dockerfile: Dockerfile
     networks:
       - evoke-infra-network
     environment:
-      EULA: "TRUE"
-      ENABLE_RCON: "true"
+      EULA: "true"
       RCON_PASSWORD: ${INFRA_SECRET:-devsecret123}
-      RCON_PORT: 25575
-      SERVER_PORT: 25565
+      MOTD: "EVOKE Prosperity - Basin Simulation"
+      MAX_PLAYERS: "40"
+      JAVA_MAX_MEMORY: "4G"
     ports:
       - "${PORT_MINECRAFT:-25565}:25565"
+      - "${PORT_MINECRAFT_BEDROCK:-19132}:19132/udp"
       - "${PORT_MINECRAFT_RCON:-25575}:25575"
     volumes:
-      - minecraft-data:/data
+      - minecraft-data:/server/world-data
     healthcheck:
-      test: ["CMD", "rcon-cli", "list"]
+      # No rcon-cli in this image (that's itzg-specific tooling) — a TCP
+      # connect check on the RCON port via bash's /dev/tcp. Confirms the
+      # server is far enough into startup to be listening, not a full
+      # authenticated RCON round-trip (verified separately, manually, during
+      # this build: real auth + a `list` command both worked end-to-end).
+      test: ["CMD-SHELL", "bash -c 'echo > /dev/tcp/127.0.0.1/25575' || exit 1"]
       interval: 10s
       timeout: 5s
-      retries: 3
-      start_period: 30s
+      retries: 5
+      start_period: 60s
 
 networks:
   evoke-infra-network:
