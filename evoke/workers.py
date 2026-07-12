@@ -4,7 +4,7 @@ import asyncio
 from io import BytesIO
 from pypdf import PdfReader
 from kafka import KafkaConsumer
-from clients import s3_client, os_client, ai_client, get_producer, REDPANDA_BROKER, AI_ENABLED, AI_MODEL
+from evoke.clients import s3_client, os_client, ai_client, get_producer, REDPANDA_BROKER, AI_ENABLED, AI_MODEL
 
 def generate_ai_insight(preview_text: str) -> str:
 

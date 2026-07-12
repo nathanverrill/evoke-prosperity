@@ -1,5 +1,14 @@
 name: evoke
 
+# Cross-project depends_on (waiting on postgres/redpanda/opensearch/minio, which
+# live in evoke-infra's own compose project) is not something Docker Compose can
+# express — a service can only depend_on services defined in its own compose file.
+# Bring-up order across the two stacks is a runtime contract (evoke-infra up first,
+# per BUILD_PLAN.md), not a compose-level one. Within this file, web/brightspace-sim/
+# minecraft-bridge have no hard startup-order dependency on each other today (checked:
+# brightspace-sim's EVOKE_API_URL is used for outbound webhook calls at grade time,
+# not needed at its own startup; minecraft-bridge only talks to evoke-infra services).
+
 services:
   web:
     build: .
@@ -17,6 +26,12 @@ services:
       BRIGHTSPACE_SIM_URL: http://brightspace-sim:8001
       OPENWEBUI_URL: http://open-webui:8080
       AI_ENABLED: "true"
+    healthcheck:
+      test: ["CMD-SHELL", "python3 -c \"import urllib.request; urllib.request.urlopen('http://localhost:8000/health')\" || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
 
   brightspace-sim:
     build:
@@ -28,6 +43,12 @@ services:
       - evoke-infra-network
     environment:
       EVOKE_API_URL: http://web:8000
+    healthcheck:
+      test: ["CMD-SHELL", "python3 -c \"import urllib.request; urllib.request.urlopen('http://localhost:8001/health')\" || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
 
   minecraft-bridge:
     build:
@@ -41,6 +62,15 @@ services:
       MINECRAFT_HOST: minecraft
       MINECRAFT_RCON_PORT: 25575
       RCON_PASSWORD: devsecret123
+    healthcheck:
+      # No HTTP server in this service (a Kafka consumer loop) — process-liveness
+      # only, not a real readiness signal. A proper check would need bridge.py to
+      # write a heartbeat file this checks the freshness of; flagged, not built here.
+      test: ["CMD-SHELL", "pgrep -f bridge.py || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
 
 networks:
   evoke-infra-network:
