@@ -937,6 +937,40 @@ async def submit_evidence(
             "source": "submission"
         })
 
+        # Submitting evidence is what "completes" a mission for badge/count
+        # purposes — later AI/teacher award tiers (below, and in
+        # trigger_ai_review/brightspace_review) are quality upgrades on an
+        # already-completed mission, not separate completions, so
+        # MissionCompleted/BadgeAwarded only fire here.
+        await publish_event("MissionCompleted", {
+            "user_id": user_id,
+            "mission_id": mission_id
+        })
+
+        # XP value is a placeholder (matches overview.md's example table) —
+        # GAPS.md flags the real XP economy as still undecided.
+        await publish_event("XPGranted", {
+            "user_id": user_id,
+            "amount": 100,
+            "reason": "mission_completed",
+            "mission_id": mission_id
+        })
+
+        mission_superpower = db_fetch_one(
+            "SELECT superpower FROM missions WHERE id = %s::uuid", (mission_id,)
+        )
+        if mission_superpower and mission_superpower[0]:
+            # badge_key = the Superpower this mission builds toward. Criteria
+            # for what "earns" a badge (every tagged mission vs. a threshold)
+            # is explicitly flagged undecided in GAPS.md — this just makes
+            # every mission-completion count as one step of progress, so
+            # profiles have something to render.
+            await publish_event("BadgeAwarded", {
+                "user_id": user_id,
+                "badge_key": mission_superpower[0],
+                "mission_id": mission_id
+            })
+
         # Create notification
         notification_id = str(uuid.uuid4())
         award_id_from_db = db_fetch_one(
@@ -1143,6 +1177,98 @@ async def collect_award(award_id: str, user_id: str):
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))
 
+# ========== Profiles ==========
+@app.get("/api/profile/player/{user_id}")
+async def get_player_profile(user_id: str):
+    """Player profile. XP/level/badges/missions/quests come from the
+    player-profile projection (built by the worker's PROFILE WORKER branch
+    from MissionCompleted/BadgeAwarded/XPGranted/QuestCompleted). Awards are
+    read directly from Postgres instead of duplicated into the projection —
+    `awards` is already a properly indexed source-of-truth table and this is
+    the same query GET /api/awards/{user_id} already uses; projecting it a
+    second time would just be two places that can disagree about the same
+    facts."""
+    try:
+        try:
+            profile = os_client.get(index="player-profile", id=user_id)["_source"]
+        except Exception:
+            # No events yet for this learner — a valid empty state, not an error.
+            profile = {"xp": 0, "level": 1, "missions_completed": [], "badges": {}, "quests_completed": []}
+
+        user_row = db_fetch_one("SELECT display_name FROM users WHERE id = %s::uuid", (user_id,))
+        minecraft_link = db_fetch_one(
+            "SELECT minecraft_username FROM minecraft_links WHERE user_id = %s::uuid LIMIT 1", (user_id,)
+        )
+
+        awards = db_fetch_all(
+            """SELECT a.id, a.mission_id, a.tier, a.source, a.awarded_at, a.collected_at
+               FROM awards a WHERE a.user_id = %s::uuid ORDER BY a.awarded_at DESC""",
+            (user_id,)
+        )
+        awards_list = [{
+            "id": str(a[0]), "mission_id": str(a[1]), "tier": a[2], "source": a[3],
+            "awarded_at": a[4].isoformat() if a[4] else None,
+            "collected_at": a[5].isoformat() if a[5] else None,
+        } for a in awards]
+
+        missions_completed = profile.get("missions_completed", [])
+        quests_completed = profile.get("quests_completed", [])
+
+        return {
+            "user_id": user_id,
+            "display_name": user_row[0] if user_row else None,
+            "minecraft_username": minecraft_link[0] if minecraft_link else None,
+            "xp": profile.get("xp", 0),
+            "level": profile.get("level", 1),
+            "badges": profile.get("badges", {}),
+            "missions_completed": missions_completed,
+            "missions_completed_count": len(missions_completed),
+            "quests_completed": quests_completed,
+            "quests_completed_count": len(quests_completed),
+            "awards": awards_list,
+        }
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@app.get("/api/profile/team/{team_id}")
+async def get_team_profile(team_id: str):
+    """Team profile. Aggregated from members' individual events (missions
+    completed, XP, badges, quests) — there's no TeamEvidenceSubmitted event
+    yet, since team-scoped submission isn't wired into /api/submit-evidence
+    (see GAPS.md's "no team-level play" gap). The PROFILE WORKER rolls each
+    completing member's contribution into their team's projection as a
+    side effect of processing that member's own event."""
+    try:
+        try:
+            team_profile = os_client.get(index="team-profile", id=team_id)["_source"]
+        except Exception:
+            team_profile = {"xp_total": 0, "missions_completed": [], "quests_completed_count": 0, "member_badges": {}}
+
+        team_row = db_fetch_one("SELECT name FROM teams WHERE id = %s::uuid", (team_id,))
+        members = db_fetch_all(
+            """SELECT tm.user_id, u.display_name, tm.role_label
+               FROM team_members tm JOIN users u ON u.id = tm.user_id
+               WHERE tm.team_id = %s::uuid""",
+            (team_id,)
+        )
+        members_list = [{"user_id": str(m[0]), "display_name": m[1], "role_label": m[2]} for m in members]
+        missions_completed = team_profile.get("missions_completed", [])
+
+        return {
+            "team_id": team_id,
+            "team_name": team_row[0] if team_row else None,
+            "members": members_list,
+            "missions_completed": missions_completed,
+            "missions_completed_count": len(missions_completed),
+            "quests_completed_count": team_profile.get("quests_completed_count", 0),
+            "xp_total": team_profile.get("xp_total", 0),
+            "member_badges": team_profile.get("member_badges", {}),
+        }
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
 # ========== Minecraft ==========
 @app.post("/api/minecraft/link")
 async def link_minecraft(user_id: str, minecraft_username: str):
@@ -1227,13 +1353,41 @@ async def submit_quest_evidence(
             (quest_id, user_id, observation_text, screenshot_key)
         )
 
-        # Record completion
+        # Check-then-insert (not atomic — mirrors this file's existing style,
+        # e.g. the awards ON CONFLICT DO NOTHING pattern above) so
+        # QuestCompleted/XPGranted only fire on a genuinely new completion,
+        # not every resubmission of the same quest.
+        already_completed = db_fetch_one(
+            "SELECT 1 FROM mc_quest_completions WHERE user_id = %s::uuid AND quest_id = %s::uuid",
+            (user_id, quest_id)
+        )
+
         db_execute(
             """INSERT INTO mc_quest_completions (user_id, quest_id)
                VALUES (%s::uuid, %s::uuid)
                ON CONFLICT DO NOTHING""",
             (user_id, quest_id)
         )
+
+        if not already_completed:
+            quest_row = db_fetch_one(
+                "SELECT mission_id, kind FROM mc_quests WHERE id = %s::uuid", (quest_id,)
+            )
+            await publish_event("QuestCompleted", {
+                "user_id": user_id,
+                "quest_id": quest_id,
+                "mission_id": str(quest_row[0]) if quest_row and quest_row[0] else None,
+                "kind": quest_row[1] if quest_row else None
+            })
+            # XP value is a placeholder (matches overview.md's example table)
+            # — GAPS.md flags the real XP economy as still undecided. Per
+            # canon, quest XP is real but never gates or grades a mission.
+            await publish_event("XPGranted", {
+                "user_id": user_id,
+                "amount": 40,
+                "reason": "quest_completed",
+                "quest_id": quest_id
+            })
 
         return {"status": "submitted"}
     except Exception as e:
