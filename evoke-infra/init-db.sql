@@ -84,7 +84,12 @@ CREATE TABLE missions (
     pbl_description TEXT,
     mission_brief_md TEXT,
     evidence_requirements_md TEXT,
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    -- The LMS (brightspace-sim, or real Brightspace later) is the system of
+    -- record for the mission catalog; this table is a synced cache keyed by
+    -- (campaign_id, lms_assignment_ref) so the startup sync can upsert
+    -- instead of duplicating a mission every restart.
+    UNIQUE(campaign_id, lms_assignment_ref)
 );
 
 -- Awards

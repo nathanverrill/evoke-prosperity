@@ -5,6 +5,7 @@ This app simulates the key Brightspace API endpoints needed to test EVOKE Prospe
 integration before connecting to a real Brightspace instance.
 """
 
+import os
 from fastapi import FastAPI, Form, HTTPException, Header, Query
 from fastapi.responses import HTMLResponse, JSONResponse
 import httpx
@@ -12,6 +13,8 @@ from brightspace_api import BrightspaceSimulator
 
 app = FastAPI(title="Brightspace LMS Simulator")
 simulator = BrightspaceSimulator()
+
+EVOKE_API_URL = os.getenv("EVOKE_API_URL", "http://web:8000")
 
 # ========== HEALTH CHECK ==========
 
@@ -192,6 +195,21 @@ async def enroll_user_in_group(
 
     return {"success": True, "UserId": user_id, "GroupId": group_id}
 
+# ========== ASSIGNMENT CATALOG ==========
+
+@app.get("/d2l/api/lp/1.96/dropbox/assignments")
+async def list_assignments():
+    """
+    GET /d2l/api/lp/1.96/dropbox/assignments
+    Lists all assignments (missions) with their EVOKE metadata in
+    CustomFields. Not authenticated, matching the read-only, low-stakes
+    nature of a catalog listing in this simulator -- what EVOKE's startup
+    sync calls to build its missions table cache. A real Brightspace
+    integration would use a real assignment/content-object listing API with
+    the service-account OAuth flow; this sim endpoint stands in for that.
+    """
+    return {"Assignments": simulator.get_all_assignments()}
+
 # ========== DROPBOX (ASSIGNMENT) ENDPOINTS ==========
 
 @app.post("/d2l/api/lp/1.96/dropbox/{assignment_id}/submissions")
@@ -253,18 +271,41 @@ async def grade_submission(
 ):
     """
     PUT /d2l/api/lp/1.96/dropbox/{assignmentId}/submissions/{submissionId}/grade
-    Teacher grades a submission
+    Teacher grades a submission. On success, calls back EVOKE's grading
+    webhook with Brightspace-native identifiers only (brightspace user id,
+    assignment ref, submission id) -- a real Brightspace webhook would never
+    know EVOKE's internal UUIDs, so EVOKE resolves them server-side. This
+    call was previously missing entirely: nothing ever told EVOKE a teacher
+    had graded something.
     """
     if not authorization or not authorization.startswith("Bearer "):
         raise HTTPException(status_code=401, detail="Missing bearer token")
 
     token = authorization.split(" ")[1]
-    success = simulator.grade_submission(token, assignment_id, submission_id, grade, feedback)
+    graded_submission = simulator.grade_submission(token, assignment_id, submission_id, grade, feedback)
 
-    if not success:
+    if not graded_submission:
         raise HTTPException(status_code=400, detail="Failed to grade submission")
 
-    return {"success": True, "Grade": grade}
+    rating = "legendary" if grade >= 95 else "epic"
+    try:
+        async with httpx.AsyncClient() as client:
+            await client.post(
+                f"{EVOKE_API_URL}/api/webhooks/brightspace/review",
+                params={
+                    "submission_id": submission_id,
+                    "brightspace_user_id": graded_submission["UserId"],
+                    "assignment_id": assignment_id,
+                    "rating": rating,
+                },
+                timeout=10,
+            )
+    except Exception as e:
+        # Non-blocking: the grade is recorded in the sim either way; EVOKE
+        # missing the webhook is a delivery problem, not a grading failure.
+        print(f"[brightspace-sim] Grading webhook to EVOKE failed (non-blocking): {e}")
+
+    return {"success": True, "Grade": grade, "Rating": rating}
 
 # ========== ADMIN/TESTING ENDPOINTS ==========
 

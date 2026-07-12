@@ -73,11 +73,57 @@ class BrightspaceSimulator:
         # Dropbox submissions: dict of assignment_id -> list of submission_data
         self.dropbox_submissions: Dict[str, List[dict]] = {}
 
-        # Assignments (dropboxes): dict of assignment_id -> assignment_data
+        # Assignments (dropboxes): dict of assignment_id -> assignment_data.
+        # Self-seeds the real 12 Prosperity missions as Brightspace-shaped
+        # assignments, per BUILD_PLAN.md's "missions come from the sim"
+        # directive -- EVOKE's mission metadata (arc, superpower, PFL domain,
+        # brief) rides in CustomFields exactly where a real Brightspace
+        # assignment's custom fields would carry it, not in an EVOKE-only
+        # table. Source: docs/canon/Prosperity Campaign Missions -- 06.11.26
+        # .docx.txt. lms_assignment_ref-style IDs ("mission-01"..."mission-12")
+        # are the stable key EVOKE's missions table syncs against.
         self.assignments: Dict[str, dict] = {
-            "m1": {"AssignmentId": "m1", "Name": "Follow the Flow", "OrgUnitId": "1"},
-            "m2": {"AssignmentId": "m2", "Name": "Money Moves", "OrgUnitId": "1"},
-            "m3": {"AssignmentId": "m3", "Name": "Building Blocks", "OrgUnitId": "1"},
+            ref: {
+                "AssignmentId": ref,
+                "Name": name,
+                "OrgUnitId": "1",
+                "CustomFields": {
+                    "Week": week,
+                    "Sequence": seq,
+                    "Arc": arc,
+                    "Superpower": superpower,
+                    "PrimarySkill": primary_skill,
+                    "SecondarySkill": secondary_skill,
+                    "PflDomain": pfl_domain,
+                    "Description": brief,
+                },
+            }
+            for ref, week, seq, name, arc, superpower, primary_skill, secondary_skill, pfl_domain, brief in [
+                ("mission-01", 1, 1, "Follow the Flow", "Explore", "Empathetic Changemaker", "Empathy", "Research & Analysis", "Philanthropy",
+                 "Interview at least two stakeholders connected to a real water-access, property-ownership, or financial-exclusion challenge, then name the challenge as a team."),
+                ("mission-02", 1, 2, "Your Prosperity Origin Story", "Explore", "Systems Thinker", "Critical Reflection", "Communication", "Goal Setting",
+                 "Connect the challenge you named to your own lived experience and write your Prosperity Origin Story or design your EVOKE Avatar."),
+                ("mission-03", 2, 3, "Dream Beyond the Obvious", "Imagine", "Creative Visionary", "Imagination", "Teamwork", "Philanthropy",
+                 "Brainstorm a wide range of imaginative solutions with your team and narrow to 2-3 promising directions on a Dream Map."),
+                ("mission-04", 2, 4, "2035: If We Get This Right", "Imagine", "Creative Visionary", "Vision", "Leadership", "Goal Setting",
+                 "Choose one promising idea, imagine it working in 2037, and write a North Star Statement plus a short creative expression of that future."),
+                ("mission-05", 3, 5, "What Would It Take—for Real?", "Imagine", "Systems Thinker", "Research & Analysis", "Problem Solving", "Budgeting",
+                 "Research what your idea actually needs (people, time, partnerships, tools, money) and build a simple starter budget."),
+                ("mission-06", 3, 6, "What If We Actually Did This?", "Imagine", "Creative Visionary", "Creativity", "Critical Reflection", "Budgeting",
+                 "Stress-test your starter budget, brainstorm possible income sources, and produce an updated, more realistic budget."),
+                ("mission-07", 4, 7, "Bring It to Life", "Act", "Systems Thinker", "Problem Solving", "Imagination", "Goal Setting",
+                 "Choose the first piece of your idea to build and create a first concrete prototype -- physical, visual, digital, or in Minecraft."),
+                ("mission-08", 4, 8, "Strengthen the Vision", "Act", "Empathetic Changemaker", "Leadership", "Vision", "Budgeting",
+                 "Reconnect your first prototype to your original vision and budget, then revise it into a stronger version ready for testing."),
+                ("mission-09", 5, 9, "Put It in the World", "Act", "Empathetic Changemaker", "Courage", "Empathy", "Investing",
+                 "Test your prototype with people beyond your team, gather honest feedback, and decide what matters most to change."),
+                ("mission-10", 5, 10, "Worth Backing", "Act", "Deep Collaborator", "Teamwork", "Relationship Management", "Investing",
+                 "Align as a team, define 2-3 measurable signs of success, and place your venture on the Low/Medium/High risk spectrum."),
+                ("mission-11", 6, 11, "Craft Your Pitch", "Communicate", "Deep Collaborator", "Communication", "Creativity", "Investing",
+                 "Decide how many of your 100 Venture Points to offer for outside support, then build and design your pitch."),
+                ("mission-12", 6, 12, "The Evokation", "Communicate", "Deep Collaborator", "Relationship Management", "Courage", "Investing",
+                 "Deliver your team's live Evokation presentation -- challenge, innovation, pitch, Venture Points offer, and a respectful audience Q&A."),
+            ]
         }
 
     # ========== OAUTH 2.0 ENDPOINTS ==========
@@ -377,16 +423,18 @@ class BrightspaceSimulator:
 
     def grade_submission(self, access_token: str, assignment_id: str,
                         submission_id: str, grade: int,
-                        feedback: str = "") -> bool:
+                        feedback: str = "") -> Optional[dict]:
         """
         PUT /d2l/api/lp/1.96/dropbox/{assignmentId}/submissions/{submissionId}/grade
-        Grades a submission (called by teacher)
+        Grades a submission (called by teacher). Returns the graded
+        submission dict (so the caller can push a grading webhook back to
+        EVOKE with the UserId) rather than a bare bool.
         """
         if not self._verify_token(access_token):
-            return False
+            return None
 
         if assignment_id not in self.dropbox_submissions:
-            return False
+            return None
 
         for submission in self.dropbox_submissions[assignment_id]:
             if submission["SubmissionId"] == submission_id:
@@ -394,11 +442,16 @@ class BrightspaceSimulator:
                 submission["Grade"] = grade
                 submission["Feedback"] = feedback
                 submission["GradedDate"] = datetime.now().isoformat()
-                return True
+                return submission
 
-        return False
+        return None
 
     # ========== UTILITY METHODS ==========
+
+    def get_all_assignments(self) -> List[dict]:
+        """Returns all assignments (missions) -- what EVOKE's startup sync
+        pulls to build its missions table cache."""
+        return list(self.assignments.values())
 
     def get_all_users(self) -> List[dict]:
         """Returns all users (for admin/testing)"""

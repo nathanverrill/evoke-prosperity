@@ -58,6 +58,59 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+# ========== Mission Catalog Sync ==========
+async def sync_missions_from_lms():
+    """The LMS (brightspace-sim now; real Brightspace later) is the system
+    of record for the mission catalog -- this pulls its assignment list and
+    upserts EVOKE's missions table, keyed by (campaign_id, lms_assignment_ref)
+    (see the UNIQUE constraint added in init-db.sql). Postgres becomes a
+    synced cache, not an independent catalog: missions are no longer seeded
+    directly (see evoke-infra/seed.py). Sim-only for this build pass, per
+    BUILD_PLAN.md's non-goals -- a real-Brightspace path would call the
+    equivalent authenticated BrightspaceLMS method instead of hitting
+    BRIGHTSPACE_SIM_URL directly."""
+    campaign_row = db_fetch_one("SELECT id FROM campaigns WHERE key = 'evoke-prosperity'")
+    if not campaign_row:
+        logger.warning("Mission sync skipped: no 'evoke-prosperity' campaign found")
+        return
+    campaign_id = campaign_row[0]
+
+    try:
+        async with httpx.AsyncClient() as client:
+            response = await client.get(
+                f"{BRIGHTSPACE_SIM_URL}/d2l/api/lp/1.96/dropbox/assignments", timeout=10
+            )
+            response.raise_for_status()
+            assignments = response.json().get("Assignments", [])
+    except Exception as e:
+        logger.error(f"Mission sync failed (LMS unreachable, keeping existing missions): {e}")
+        return
+
+    synced = 0
+    for assignment in assignments:
+        fields = assignment.get("CustomFields", {})
+        db_execute(
+            """INSERT INTO missions
+               (id, campaign_id, lms_assignment_ref, week, sequence, title, arc,
+                superpower, primary_skill, secondary_skill, pfl_domain, mission_brief_md)
+               VALUES (gen_random_uuid(), %s::uuid, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+               ON CONFLICT (campaign_id, lms_assignment_ref) DO UPDATE SET
+                   week = EXCLUDED.week, sequence = EXCLUDED.sequence, title = EXCLUDED.title,
+                   arc = EXCLUDED.arc, superpower = EXCLUDED.superpower,
+                   primary_skill = EXCLUDED.primary_skill, secondary_skill = EXCLUDED.secondary_skill,
+                   pfl_domain = EXCLUDED.pfl_domain, mission_brief_md = EXCLUDED.mission_brief_md""",
+            (
+                campaign_id, assignment["AssignmentId"], fields.get("Week"), fields.get("Sequence"),
+                assignment["Name"], fields.get("Arc"), fields.get("Superpower"),
+                fields.get("PrimarySkill"), fields.get("SecondarySkill"), fields.get("PflDomain"),
+                fields.get("Description"),
+            )
+        )
+        synced += 1
+
+    logger.info(f"Mission sync complete: {synced} assignments synced from LMS")
+
+
 # ========== Startup/Shutdown ==========
 @app.on_event("startup")
 async def startup():
@@ -89,6 +142,8 @@ async def startup():
                 logger.info("LTI not configured (optional feature)")
         except ImportError:
             logger.warning("LTI provider not available")
+
+        await sync_missions_from_lms()
 
     except Exception as e:
         logger.error(f"Startup error: {e}")
@@ -868,19 +923,64 @@ async def submit_evidence(
                 logger.error(f"Brightspace sync failed: {e}")
                 # Continue anyway - submission stored locally
         else:
-            # Fallback: use simulator for demo
-            async with httpx.AsyncClient() as client:
-                try:
-                    await client.post(
-                        f"{BRIGHTSPACE_SIM_URL}/d2l/api/lp/1.96/dropbox/m1/submissions",
-                        json={
-                            "user_id": user_id,
-                            "file_name": file.filename,
-                            "content": object_key
-                        }
-                    )
-                except Exception as e:
-                    logger.warning(f"Simulator sync failed (non-blocking): {e}")
+            # Fallback: use simulator for demo. This used to always post to
+            # the sim's "m1" dropbox regardless of which mission was actually
+            # submitted, and sent a JSON body to an endpoint that only
+            # accepts form fields (submit_to_dropbox's Form(...) params) --
+            # meaning this call has always 422'd and been silently swallowed
+            # by the except below. Fixed: resolve the mission's real
+            # lms_assignment_ref and post as form data with the field names
+            # the sim endpoint actually expects.
+            mission_ref = db_fetch_one(
+                "SELECT lms_assignment_ref FROM missions WHERE id = %s::uuid", (mission_id,)
+            )
+            assignment_ref = mission_ref[0] if mission_ref and mission_ref[0] else mission_id
+
+            # The sim's dropbox just stores whatever 'user_id' string it's
+            # given, without validating it -- so passing EVOKE's own UUID
+            # (as this used to) "worked" for storing the submission, but
+            # broke the round trip: grading later echoes that same value
+            # back as UserId, and the grading webhook needs a real
+            # Brightspace-native numeric ID to resolve back to an EVOKE
+            # user via evoke_identities. Resolve it here instead.
+            bs_identity = db_fetch_one(
+                "SELECT brightspace_user_id FROM evoke_identities WHERE user_id = %s::uuid", (user_id,)
+            )
+            brightspace_user_id = bs_identity[0] if bs_identity and bs_identity[0] else None
+
+            if brightspace_user_id is not None:
+                async with httpx.AsyncClient() as client:
+                    try:
+                        # The sim's dropbox endpoint requires a real bearer
+                        # token (previously this call sent none at all and
+                        # would have 401'd even after fixing the encoding
+                        # above). This pass doesn't model true per-learner
+                        # OAuth for the demo/sim path -- acquiring a token via
+                        # the sim's own login as a fixed service identity,
+                        # since the sim accepts any password for its seeded
+                        # users (matching how a real integration would use a
+                        # service account, not a per-learner login, for
+                        # server-to-server calls).
+                        token_response = await client.post(
+                            f"{BRIGHTSPACE_SIM_URL}/oauth2/token",
+                            data={"grant_type": "password", "username": "teacher@evoke.local", "password": "sim-demo"}
+                        )
+                        sim_token = token_response.json().get("access_token") if token_response.status_code == 200 else None
+
+                        if sim_token:
+                            await client.post(
+                                f"{BRIGHTSPACE_SIM_URL}/d2l/api/lp/1.96/dropbox/{assignment_ref}/submissions",
+                                data={
+                                    "user_id": str(brightspace_user_id),
+                                    "file_name": file.filename,
+                                    "file_content": object_key
+                                },
+                                headers={"Authorization": f"Bearer {sim_token}"}
+                            )
+                    except Exception as e:
+                        logger.warning(f"Simulator sync failed (non-blocking): {e}")
+            else:
+                logger.info(f"No Brightspace identity linked for {user_id}; skipping sim dropbox sync")
 
         # Publish EvidenceSubmitted event
         await publish_event("EvidenceSubmitted", {
@@ -1046,12 +1146,32 @@ async def trigger_ai_review(user_id: str, mission_id: str, object_key: str):
 @app.post("/api/webhooks/brightspace/review")
 async def brightspace_review(
     submission_id: str,
-    user_id: str,
-    mission_id: str,
+    brightspace_user_id: int,
+    assignment_id: str,
     rating: str = "epic"
 ):
-    """Webhook from Brightspace simulator when teacher reviews"""
+    """Webhook from Brightspace (sim or real) when a teacher grades a
+    submission. Takes Brightspace-native identifiers only -- a real
+    Brightspace webhook would never know EVOKE's internal UUIDs, so they're
+    resolved here rather than expected from the caller. (Previously this
+    endpoint took EVOKE's own user_id/mission_id directly, which nothing
+    could actually have supplied -- brightspace-sim's grading endpoint never
+    called this webhook at all until now.)"""
     try:
+        identity = db_fetch_one(
+            "SELECT user_id FROM evoke_identities WHERE brightspace_user_id = %s", (brightspace_user_id,)
+        )
+        if not identity:
+            raise HTTPException(status_code=404, detail=f"No EVOKE identity linked to Brightspace user {brightspace_user_id}")
+        user_id = str(identity[0])
+
+        mission_row = db_fetch_one(
+            "SELECT id FROM missions WHERE lms_assignment_ref = %s", (assignment_id,)
+        )
+        if not mission_row:
+            raise HTTPException(status_code=404, detail=f"No mission synced for assignment {assignment_id}")
+        mission_id = str(mission_row[0])
+
         # Determine tier based on rating
         tier = "legendary" if rating == "legendary" else "epic"
 

@@ -5,8 +5,15 @@ Populates with campaigns, missions, quests, users, and test data
 """
 
 import psycopg2
+import psycopg2.extras
 import sys
 import uuid
+
+# Without this, psycopg2 can't adapt Python uuid.UUID objects to Postgres UUID
+# columns at all ("can't adapt type 'UUID'") -- every uuid.uuid4() passed as a
+# query param below needs it. This was missing, so this script has never
+# actually completed a run; it fails on the very first UUID-bearing INSERT.
+psycopg2.extras.register_uuid()
 
 # Database connection
 def get_connection(db_url):
@@ -89,58 +96,57 @@ def seed_database(db_url):
             )
             badge_ids[key] = badge_id
 
-        # Create 12 missions
-        missions_data = [
-            (1, 1, 'm1', 'Explore', 'Follow the Flow', 'Deep Collaborator', 'Goal Setting', 'Explore water patterns in Keel'),
-            (1, 2, 'm2', 'Explore', 'Money Moves', 'Empathetic Changemaker', 'Budgeting', 'Track personal spending'),
-            (2, 3, 'm3', 'Imagine', 'Building Blocks', 'Systems Thinker', 'Investing', 'Design an investment strategy'),
-            (2, 4, 'm4', 'Imagine', 'Pitch Perfect', 'Creative Visionary', 'Goal Setting', 'Develop a pitch for a venture'),
-            (3, 5, 'm5', 'Act', 'Risk and Reward', 'Systems Thinker', 'Investing', 'Evaluate risk profiles'),
-            (3, 6, 'm6', 'Act', 'Market Makers', 'Empathetic Changemaker', 'Budgeting', 'Create a social enterprise'),
-            (4, 7, 'm7', 'Communicate', 'Community Capital', 'Deep Collaborator', 'Philanthropy', 'Build community support'),
-            (4, 8, 'm8', 'Communicate', 'Digital Economy', 'Creative Visionary', 'Investing', 'Navigate digital markets'),
-            (5, 9, 'm9', 'Act', 'Sustainable Growth', 'Systems Thinker', 'Goal Setting', 'Create sustainability plan'),
-            (5, 10, 'm10', 'Act', 'Global Markets', 'Empathetic Changemaker', 'Budgeting', 'Understand global trade'),
-            (6, 11, 'm11', 'Communicate', 'Craft Your Pitch', 'Creative Visionary', 'Philanthropy', 'Refine final pitch'),
-            (6, 12, 'm12', 'Communicate', 'Worth Backing', 'Deep Collaborator', 'Investing', 'Present venture for backing'),
-        ]
-
-        mission_ids = {}
-        for week, seq, key, arc, title, superpower, pfl_domain, description in missions_data:
-            mission_id = uuid.uuid4()
+        # Missions are no longer seeded here -- the LMS (brightspace-sim) is
+        # the system of record for the mission catalog, and EVOKE syncs its
+        # missions table from it on startup (see main.py's
+        # sync_missions_from_lms, keyed by lms_assignment_ref). Run this
+        # script AFTER starting the EVOKE app at least once, or the quest
+        # links below will warn and fall back to unlinked (mission_id=NULL).
+        #
+        # NOTE on the mission_id lookups below: the previous version of this
+        # script built an in-memory mission_key -> mission_id map from its
+        # own mission-seeding loop, but the quest_data keys ('mission-1',
+        # 'mission-2', ...) never actually matched that map's keys ('m1',
+        # 'm2', ...) -- every mission_quest silently got mission_id=NULL,
+        # indistinguishable from a side_quest by foreign key alone. Fixed by
+        # querying the real missions table by lms_assignment_ref instead of
+        # relying on an in-process dict built from placeholder data.
+        def get_mission_id(lms_ref):
+            if not lms_ref:
+                return None
             cur.execute(
-                """INSERT INTO missions
-                   (id, campaign_id, lms_assignment_ref, week, sequence, title, arc, superpower, primary_skill, pfl_domain, mission_brief_md)
-                   VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
-                   ON CONFLICT DO NOTHING""",
-                (mission_id, campaign_id, key, week, seq, title, arc, superpower, superpower, pfl_domain, description)
+                "SELECT id FROM missions WHERE campaign_id = %s AND lms_assignment_ref = %s",
+                (campaign_id, lms_ref)
             )
-            mission_ids[key] = mission_id
+            row = cur.fetchone()
+            if not row:
+                print(f"  ! No mission synced yet for {lms_ref} -- quest will link to no mission until the EVOKE app has run its startup sync")
+            return row[0] if row else None
 
         # Create Minecraft quests (one per mission + side quests)
         quest_data = [
-            ('mission-1', None, 'Follow the Flow', 'Explore the abandoned pumping station', 'mission_quest'),
-            ('mission-2', None, 'Track Your Resources', 'Collect resources and organize your inventory', 'mission_quest'),
-            ('mission-3', None, 'Build the Base', 'Construct a shelter representing your investment', 'mission_quest'),
-            ('mission-4', None, 'The Great Pitch', 'Create a banner for your venture', 'mission_quest'),
-            ('mission-5', None, 'Risk Assessment', 'Explore dangerous terrain to understand risk', 'mission_quest'),
-            ('mission-6', None, 'Market Hub', 'Set up a trading station', 'mission_quest'),
-            ('mission-7', None, 'Community Hall', 'Build a gathering space', 'mission_quest'),
-            ('mission-8', None, 'Digital Marketplace', 'Create a shop with villager trading', 'mission_quest'),
-            ('mission-9', None, 'Green Initiative', 'Build a sustainable farm', 'mission_quest'),
-            ('mission-10', None, 'Trade Routes', 'Establish transportation network', 'mission_quest'),
-            ('mission-11', None, 'Presentation Stage', 'Build a stage for your pitch', 'mission_quest'),
-            ('mission-12', None, 'The Grand Opening', 'Open your venture to the Basin', 'mission_quest'),
+            ('mission-01', 'Walk the Mountain', 'Explore Keel, Halyard, and Oasis before any missions unlock', 'mission_quest'),
+            ('mission-02', 'Carve Your Cup', 'Carve a personal cup from recycled pipe metal in Keel', 'mission_quest'),
+            ('mission-03', 'Blueprint Table', 'Sketch your team\'s wildest ideas in the Keel workshop', 'mission_quest'),
+            ('mission-04', 'Vision Beacon', 'Build a marker showing your 2035 vision', 'mission_quest'),
+            ('mission-05', 'Factory Crafting I', 'Plan a resource-flow production line in Halyard', 'mission_quest'),
+            ('mission-06', 'Factory Crafting II', 'Stress-test your production line against a supply shock', 'mission_quest'),
+            ('mission-07', 'Salvage & Build', 'Recover abandoned Alpha Dynamics infrastructure in Halyard', 'mission_quest'),
+            ('mission-08', 'Reroute', 'Iterate on your build after a complication', 'mission_quest'),
+            ('mission-09', 'Open the Gates', 'Invite others to react to your build in-world', 'mission_quest'),
+            ('mission-10', 'The Vault', 'Allocate resources between your build and the shared network', 'mission_quest'),
+            ('mission-11', 'Pitch Hall', 'Stage your build in the newly-unlocked Oasis', 'mission_quest'),
+            ('mission-12', 'Network Node', 'Connect your build to the growing network map', 'mission_quest'),
             # Side quests
-            (None, None, 'Find Hidden Treasure', 'Locate 5 hidden chests in the Basin', 'side_quest'),
-            (None, None, 'Master Farmer', 'Harvest crops from all biomes', 'side_quest'),
-            (None, None, 'Mining Expert', 'Collect rare ores and materials', 'side_quest'),
-            (None, None, "Explorer's Log", 'Map out the entire Basin', 'side_quest'),
+            (None, 'Find Hidden Treasure', 'Locate 5 hidden chests in the Basin', 'side_quest'),
+            (None, 'Master Farmer', 'Harvest crops from all biomes', 'side_quest'),
+            (None, 'Mining Expert', 'Collect rare ores and materials', 'side_quest'),
+            (None, "Explorer's Log", 'Map out the entire Basin', 'side_quest'),
         ]
 
-        for mission_key, mission_ref, title, description, kind in quest_data:
+        for lms_ref, title, description, kind in quest_data:
             quest_id = uuid.uuid4()
-            mission_id = mission_ids.get(mission_key)
+            mission_id = get_mission_id(lms_ref)
 
             cur.execute(
                 """INSERT INTO mc_quests (id, campaign_id, mission_id, title, description, kind)
@@ -197,7 +203,7 @@ def seed_database(db_url):
         print(f"  - Organization: Demo School")
         print(f"  - Test Learner: {learner_id}")
         print(f"  - Test Teacher: {teacher_id}")
-        print(f"  - Missions: 12 created")
+        print(f"  - Missions: synced from the LMS on EVOKE app startup, not seeded here")
         print(f"  - Quests: 16 created")
         print(f"  - Minecraft Username: DemoLearner")
 
