@@ -255,12 +255,16 @@ Evoke.screens.missionBrief = async function missionBrief(missionId) {
   });
 };
 
-Evoke.screens.missionDebrief = async function missionDebrief(missionId) {
+Evoke.screens.missionDebrief = async function missionDebrief(missionId, targetUserIdParam) {
   const { api, state, mount } = Evoke;
-  const [missionsRes, timeline, awardsRes] = await Promise.all([
+  const targetUserId = targetUserIdParam || state.userId;
+  const isOwn = targetUserId === state.userId;
+
+  const [missionsRes, timeline, awardsRes, targetProfile] = await Promise.all([
     api.missions(state.userId),
-    api.timeline(state.userId, missionId).catch(() => ({ insights: [] })),
-    api.awards(state.userId),
+    api.timeline(targetUserId, missionId).catch(() => ({ insights: [] })),
+    api.awards(targetUserId),
+    isOwn ? Promise.resolve(null) : api.playerProfile(targetUserId).catch(() => null),
   ]);
   const mission = (missionsRes.missions || []).find(m => m.id === missionId);
   const missionAwards = (awardsRes.awards || []).filter(a => a.mission_id === missionId);
@@ -268,13 +272,25 @@ Evoke.screens.missionDebrief = async function missionDebrief(missionId) {
   mount(`
     <div class="stack">
       <h1>${mission ? Evoke.escapeHtml(mission.title) : "Debrief"}</h1>
+      ${!isOwn ? `<p class="empty-state">Viewing ${Evoke.escapeHtml(targetProfile ? targetProfile.display_name : "a classmate")}'s work</p>` : ""}
 
       <div class="card">
         <div class="card__eyebrow">Insights</div>
         ${(timeline.insights || []).length
-          ? timeline.insights.map(i => `<p><strong>${Evoke.escapeHtml(i.source)}:</strong> ${Evoke.escapeHtml(i.text)}</p>`).join("")
+          ? timeline.insights.map(i => `<p><strong>${Evoke.escapeHtml(i.category || "Insight")} from ${Evoke.escapeHtml(i.source)}:</strong> ${Evoke.escapeHtml(i.text)}</p>`).join("")
           : `<p class="empty-state">No insights yet — check back shortly.</p>`}
       </div>
+
+      ${!isOwn ? `
+        <div class="card">
+          <div class="card__eyebrow">Leave Feedback</div>
+          <form id="peer-insight-form" class="stack-sm">
+            <textarea id="peer-insight-text" placeholder="What stood out about this?" rows="3" required></textarea>
+            <button type="submit" class="btn btn-primary">Post Feedback</button>
+          </form>
+          <p id="peer-insight-status" class="empty-state"></p>
+        </div>
+      ` : ""}
 
       <div class="stack-sm" id="awards-list">
         ${missionAwards.length ? missionAwards.map(a => `
@@ -285,12 +301,12 @@ Evoke.screens.missionDebrief = async function missionDebrief(missionId) {
             </div>
             ${a.collected_at
               ? `<span class="empty-state">Collected</span>`
-              : `<button data-award-id="${a.id}" class="btn btn-primary collect-btn">Collect</button>`}
+              : (isOwn ? `<button data-award-id="${a.id}" class="btn btn-primary collect-btn">Collect</button>` : `<span class="empty-state">Not yet collected</span>`)}
           </div>
         `).join("") : `<p class="empty-state">No awards yet for this mission.</p>`}
       </div>
 
-      <a class="btn" href="#/">← Back to Operations Hub</a>
+      <a class="btn" href="${isOwn ? "#/" : "#/gallery"}">← Back to ${isOwn ? "Operations Hub" : "Gallery"}</a>
     </div>
   `);
 
@@ -308,6 +324,47 @@ Evoke.screens.missionDebrief = async function missionDebrief(missionId) {
       }
     });
   });
+
+  document.getElementById("peer-insight-form")?.addEventListener("submit", async (e) => {
+    e.preventDefault();
+    const textEl = document.getElementById("peer-insight-text");
+    const statusEl = document.getElementById("peer-insight-status");
+    const text = textEl.value.trim();
+    if (!text) return;
+    statusEl.textContent = "Posting...";
+    try {
+      await api.postPeerInsight(targetUserId, missionId, state.userId, text);
+      statusEl.textContent = "Posted! It'll show up in their Insights above shortly.";
+      textEl.value = "";
+    } catch (err) {
+      statusEl.textContent = "Couldn't post that just now.";
+    }
+  });
+};
+
+Evoke.screens.gallery = async function gallery() {
+  const { api, mount } = Evoke;
+  // "Peers seeing each other's work" -- GAPS.md's #2 flagged social-layer
+  // gap, the other half beyond the activity feed: the feed says something
+  // happened, the gallery is where you can actually go look and react.
+  const galleryRes = await api.gallery().catch(() => ({ gallery: [] }));
+  const items = galleryRes.gallery || [];
+
+  mount(`
+    <div class="stack">
+      <h1>Gallery</h1>
+      <p class="empty-state">Completed mission work from across the cohort. Open one to leave feedback.</p>
+      <div class="grid-2">
+        ${items.length ? items.map(it => `
+          <a class="card mission-card" data-state="available" href="#/mission/${it.mission_id}/debrief/${it.user_id}">
+            <div class="card__eyebrow">${Evoke.escapeHtml(it.mission_title)}</div>
+            <div class="mission-card__title">${Evoke.escapeHtml(it.display_name)}</div>
+            <div class="mission-card__meta">${Evoke.escapeHtml(it.superpower || "")} · ${new Date(it.submitted_at).toLocaleDateString()}</div>
+          </a>
+        `).join("") : `<p class="empty-state">No submissions yet — this fills up as the cohort starts turning in missions.</p>`}
+      </div>
+    </div>
+  `);
 };
 
 Evoke.screens.playerProfile = async function playerProfile(userId) {

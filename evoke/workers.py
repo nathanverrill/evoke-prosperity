@@ -196,13 +196,20 @@ def _process_event(event: dict, producer):
                     step["status"] = "active"
 
             elif event_type == "InsightPublished":
-                current["status"] = "Human Review Received"
-                if step["id"] == "teacher_review":
-                    step["status"] = "completed"
-                    step["timestamp"] = now_str
-                    # Append human feedback to the timeline step directly
-                    existing = step["content"] if step["content"] != "Awaiting human insights." else ""
-                    step["content"] = existing + f"<br/><br/><strong>[{new_insight['category']} from {new_insight['source']}]</strong><br/>{new_insight['text']}"
+                # Peer comments are also InsightPublished (per CONCEPTS.md:
+                # "Insight -- feedback from AI Coach, instructor, or peer"),
+                # but must NOT be treated as the teacher review -- a
+                # classmate leaving a comment on your work is not the same
+                # as an instructor completing "Instructor Review". Only
+                # advance that step for non-peer insights.
+                if event['data'].get('kind') != 'peer':
+                    current["status"] = "Human Review Received"
+                    if step["id"] == "teacher_review":
+                        step["status"] = "completed"
+                        step["timestamp"] = now_str
+                        # Append human feedback to the timeline step directly
+                        existing = step["content"] if step["content"] != "Awaiting human insights." else ""
+                        step["content"] = existing + f"<br/><br/><strong>[{new_insight['category']} from {new_insight['source']}]</strong><br/>{new_insight['text']}"
 
         os_client.index(index="learner-timeline", id=projection_id, body=current, refresh=True)
         print(f"[SEARCH WORKER] Projected {event_type} into read-model for {learner_id}.")

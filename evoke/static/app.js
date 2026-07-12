@@ -47,6 +47,12 @@ const Evoke = (() => {
     devLogin: () => fetch("/api/dev-login", { method: "POST" }).then(r => r.json()),
     checkin: (userId) => fetch(`/api/checkin?user_id=${userId}`, { method: "POST" }).then(r => r.json()),
     activity: (limit) => apiGet(`/api/activity${limit ? "?limit=" + limit : ""}`),
+    gallery: (missionId) => apiGet(`/api/gallery${missionId ? "?mission_id=" + missionId : ""}`),
+    postPeerInsight: (targetUserId, missionId, fromUserId, text) => {
+      const formData = new FormData();
+      formData.append("text", text);
+      return fetch(`/api/timeline/${targetUserId}/${missionId}/peer-insight?from_user_id=${fromUserId}`, { method: "POST", body: formData }).then(r => r.json());
+    },
   };
 
   // ---------- Auth (dev-login only; see CONCEPTS.md's known gaps) ----------
@@ -85,6 +91,7 @@ const Evoke = (() => {
         <nav class="topbar__nav">
           ${navLink("#/", "Operations Hub")}
           ${navLink("#/novel", "Novel")}
+          ${navLink("#/gallery", "Gallery")}
           ${navLink("#/profile", "Profile")}
         </nav>
       </div>
@@ -144,8 +151,10 @@ const Evoke = (() => {
   const routes = [
     { pattern: /^#\/$/, screen: "hub" },
     { pattern: /^#\/novel$/, screen: "novel" },
+    { pattern: /^#\/gallery$/, screen: "gallery" },
     { pattern: /^#\/mission\/([^/]+)$/, screen: "missionBrief" },
     { pattern: /^#\/mission\/([^/]+)\/debrief$/, screen: "missionDebrief" },
+    { pattern: /^#\/mission\/([^/]+)\/debrief\/([^/]+)$/, screen: "missionDebrief" },
     { pattern: /^#\/profile$/, screen: "playerProfile" },
     { pattern: /^#\/profile\/([^/]+)$/, screen: "playerProfile" },
     { pattern: /^#\/team\/([^/]+)$/, screen: "teamProfile" },

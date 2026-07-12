@@ -1483,6 +1483,77 @@ async def get_timeline(user_id: str, mission_id: str):
     return doc
 
 
+@app.post("/api/timeline/{target_user_id}/{mission_id}/peer-insight")
+async def add_peer_insight(
+    target_user_id: str,
+    mission_id: str,
+    from_user_id: str,
+    text: str = Form(...),
+):
+    """A classmate leaves feedback on someone else's mission work -- the
+    peer half of CONCEPTS.md's Insight concept ("feedback from AI Coach,
+    instructor, or peer"), which had never been built: nothing emitted or
+    displayed peer insights before this (GAPS.md's #2 flagged gap). Reuses
+    the existing InsightPublished event and learner-timeline projection --
+    the worker was fixed alongside this to NOT treat a peer comment as
+    completing "Instructor Review" the way a real teacher insight does."""
+    try:
+        if target_user_id == from_user_id:
+            raise HTTPException(status_code=400, detail="Can't leave peer feedback on your own work")
+
+        commenter = db_fetch_one("SELECT display_name FROM users WHERE id = %s::uuid", (from_user_id,))
+        commenter_name = commenter[0] if commenter else "A classmate"
+
+        await publish_event("InsightPublished", {
+            "learner_id": target_user_id,
+            "mission_id": mission_id,
+            "kind": "peer",
+            "insight": {
+                "category": "Peer Feedback",
+                "source": commenter_name,
+                "text": text,
+            },
+        })
+        return {"status": "posted"}
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+# ========== Gallery ==========
+@app.get("/api/gallery")
+async def get_gallery(mission_id: Optional[str] = None, limit: int = 30):
+    """Class-wide gallery of completed mission work -- the other half of
+    GAPS.md's #2 flagged social-layer gap. Urgent Evoke's engine was peers
+    seeing each other's work; before this, no learner could see anyone
+    else's submission at all. A live join over submissions/users/missions,
+    not a projection -- this is a straightforward indexed catalog read (the
+    same category as GET /api/mc-quests), not the kind of cross-event
+    aggregation the "no request-time aggregation" rule in UI_SPEC.md is
+    about."""
+    try:
+        query = """SELECT s.user_id, u.display_name, s.mission_id, m.title, m.superpower, s.submitted_at
+                    FROM submissions s
+                    JOIN users u ON u.id = s.user_id
+                    JOIN missions m ON m.id = s.mission_id"""
+        params = []
+        if mission_id:
+            query += " WHERE s.mission_id = %s::uuid"
+            params.append(mission_id)
+        query += " ORDER BY s.submitted_at DESC LIMIT %s"
+        params.append(limit)
+
+        rows = db_fetch_all(query, tuple(params))
+        return {"gallery": [{
+            "user_id": str(r[0]), "display_name": r[1], "mission_id": str(r[2]),
+            "mission_title": r[3], "superpower": r[4],
+            "submitted_at": r[5].isoformat() if r[5] else None,
+        } for r in rows]}
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
 # ========== Minecraft ==========
 @app.post("/api/minecraft/link")
 async def link_minecraft(user_id: str, minecraft_username: str):
