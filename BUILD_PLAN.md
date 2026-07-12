@@ -188,12 +188,14 @@ Done means, on localhost, with real events on Redpanda:
 
 ## Build order
 
-1. **Compose hardening** — project name `evoke` everywhere, healthchecks on every service, `depends_on` conditions, one `.env` contract documented in `.env.example`. *(Small, unblocks everything.)*
-2. **Custom Minecraft container** — Fabric + Geyser/Floodgate Dockerfile, migrate the `evoke-prosperity-files` world/datapacks/mod into the repo, swap into `evoke-infra`, re-verify bridge delivery end-to-end with both a Java and a Bedrock client.
-3. **Missions-from-sim inversion** — sim self-seeds assignments with mission metadata; EVOKE sync-on-startup via `LMSSync`; retire mission rows from `seed.py`; sim accuracy pass + `SIM-DIVERGENCE` audit.
-4. **Event catalog completion** — add `QuestCompleted`, `XPGranted`, `MissionCompleted`, `BadgeAwarded` emitters where missing; build `player-profile` / `team-profile` projections + profile APIs.
-5. **Gamified web app** — new mission-loop SPA + profile pages + Companion restyle, per `UI_SPEC.md`.
-6. **End-to-end pass** — run the acceptance scenario, fix, document the demo script.
+**Status checklist** — verified against the actual code, not assumed from this plan. Re-check by grepping the specific evidence noted before trusting a ✅ that's more than a few sessions old.
+
+1. ⚠️ **Compose hardening** — *partial.* `evoke-infra/docker-compose.yml` has healthchecks on its 5 services; `evoke/docker-compose.yml` (`web`, `brightspace-sim`, `minecraft-bridge`) has **zero**. Project name `evoke` and `.env.example` are done. *(Small, unblocks everything — do this first.)*
+2. ⚠️ **Custom Minecraft container** — *not started.* `evoke-infra/docker-compose.yml` still runs `image: itzg/minecraft-server:latest`. The B1llbot mod is a **pre-built jar**, confirmed present (not just source) at `~/evoke-prosperity-files/minecraft/billbot_simple_chat_plugins/billbot/build/libs/billbot-1.0.1.jar` (7KB, targets MC 1.21.10 / Fabric API 0.138.4 per its Gradle loom cache) — `BUILD_PLAN.md`'s original claim that "the mod is built and working" holds. The `true_oasis` world is **704MB** and living in an uninitialized git repo of its own (`~/evoke-prosperity-files` has no commits) — migrating it into this repo needs a deliberate call (git-lfs vs. S3-pulled-at-build vs. a documented manual step), not a plain `cp`. Datapacks (`halyard_rent_functions`, `mines_lift_precheck`, `custom_drops`, `inventory_save`) are small text/JSON and migrate trivially.
+3. ⚠️ **Missions-from-sim inversion** — *not done.* `evoke-infra/seed.py` still seeds all 12 missions directly into Postgres (with an `lms_assignment_ref` column already present, so the schema anticipates the inversion — it just isn't wired). `evoke/lms/brightspace_lms.py` is used one-directionally today (`push_badge_award`, pushing *to* Brightspace) — nothing pulls the mission catalog *from* the sim on startup yet.
+4. ⚠️ **Event catalog completion** — *partial.* `EvidenceSubmitted`/`AwardGranted`/`RewardCollected` all emit correctly. `QuestCompleted`, `XPGranted`, `MissionCompleted`, `BadgeAwarded` don't exist anywhere in `main.py`. `/api/mc-quests` and `/api/mc-quests/{quest_id}/submit` **exist and work**, but the submit path doesn't emit `QuestCompleted` — quests are recorded with nothing downstream. `player-profile`/`team-profile` OpenSearch projections and their read APIs don't exist.
+5. ❌ **Gamified web app** — *not done.* `evoke/static/index.html` is still the original pipeline-demo page (a "Dev Login" button, a bare missions list, a notifications list) — not the mission-loop SPA specified in `UI_SPEC.md`. Blocked on #4's profile APIs to have real data to render.
+6. ❌ **End-to-end pass** — blocked on the above.
 
 ## Non-goals (this pass)
 
