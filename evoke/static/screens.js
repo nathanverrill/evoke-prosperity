@@ -1183,17 +1183,42 @@ Evoke.screens.playerProfile = async function playerProfile(userId) {
 Evoke.screens.teamProfile = async function teamProfile(teamId) {
   const { api, mount } = Evoke;
   Evoke.kit?.visit("spout");
-  const [team, wheelRes] = await Promise.all([
+  const [team, wheelRes, mcStatus] = await Promise.all([
     api.teamProfile(teamId),
     api.teamWheel(teamId).catch(() => ({ wheels: [], roster_size: 0 })),
+    api.minecraftStatus().catch(() => null),
   ]);
+  const onlinePlayers = new Set((mcStatus && mcStatus.online_players) || []);
 
+  // Squad panel (console-UX gap #7): "friends online, join them" -- the
+  // team page was a flat name list with no presence signal anywhere.
+  // Presence is scoped to the Basin (Minecraft) since that's the only
+  // real-time presence this app tracks; there's no "browsing the web app
+  // right now" signal to show alongside it.
   mount(`
     <div class="stack">
       <div class="card">
         <h1>${Evoke.escapeHtml(team.team_name || "Team")}</h1>
-        <div class="row">
-          ${(team.members || []).map(m => `<span class="badge-tile">${Evoke.escapeHtml(m.display_name)}${m.role_label ? " — " + Evoke.escapeHtml(m.role_label) : ""}</span>`).join("") || `<p class="empty-state">No members yet.</p>`}
+        <div class="squad-panel">
+          ${(team.members || []).map(m => {
+            const online = m.minecraft_username && onlinePlayers.has(m.minecraft_username);
+            const sigilStyle = m.sigil ? `--sigil-hue:${m.sigil.hue}` : "";
+            return `
+            <div class="squad-member">
+              <span class="dossier-monogram ${m.sigil ? "dossier-sigil" : ""}" style="width:48px;height:48px;font-size:var(--text-lg);${sigilStyle}">
+                ${m.sigil ? Evoke.escapeHtml(m.sigil.glyph) : Evoke.escapeHtml((m.display_name || "?")[0])}
+              </span>
+              <div class="squad-member__info">
+                <strong>${Evoke.escapeHtml(m.display_name)}</strong>
+                ${m.role_label ? `<span class="empty-state">${Evoke.escapeHtml(m.role_label)}</span>` : ""}
+                <span class="squad-member__presence">
+                  <span class="presence-dot ${online ? "is-online" : ""}"></span>
+                  ${online ? "In the Basin now" : (m.minecraft_username ? "Offline" : "Not linked")}
+                </span>
+              </div>
+            </div>
+          `;
+          }).join("") || `<p class="empty-state">No members yet.</p>`}
         </div>
       </div>
 

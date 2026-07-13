@@ -1720,12 +1720,17 @@ async def get_team_profile(team_id: str):
 
         team_row = db_fetch_one("SELECT name FROM teams WHERE id = %s::uuid", (team_id,))
         members = db_fetch_all(
-            """SELECT tm.user_id, u.display_name, tm.role_label
+            """SELECT tm.user_id, u.display_name, tm.role_label, u.sigil, ml.minecraft_username
                FROM team_members tm JOIN users u ON u.id = tm.user_id
+               LEFT JOIN minecraft_links ml ON ml.user_id = tm.user_id
                WHERE tm.team_id = %s::uuid""",
             (team_id,)
         )
-        members_list = [{"user_id": str(m[0]), "display_name": m[1], "role_label": m[2]} for m in members]
+        members_list = [{
+            "user_id": str(m[0]), "display_name": m[1], "role_label": m[2],
+            "sigil": json.loads(m[3]) if m[3] else None,
+            "minecraft_username": m[4],
+        } for m in members]
         missions_completed = team_profile.get("missions_completed", [])
 
         return {

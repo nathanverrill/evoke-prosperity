@@ -665,6 +665,12 @@ a.objectives-list__label:hover { color: var(--cyan-300); }
 }
 .world-meter__tick.is-reached { background: var(--color-text-inverse); opacity: 0.8; }
 
+/* Squad panel (console-UX gap #7): "friends online, what they're playing" */
+.squad-panel { display: flex; flex-wrap: wrap; gap: var(--space-4); margin-top: var(--space-2); }
+.squad-member { display: flex; align-items: center; gap: var(--space-3); }
+.squad-member__info { display: flex; flex-direction: column; gap: 2px; }
+.squad-member__presence { display: flex; align-items: center; font-size: var(--text-xs); color: var(--color-text-muted); }
+
 /* ---- Basin presence ---- */
 .presence-dot {
   display: inline-block;
