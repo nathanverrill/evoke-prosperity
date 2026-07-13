@@ -1217,14 +1217,25 @@ async def trigger_ai_review(user_id: str, mission_id: str, object_key: str):
         async with httpx.AsyncClient() as client:
             response = await client.post(
                 f"{OPENWEBUI_URL}/api/chat/completions",
+                headers={"Authorization": f"Bearer {OPENWEBUI_API_KEY}"} if OPENWEBUI_API_KEY else {},
                 json={
                     "model": "billbot",
                     "messages": [
                         {"role": "user", "content": f"Review this mission submission for consistency: {object_key}"}
                     ]
                 },
-                timeout=30
+                # See billbot_chat()'s identical timeout note -- a cold model
+                # load on this same backend measured up to ~60s.
+                timeout=90
             )
+            if response.status_code != 200:
+                # This exact bug (no auth header sent -> silent 401, this
+                # whole branch skipped, no exception, nothing logged, no
+                # epic award ever granted) went unnoticed here even after
+                # fixing the identical issue in billbot_chat() -- this
+                # sibling function makes the same OpenWebUI call and was
+                # never touched. Logging now so a repeat doesn't stay silent.
+                logger.warning(f"AI review failed: HTTP {response.status_code} {response.text[:300]}")
 
             if response.status_code == 200:
                 # Assume consistent for now - in real implementation, parse response
