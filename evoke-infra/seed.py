@@ -43,28 +43,34 @@ def seed_database(db_url):
             (org_id, 'Demo School', campaign_id, 'brightspace')
         )
 
-        # Create test users
-        learner_id = uuid.uuid4()
+        # Two default users, not four -- Player One is the primary
+        # learner-facing default (what dev-login returns with no params);
+        # Admin is the operator identity, deliberately using the same email
+        # OpenWebUI's admin account uses (see openwebui-bootstrap.py) so
+        # it's recognizably the same person across both systems. There's no
+        # shared password auth between them (evoke's dev-login has no
+        # password concept at all) -- this is identity alignment, not SSO.
+        player_one_id = uuid.uuid4()
         cur.execute(
             "INSERT INTO users (id, org_id, display_name, email, role) VALUES (%s, %s, %s, %s, %s) ON CONFLICT DO NOTHING",
-            (learner_id, org_id, 'Demo Learner', 'learner@evoke.local', 'learner')
+            (player_one_id, org_id, 'Player One', 'player1@evoke.local', 'learner')
         )
 
         # Add local auth identity
         cur.execute(
             "INSERT INTO auth_identities (user_id, provider, provider_subject) VALUES (%s, %s, %s) ON CONFLICT DO NOTHING",
-            (learner_id, 'local', 'learner@evoke.local')
+            (player_one_id, 'local', 'player1@evoke.local')
         )
 
-        teacher_id = uuid.uuid4()
+        admin_id = uuid.uuid4()
         cur.execute(
             "INSERT INTO users (id, org_id, display_name, email, role) VALUES (%s, %s, %s, %s, %s) ON CONFLICT DO NOTHING",
-            (teacher_id, org_id, 'Demo Teacher', 'teacher@evoke.local', 'instructor')
+            (admin_id, org_id, 'Admin', 'admin@evoke.local', 'admin')
         )
 
         cur.execute(
             "INSERT INTO auth_identities (user_id, provider, provider_subject) VALUES (%s, %s, %s) ON CONFLICT DO NOTHING",
-            (teacher_id, 'local', 'teacher@evoke.local')
+            (admin_id, 'local', 'admin@evoke.local')
         )
 
         # Create team
@@ -76,7 +82,7 @@ def seed_database(db_url):
 
         cur.execute(
             "INSERT INTO team_members (team_id, user_id, role_label) VALUES (%s, %s, %s) ON CONFLICT DO NOTHING",
-            (team_id, learner_id, 'Leader')
+            (team_id, player_one_id, 'Leader')
         )
 
         # Create badges (Superpowers)
@@ -187,6 +193,18 @@ def seed_database(db_url):
             'checkin': [
                 ('item', 'minecraft:compass', 1, None, False),
             ],
+            # Small, harmless flavor items handed out at random to anyone
+            # online in Minecraft (evoke-minecraft-bridge's heartbeat loop) --
+            # not a mission/badge reward, just a "the pipeline is alive"
+            # signal, so deliberately not tier-ranked with the real rewards
+            # above and never anything an economy/inventory decision hinges
+            # on.
+            'ambient': [
+                ('item', 'minecraft:paper', 1, None, False),
+                ('item', 'minecraft:torch', 4, None, False),
+                ('item', 'minecraft:bread', 2, None, False),
+                ('item', 'minecraft:poppy', 1, None, False),
+            ],
         }
 
         for tier, reward_list in rewards.items():
@@ -200,21 +218,22 @@ def seed_database(db_url):
                     (catalog_id, campaign_id, tier, reward_type, reward, amount, duration, persistent)
                 )
 
-        # Link test user to Minecraft
-        cur.execute(
-            "INSERT INTO minecraft_links (user_id, server_id, minecraft_username) VALUES (%s, %s, %s) ON CONFLICT DO NOTHING",
-            (learner_id, 'default', 'DemoLearner')
-        )
+        # Deliberately NOT pre-linking Player One to a Minecraft username
+        # here -- evoke-minecraft-bridge's heartbeat loop auto-links the
+        # first real player it ever sees online to Player One (see
+        # PLAYER_ONE_EMAIL in bridge.py). Pre-seeding a fake "DemoLearner"
+        # link here would make that detection logic untestable (it would
+        # see Player One as already linked and never run).
 
         conn.commit()
         print("✓ Database seeded successfully")
         print(f"  - Campaign: evoke-prosperity")
         print(f"  - Organization: Demo School")
-        print(f"  - Test Learner: {learner_id}")
-        print(f"  - Test Teacher: {teacher_id}")
+        print(f"  - Player One (learner): {player_one_id}")
+        print(f"  - Admin: {admin_id}")
         print(f"  - Missions: synced from the LMS on EVOKE app startup, not seeded here")
         print(f"  - Quests: 16 created")
-        print(f"  - Minecraft Username: DemoLearner")
+        print(f"  - Minecraft: unlinked -- connect a real client and evoke-minecraft-bridge will auto-link the first player to Player One")
 
     except Exception as e:
         conn.rollback()

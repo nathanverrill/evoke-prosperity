@@ -324,19 +324,30 @@ async def login(email: str, password: str):
         raise HTTPException(status_code=400, detail=str(e))
 
 @app.post("/api/dev-login")
-async def dev_login(user_id: Optional[str] = None):
-    """Dev mode auto-login"""
-    if not user_id:
-        # Return first dev user
-        result = db_fetch_one("SELECT id, display_name, email FROM users LIMIT 1")
-        if not result:
-            raise HTTPException(status_code=404, detail="No users found")
-        user_id, display_name, email = result
-    else:
+async def dev_login(user_id: Optional[str] = None, email: Optional[str] = None):
+    """Dev mode auto-login. No params: deterministically Player One, the
+    default learner-facing identity -- previously `LIMIT 1` with no
+    ORDER BY, which picked "whichever row sorts first" rather than a
+    specific, intentional user. `email` param: an explicit way to log in
+    as a specific seeded user (e.g. ?email=admin@evoke.local for Admin,
+    which has no in-app UI switcher and no role check on #/admin yet)."""
+    if user_id:
         result = db_fetch_one("SELECT display_name, email FROM users WHERE id = %s::uuid", (user_id,))
         if not result:
             raise HTTPException(status_code=404, detail="User not found")
         display_name, email = result
+    elif email:
+        result = db_fetch_one("SELECT id, display_name FROM users WHERE email = %s", (email,))
+        if not result:
+            raise HTTPException(status_code=404, detail="User not found")
+        user_id, display_name = result
+    else:
+        result = db_fetch_one("SELECT id, display_name, email FROM users WHERE role = 'learner' ORDER BY created_at LIMIT 1")
+        if not result:
+            result = db_fetch_one("SELECT id, display_name, email FROM users ORDER BY created_at LIMIT 1")
+        if not result:
+            raise HTTPException(status_code=404, detail="No users found")
+        user_id, display_name, email = result
 
     return {
         "user_id": user_id,

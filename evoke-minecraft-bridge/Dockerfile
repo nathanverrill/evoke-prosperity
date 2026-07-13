@@ -5,7 +5,7 @@ WORKDIR /app
 RUN apt-get update && apt-get install -y --no-install-recommends procps \
     && rm -rf /var/lib/apt/lists/*
 
-RUN pip install --no-cache-dir psycopg2-binary kafka-python
+RUN pip install --no-cache-dir psycopg2-binary kafka-python requests
 
 COPY bridge.py .
 
