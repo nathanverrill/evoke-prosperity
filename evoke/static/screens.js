@@ -1642,7 +1642,7 @@ Evoke.screens.faq = async function faq() {
           <li><strong>Open your Field Kit</strong> on your phone — scan the QR code on the Now page. It registers you automatically.</li>
           <li>Tap <strong>Connect to Basin Simulation</strong>. You'll get the server address and a 4-digit link code.</li>
           <li>In Minecraft (Java or Bedrock), add a multiplayer server:${info ? `<br>Java: <code>${Evoke.escapeHtml(info.java_address)}</code> · Bedrock: <code>${Evoke.escapeHtml(info.bedrock_address)}</code>` : ""}</li>
-          <li>Join the world, find the <strong>B1LLBOT Signal Post</strong> (a glowing beacon with a sign, near where the cohort's first agent spawned in), and type in chat: <code>/trigger evoke_link set YOUR-CODE</code></li>
+          <li>Join the world and find B1llbot's secret kiosk near the starter villagers, close to spawn — he'll whisper hello the first time. Right there, type in chat: <code>/trigger evoke_link set YOUR-CODE</code></li>
           <li>Your Field Kit pops a confirmation — tap <strong>Confirm</strong>. Done: rewards, quests, and XP now flow between the Basin and your account.</li>
         </ol>
       </div>
