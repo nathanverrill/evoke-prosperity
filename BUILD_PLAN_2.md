@@ -2,7 +2,14 @@
 
 Nathan's design questions (July 13), answered, with a scoped build plan.
 Companion to the original `BUILD_PLAN.md` (historical) and `GAPS.md`
-(live status). Nothing here is built yet — this is the plan.
+(live status).
+
+> **STATUS: SHIPPED (same day).** Nathan's decisions: stage = admin
+> setting (not fixed weeks) ✅; reflection→Transformation trigger ✅;
+> dev auto-link heuristic kept ✅; Field Kit owns the connect flow with
+> inline instructions + `#/faq` ✅. All of W3.1–W3.8 landed and were
+> verified live — see `GAPS.md`'s "New since the last audit" table for
+> the as-built record. This doc remains as the design rationale.
 
 ---
 

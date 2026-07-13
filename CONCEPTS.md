@@ -68,7 +68,15 @@ Source: [`docs/canon/overview.md`](docs/canon/overview.md) and [`docs/canon/Pros
 | **Timeline** | The per-learner, per-mission view of progress: submitted → processing → AI analysis → instructor review → completed. |
 | **XP / Levels / Badges / Streaks** | Progression mechanics. XP is never removed. Streaks pause, never punish, on a missed day. |
 | **Team / Venture Points / Venture Spectrum** | Teams of ~4 collaborate on missions. In the late-game "Worth Backing" / "Craft Your Pitch" missions, teams allocate 100 **Venture Points** (representing ownership/voting power) between themselves and outside backers, and classify their venture as a **Safe Bet / Balanced Bet / Moonshot**. |
-| **Companion Mode** | A narrow, sidebar-style web page meant to be kept open next to the Minecraft client while playing — shows the current mission/quest, notifications, pending awards (with the same **Collect** action as the main site), and a B1llbot chat box. Same backend APIs as the main site; a separate, narrower surface, not a responsive variant. See `UI_SPEC.md`. |
+| **Companion Mode / Field Kit** | The phone-first companion, now an installable PWA ("Field Kit"). Registered to a learner by scanning the Hub QR (one-time pairing token — no login). Home of the daily **Field Report**, the two-channel Minecraft linking flow, quest reporting (once linked), pending awards, and B1llbot. See `UI_SPEC.md`. |
+| **Campaign Map / Stage** | `#/map` — the "what done means" infographic. Missions are grouped into instructor-configured **stages** (`missions.stage`, set from the Ops Deck, defaults to the LMS week); a stage is DONE at 100% of its missions submitted, and carries a ★–★★★ quality grade (the minimum best-award-tier across the stage — resubmitting your weakest mission raises it). |
+| **Keel Restoration / world-state** | The cohort-wide progress meter ("The Water Rises"): every distinct (learner, mission) completion advances Keel through 9 named stages, celebrated on the web, in the feed, and physically in Minecraft (titles + a growing **Restoration Beacon**). `evoke/world_state.py`. |
+| **Field Report / Words of Wisdom** | The daily check-in as a one-line reflection to B1llbot; he replies with a kept Word of Wisdom. Both collect in the **Wisdom Journal** on the Dossier; 10 reports unlock the **Transformation** Power. |
+| **Agent ranks** | 12 named levels (Recruit → Legend of the Basin, `evoke/progression.py`); rank-ups celebrate on web and in-game. |
+| **Field Gear / Aqueduct Kit / Alchemy Signal** | Cosmetic-identity collectibles, never gates: **Gear** (12 items unlocked by combinations of real progress, up to 3 equipped on the Dossier, `evoke/gear.py`), the **Aqueduct Kit** (10 components auto-collected by visiting each screen), and the **Alchemy Signal** (5 hidden easter-egg fragments → the secret `#/alchemy` channel). |
+| **Training Sims** | Browser minigames at `#/arcade` (Flow Control = scarcity/budgeting; Signal Decrypt = the §12 financial vocabulary). Optional, never graded, XP capped daily per sim. |
+| **Team Wheel** | GAME_DESIGN §7.1's team mechanic, shipped as rolling-roster/no-deadline: one wheel per released mission, a wedge per current member; the final member's completion fires a `TeamWheelCompleted` celebration ("nobody left behind"). |
+| **Two-channel Minecraft linking** | Real account linking without mods: the Field Kit mints a 4-digit code, the player types `/trigger evoke_link set <code>` in-game, the bridge matches it, and the phone confirms. Basin content everywhere stays behind a "telemetry offline" teaser until linked. |
 
 ---
 
@@ -84,36 +92,49 @@ Quick summary of the stack (target state):
 - **MinIO** — S3-compatible object storage for evidence files
 - **Postgres** — identity, organizations, teams, and the mission catalog (synced from the Brightspace sim); CRUD data, not event-sourced. Built, not just planned.
 - **Identity/auth** — dev-login (a `LocalIdentityProvider` equivalent) and a real `BrightspaceLTIProvider` both exist and work; there's no clean shared interface abstracting the two the way `ARCHITECTURE.md` originally sketched. Still dev-grade outside the LTI path — see `GAPS.md`'s "Auth is dev-grade" item.
-- **Minecraft Reward Bridge** (`evoke-minecraft-bridge/`, Prosperity-specific) — built and running: consumes `RewardCollected` events off Redpanda and grants the matching in-game item via RCON, keyed by award tier. Also runs a heartbeat loop now: auto-links the first real Minecraft player to the seeded **Player One** account, and gives anyone online a small ongoing XP/item/AI-lore trickle — see `GAPS.md`. See `ARCHITECTURE.md`'s "Minecraft Reward Bridge" section for the original design.
+- **Minecraft Reward Bridge** (`evoke-minecraft-bridge/`, Prosperity-specific) — built and running with a real Source-RCON client (the original raw-text client never actually spoke RCON; fixed July 2026, see `GAPS.md`). Five concurrent loops: event consumer (reward delivery + world-stage celebrations + level-up titles + team-wheel broadcasts), offline delivery, heartbeat (dev auto-link of the first player to **Player One**, ambient XP/items/AI lore), presence (feeds the web's live "who's in the Basin" card), scoreboard quest-triggers ("the world reports itself"), and the `/trigger evoke_link` code matcher for two-channel account linking.
+- **Live layer** (`evoke/live.py`, `WS /ws`) — in-process fan-out of every processed stream event to connected browsers: live feed, toasts, level-up overlays, presence, link-confirm pushes.
 - **OpenWebUI** — the AI gateway in front of Ollama/hosted models, built and running. B1llbot (web-facing; the in-Minecraft mod is currently not loaded, see the B1llbot glossary entry above) is a real "custom model" inside OpenWebUI — base model + system prompt + knowledge base(s) for RAG, provisioned by `evoke-infra/openwebui-bootstrap.py`, not a hardcoded prompt string. `AI_ENABLED=true` by default now; the local LLM backend is a containerized `ollama` service by default too (overridable to a native install).
 
-**The currently-running code is an earlier prototype**, not yet updated to this plan — see the repo map below for what exists today versus what's planned.
+**The running code has caught up with (and passed) the original plan** — the repo map below is current as of the July 2026 build passes.
 
 ---
 
 ## Repo map
 
 ```
-evoke/                  FastAPI app (current prototype)
-  main.py                API routes: submit-evidence, insights, timeline, instructor dashboard, portfolio
-  workers.py             Background event consumer: AI Coach worker + Search/Timeline worker
-  clients.py             S3/MinIO, OpenSearch, Kafka producer, AI client setup
-  static/                Vanilla HTML/JS/CSS SPA (functional but minimal — one hardcoded demo learner/mission)
+evoke/                  FastAPI app + SPA
+  main.py                All API routes (missions, evidence, awards, profiles, world-state, progress map,
+                         minigames/collections, reflections, gear/avatars, pairing, link codes, admin)
+  workers.py             In-process event workers: AI Coach, Search/Timeline, Profile, Activity, World,
+                         Team Wheel, Presence, Stage/Link announcements — all consuming `evoke-events`
+  live.py                WebSocket hub (/ws) — live push of processed events to browsers
+  world_state.py         Keel Restoration stages (collective world-state) + pacing knob/variants
+  progression.py         XP thresholds + the 12 named Agent ranks
+  gear.py                Field Gear catalog + combo-unlock evaluator
+  skills_framework.py    The 16 Powers / 4 Qualities + behavioral-power triggers
+  static/                Vanilla SPA: app.js (shell/router/live), screens.js (screens), games.js
+                         (Training Sims + collectibles), companion.html (Field Kit PWA), tokens/theme CSS
+                         (production skin ported from ui/Final Prosperity Showcase.html)
 
-evoke-infra/             docker-compose for shared infra (MinIO, Redpanda, OpenSearch, Keycloak — Keycloak to be
-                         replaced with Postgres per ARCHITECTURE.md)
+evoke-infra/             docker-compose for shared infra (Postgres, MinIO, Redpanda, OpenSearch, OpenWebUI,
+                         Ollama, the custom Fabric+Geyser Minecraft server) + init-db.sql + seed.py +
+                         openwebui-bootstrap.py (B1llbot persona/KB/API key)
 
-ui/                      "Final Prosperity Showcase.html" — a polished, self-contained interactive UI mockup/prototype.
-                         NOT wired to the backend. Ahead of the backend in features (XP, levels, badges, streaks,
-                         Vault/portfolio, B1llbot chat UI, Profile) — treat as the target UI design, not working code.
+evoke-minecraft-bridge/  The bridge service (see Technical architecture above)
 
-docs/canon/              Narrative + curriculum source of truth (see Canon hierarchy above)
-docs/legacy/             Superseded draft material — do not treat as current
-docs/process/            Meeting notes, planning chats — history, not canon
+brightspace-sim/         Brightspace LMS simulator — system of record for the 12 missions in dev
 
-ARCHITECTURE.md          Target-state technical architecture plan
-BUILD_PLAN.md            Active build spec (infra, events, Minecraft container, Brightspace sim)
-UI_SPEC.md               Gamified web experience spec + wireframe skinning contract
+ui/                      "Final Prosperity Showcase.html" — the design team's approved look; the live skin
+                         was ported from it (tokens.css/theme.css). Still the visual reference.
+
+docs/canon|legacy|process  Narrative/curriculum source material (see Canon hierarchy above)
+
+GAPS.md                  THE live status doc — updated every build pass
+BUILD_PLAN.md            Historical build spec (first pass)
+BUILD_PLAN_2.md          Wave 3 design decisions + plan (shipped)
+UI_SPEC.md               Web experience spec (IA kept in sync)
+ARCHITECTURE.md          Original target-state architecture — historical/rationale; defer to GAPS.md
 CONCEPTS.md              This file
 ```
 
@@ -121,8 +142,10 @@ CONCEPTS.md              This file
 
 ## Known gaps / traps for agents
 
-- The `ui/` mockup and the `evoke/` backend are **not connected**. Don't assume UI features (XP, badges, Vault, Profile) exist server-side just because they're in the mockup.
-- [`evoke/static/script.js`](evoke/static/script.js) hardcodes `learner_id`/`mission_id` — there's no real auth or user model yet (that's what `ARCHITECTURE.md`'s Postgres + `IdentityProvider` plan addresses).
-- The 12-mission curriculum is **not yet seeded** into the running backend — `main.py`'s `_bootstrap_timeline` uses a generic demo mission, not the real curriculum.
-- The frontend has two health-check buttons (`/api/minio`, `/api/opensearch`) that call routes which don't exist in `main.py` — currently dead/404.
+- `GAPS.md` is the single live status document — trust it over any prose summary, including this file's.
+- **Backend timestamps are naive UTC** — frontend must parse with `parseUtc()` (screens.js) or times shift by the viewer's UTC offset.
+- **The event consumers use `auto_offset_reset='latest'` with no replay tooling** — events published while a worker is down are lost to projections (GAPS.md's projection-replay item). Wait for worker startup (~5s after boot) before firing test events.
+- **Never write a `*` immediately followed by `/` inside a CSS comment** in theme.css — it terminates the comment and silently eats the next rule (this exact bug hid the `body` rule for months).
+- The Minecraft **world in dev is a fresh vanilla world** — the real `true_oasis` Basin build (704MB) lives outside the repo (`evoke-infra/minecraft/world-seed/README.md`). Scoreboard quest-triggers reference the real datapacks' objectives; on vanilla they simply never fire unless set manually.
 - Don't cite `docs/legacy/` as world fact. If a task needs Minecraft NPC dialogue or world details, canon (the infographics + stakeholder feedback) governs, not the legacy prompts.
+- Alchemy's narrative beats are an **open canon question** (`GAME_DESIGN.md` §13.5) — the `#/alchemy` unlock copy is deliberately minimal placeholder; don't extend it without the narrative team.

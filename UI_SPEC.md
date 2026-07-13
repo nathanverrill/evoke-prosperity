@@ -20,9 +20,19 @@ Companion to [`BUILD_PLAN.md`](BUILD_PLAN.md). Defines the gamified web app this
 /profile/{user_id}       Player profile (public view)
 /team/{team_id}          Team profile
 /billbot                 Full-screen B1llbot chat (in addition to the persistent drawer on every screen)
-/admin                   Mission release gating -- not in the learner nav, direct-URL only, no role check yet
-/companion               Companion Mode (separate narrow page, as today)
+/map                     Campaign Map -- the "what done means" infographic: instructor-configured stages,
+                         completion rings, star quality grades, Basin quest markers (linked players only)
+/arcade                  Field Ops / Training Sims (Flow Control, Signal Decrypt) + leaderboards
+/game/flow, /game/decrypt  The two Training Sims themselves
+/alchemy                 Hidden -- unlocks via the 5-fragment Alchemy Signal scavenger hunt
+/faq                     Connect-to-Basin instructions, "what does done mean," Field Report explainer
+/admin                   Instructor Ops Deck: cohort table, mission release + stage assignment -- not in the
+                         learner nav, direct-URL only, no role check yet
+/companion               The Field Kit (installable PWA) -- registered to a learner via the Hub QR's
+                         one-time pairing token; daily Field Report, Basin linking, quests, B1llbot
 ```
+
+**Learner nav (July 2026 IA):** `Now · Campaign Map · Story (/novel) · Cohort (/gallery) · Field Ops (/arcade) · Dossier (/profile)` — ordered by the learner's questions (what do I do now → what does done mean → what's happening around me → what else is there → who am I). B1llbot is deliberately *not* a nav destination; he's the persistent drawer.
 
 All of the above beyond the original six routes were added after this doc was first written — `GAPS.md` is the source of truth for what's shipped vs. still open; this list is kept in sync with it, not the other way around.
 
@@ -98,6 +108,13 @@ The whole app ships deliberately unskinned — structure, layout, and interactio
 | Team profile | `/api/profile/team/{team_id}` | — |
 | Companion | same as today + quest submit | collect, quest submit, `/api/billbot/chat` |
 | B1llbot drawer | — | `/api/billbot/chat` |
+| Campaign Map | `/api/progress-map/{user_id}`, `/api/world-state` | — |
+| Field Ops / Training | `/api/minigames/{key}/leaderboard`, `/api/minigames/signal/{user_id}` | `/api/minigames/{key}/score`, `/api/minigames/signal/fragment` |
+| Dossier extras | `/api/gear/{user_id}`, `/api/minigames/kit/{user_id}`, `/api/reflections/{user_id}`, `/api/achievements/{user_id}` | `/api/gear/{user_id}/equip`, `/api/avatar/{user_id}`, `/api/profile/{user_id}/sigil` |
+| Now (Field Report card) | `/api/reflections/{user_id}` | `/api/reflection` |
+| Field Kit (pairing/linking) | `/api/minecraft/link-request/{user_id}`, `/api/minecraft/connect-info` | `/api/companion/pair`, `/api/minecraft/link-code`, `/api/minecraft/link-confirm` |
+| Instructor Ops Deck | `/api/admin/cohort`, `/api/admin/missions` | `/api/admin/missions/{id}/release`, `/api/admin/missions/{id}/stage` |
+| Live layer (all screens) | `WS /ws` — pushed events (ActivityPosted, WorldStateAdvanced, LevelUpped, MinecraftPresence, MinecraftLinkRequested…) | — |
 
 ## Explicitly out of scope
 

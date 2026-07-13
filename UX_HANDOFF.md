@@ -8,9 +8,15 @@
 > the state this doc was written against; the skinning *contract* (restyle
 > via tokens.css + theme.css, never markup or JS) is unchanged and remains
 > the way to iterate on the design. New since this doc was written:
-> `#/arcade` (Training Sims), `#/alchemy` (hidden), the Dossier treatment
-> of the profile, the Hub's Keel Restoration meter / Basin presence /
-> Field Kit QR cards, and live toasts + level-up overlay.
+> `#/map` (Campaign Map — the "what done means" infographic), `#/arcade`
+> (Training Sims), `#/alchemy` (hidden), `#/faq`, the Dossier treatment of
+> the profile (avatars/sigils, Field Gear, Aqueduct Kit, Wisdom Journal),
+> the reordered Now page (Next Action first, Field Report card, compact
+> world strip), the nav rename (Now / Campaign Map / Story / Cohort /
+> Field Ops / Dossier — B1llbot lives in the drawer, not the nav), the
+> Field Kit phone PWA with QR pairing and the Minecraft linking flow, the
+> Instructor Ops Deck on `#/admin`, and live toasts + level-up overlays
+> everywhere.
 
 This covers the **entire application** — every screen that exists today, every screen that's designed but not yet built, and where the other two pieces of the product (the graphic novel and the Minecraft world) fit around the web app you're actually restyling.
 
