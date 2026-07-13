@@ -174,17 +174,21 @@ Evoke.screens.hub = async function hub() {
             <button class="btn" id="hub-guide-dismiss">Got it</button>
           </section>
         ` : ""}
-        <section class="card">
-          <div class="card__eyebrow">Now</div>
-          ${nextMission
-            ? `<h2 class="card__title">${Evoke.escapeHtml(nextMission.title)}</h2>
-               <p>Week ${nextMission.week} · ${nextMission.arc}</p>
-               <a class="btn btn-primary" href="#/mission/${nextMission.id}">Open Mission Brief →</a>`
-            : allDone
-              ? `<p class="empty-state">All released missions complete. New chapters coming soon.</p>`
-              : `<p class="empty-state">Waiting on your instructor to release the next mission.</p>`}
-          <p style="margin-top:var(--space-3)">${completedCount}/12 missions complete · ${pendingAwards.length} pending award${pendingAwards.length === 1 ? "" : "s"}</p>
-          ${checkinLine ? `<p class="empty-state" style="margin-top:var(--space-2)">${checkinLine}</p>` : ""}
+        <section class="hub-hero" data-arc="${nextMission ? nextMission.arc : ""}">
+          <div class="hub-hero__ghost" aria-hidden="true">${nextMission ? String(nextMission.week).padStart(2, "0") : (allDone ? "✓" : "—")}</div>
+          <div class="hub-hero__body">
+            <div class="card__eyebrow">${nextMission ? `Week ${nextMission.week} · ${nextMission.arc}` : "Now"}</div>
+            ${nextMission
+              ? `<h2 class="hub-hero__title">${Evoke.escapeHtml(nextMission.title)}</h2>
+                 <p class="hub-hero__sub">${completedCount}/12 missions complete · ${pendingAwards.length} pending award${pendingAwards.length === 1 ? "" : "s"}</p>
+                 <a class="btn btn-primary btn-hero" href="#/mission/${nextMission.id}">Open Mission Brief →</a>`
+              : allDone
+                ? `<h2 class="hub-hero__title">All released missions complete</h2>
+                   <p class="hub-hero__sub">New chapters coming soon.</p>`
+                : `<h2 class="hub-hero__title">Standing by</h2>
+                   <p class="hub-hero__sub">Waiting on your instructor to release the next mission.</p>`}
+            ${checkinLine ? `<p class="empty-state" style="margin-top:var(--space-2)">${checkinLine}</p>` : ""}
+          </div>
         </section>
 
         ${fieldReportCard}

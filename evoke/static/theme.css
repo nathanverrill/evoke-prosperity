@@ -213,6 +213,66 @@ input:focus, textarea:focus, select:focus {
   color: var(--teal-400);
 }
 
+/* Hub hero tile -- console-player feedback: the Hub's "Now" card was
+   functionally a lobby's "jump back in" tile but styled like a document; an
+   Xbox player expects a full-width hero with mission art behind it and one
+   glowing button. Ported from the showcase's .home-hero, adapted: no
+   chapter art exists yet (GAPS.md: "Graphic-novel content pipeline is
+   undefined"), so the art slot is a giant low-opacity week numeral (a
+   "ghost number") instead of a photo, arc-colored via the same data-arc
+   convention .mission-card__arc already uses. */
+.hub-hero {
+  position: relative;
+  overflow: hidden;
+  border-radius: var(--radius-lg);
+  min-height: 200px;
+  display: flex;
+  align-items: stretch;
+  box-shadow: var(--shadow);
+  background: var(--grad-page);
+  isolation: isolate;
+}
+.hub-hero__ghost {
+  position: absolute;
+  right: clamp(-10px, 2vw, 20px);
+  bottom: -0.15em;
+  font-family: var(--font-display);
+  font-size: clamp(160px, 22vw, 280px);
+  font-weight: 800;
+  line-height: 1;
+  color: var(--color-accent);
+  opacity: 0.16;
+  z-index: 0;
+  pointer-events: none;
+  user-select: none;
+}
+.hub-hero[data-arc="Explore"] .hub-hero__ghost { color: var(--arc-explore); }
+.hub-hero[data-arc="Imagine"] .hub-hero__ghost { color: var(--arc-imagine); }
+.hub-hero[data-arc="Act"] .hub-hero__ghost { color: var(--arc-act); }
+.hub-hero[data-arc="Communicate"] .hub-hero__ghost { color: var(--arc-communicate); }
+.hub-hero__body {
+  position: relative;
+  z-index: 1;
+  padding: var(--space-5) clamp(var(--space-4), 4vw, var(--space-6));
+  max-width: 68%;
+  align-self: center;
+}
+.hub-hero__title {
+  font-family: var(--font-display);
+  font-size: var(--text-2xl);
+  text-transform: none;
+  color: var(--color-text-heading);
+  text-shadow: var(--glow-text);
+  margin: var(--space-2) 0;
+  text-wrap: balance;
+}
+.hub-hero__sub { color: var(--color-text-muted); margin-bottom: var(--space-3); }
+.btn-hero { font-size: var(--text-base); padding: var(--space-3) var(--space-5); }
+@media (max-width: 720px) {
+  .hub-hero__body { max-width: 100%; }
+  .hub-hero__ghost { opacity: 0.10; }
+}
+
 /* Mono status chip (showcase's "System Online" language) */
 .chip {
   display: inline-flex;
