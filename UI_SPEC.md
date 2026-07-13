@@ -32,7 +32,7 @@ Companion to [`BUILD_PLAN.md`](BUILD_PLAN.md). Defines the gamified web app this
                          one-time pairing token; daily Field Report, Basin linking, quests, B1llbot
 ```
 
-**Learner nav (July 2026 IA):** `Now · Campaign Map · Story (/novel) · Cohort (/gallery) · Field Ops (/arcade) · Dossier (/profile)` — ordered by the learner's questions (what do I do now → what does done mean → what's happening around me → what else is there → who am I). B1llbot is deliberately *not* a nav destination; he's the persistent drawer.
+**Learner nav (July 2026 IA):** the showcase's **left nav rail** pattern (`ui/Final Prosperity Showcase.html`'s `primary-nav`), ported verbatim — brand lockup on top, then big icon+label items (Material Symbols + Unbounded), cyan-highlighted when active; collapses to a fixed bottom tab bar under 900px. Items, ordered by the learner's questions: `Home (#/) · Campaign Map (#/map) · Story (#/novel) · Cohort (#/gallery) · Field Ops (#/arcade) · B1llbot (#/billbot) · Dossier (#/profile)`. B1llbot appears in the rail (as in the showcase) *and* remains the persistent drawer.
 
 All of the above beyond the original six routes were added after this doc was first written — `GAPS.md` is the source of truth for what's shipped vs. still open; this list is kept in sync with it, not the other way around.
 

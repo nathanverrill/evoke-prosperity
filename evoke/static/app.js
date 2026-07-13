@@ -210,7 +210,58 @@ const Evoke = (() => {
     }
   }
 
-  // ---------- Top bar ----------
+  // ---------- Nav rail (the showcase's primary-nav pattern) ----------
+  // A vertical rail: brand lockup on top, then big icon+label items in the
+  // display font, cyan-highlighted when active. On narrow screens it
+  // collapses to a fixed bottom tab bar (layout.css).
+  const NAV_ITEMS = [
+    { href: "#/", icon: "home", label: "Home", fill: true },
+    { href: "#/map", icon: "hub", label: "Campaign Map" },
+    { href: "#/novel", icon: "auto_stories", label: "Story" },
+    { href: "#/gallery", icon: "groups", label: "Cohort" },
+    { href: "#/arcade", icon: "sports_esports", label: "Field Ops" },
+    { href: "#/billbot", icon: "smart_toy", label: "B1llbot" },
+    { href: "#/profile", icon: "person", label: "Dossier", fill: true },
+  ];
+
+  function navIsActive(href) {
+    const route = location.hash || "#/";
+    if (href === "#/") return route === "#/" || route === "#/welcome";
+    return route === href || route.startsWith(href + "/");
+  }
+
+  function renderRail() {
+    const el = document.getElementById("nav-rail");
+    if (!el) return;
+    el.innerHTML = `
+      <a href="#/" class="topbar__brand rail__brand" aria-label="EVOKE Prosperity — home">
+        <span class="glyph" aria-hidden="true"></span>
+        <span class="rail__brandwords"><span class="word">EVOKE</span><span class="word--sub">Prosperity</span></span>
+      </a>
+      ${NAV_ITEMS.map(it => `
+        <a class="nav ${navIsActive(it.href) ? "on" : ""}" href="${it.href}">
+          <span class="ms ${it.fill ? "ms--fill" : ""}" aria-hidden="true">${it.icon}</span>
+          <span class="nav__lbl">${it.label}</span>
+        </a>
+      `).join("")}
+    `;
+
+    // Easter egg (Alchemy Signal fragment): triple-click the glyph.
+    let glyphClicks = 0, glyphTimer = null;
+    el.querySelector(".glyph")?.addEventListener("click", (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      glyphClicks++;
+      clearTimeout(glyphTimer);
+      glyphTimer = setTimeout(() => { glyphClicks = 0; }, 2500);
+      if (glyphClicks >= 3) {
+        glyphClicks = 0;
+        Evoke.signal?.collect("glyph");
+      }
+    });
+  }
+
+  // ---------- Top bar (slim status strip -- nav lives in the rail) ----------
   async function renderTopbar() {
     const el = document.getElementById("topbar");
     let xp = 0, level = 1, rank = "";
@@ -227,25 +278,9 @@ const Evoke = (() => {
       unreadCount = (n.notifications || []).filter(x => !x.read).length;
     } catch (e) { /* ignore */ }
 
-    const route = location.hash || "#/";
-    const navLink = (href, label) =>
-      `<a href="${href}" class="${route === href ? "is-active" : ""}">${label}</a>`;
-
     el.innerHTML = `
       <div class="topbar__left">
-        <a href="#/" class="topbar__brand" aria-label="EVOKE Prosperity — home">
-          <span class="glyph" aria-hidden="true"></span>
-          <span class="word">EVOKE</span>
-          <span class="word--sub">Prosperity</span>
-        </a>
-        <nav class="topbar__nav">
-          ${navLink("#/", "Now")}
-          ${navLink("#/map", "Campaign Map")}
-          ${navLink("#/novel", "Story")}
-          ${navLink("#/gallery", "Cohort")}
-          ${navLink("#/arcade", "Field Ops")}
-          ${navLink("#/profile", "Dossier")}
-        </nav>
+        <span class="hud">Hello, Agent</span>
       </div>
       <div class="topbar__right">
         <span class="xp-meter">${state.displayName || "Agent"} · Lv ${level}${rank ? ` ${rank}` : ""} · ${xp} XP</span>
@@ -253,22 +288,7 @@ const Evoke = (() => {
         <a href="#/profile" class="notif-bell ${unreadCount ? "has-unread" : ""}">🔔 ${unreadCount}</a>
       </div>
     `;
-
-    // Easter egg (Alchemy Signal fragment 1/5): triple-click the glyph.
-    // preventDefault so hunting the glyph doesn't navigate mid-count --
-    // the wordmark next to it still goes home.
-    let glyphClicks = 0, glyphTimer = null;
-    el.querySelector(".glyph")?.addEventListener("click", (e) => {
-      e.preventDefault();
-      e.stopPropagation();
-      glyphClicks++;
-      clearTimeout(glyphTimer);
-      glyphTimer = setTimeout(() => { glyphClicks = 0; }, 2500);
-      if (glyphClicks >= 3) {
-        glyphClicks = 0;
-        Evoke.signal?.collect("glyph");
-      }
-    });
+    renderRail();
   }
 
   // ---------- B1llbot drawer ----------

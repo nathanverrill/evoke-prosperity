@@ -7,6 +7,9 @@
    app degrades to system-ui and stays fully usable. */
 
 @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&family=Unbounded:wght@600;700;800&family=Cousine:wght@400;700&display=swap');
+/* Nav rail icons, same as the showcase. Offline fallback renders the
+   ligature word ("home", "hub") — readable, just not iconic. */
+@import url('https://fonts.googleapis.com/css2?family=Material+Symbols+Rounded:opsz,wght,FILL,GRAD@24,400,0,0&display=swap');
 
 :root {
   /* Showcase base palette */
