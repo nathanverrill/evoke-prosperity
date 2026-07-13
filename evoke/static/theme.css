@@ -737,3 +737,38 @@ input:focus, textarea:focus, select:focus {
 .gear-chip[data-rarity="standard"] { box-shadow: inset 0 0 0 1px var(--color-border-strong); color: var(--teal-050); }
 .gear-chip[data-rarity="epic"] { box-shadow: inset 0 0 0 1px var(--tier-epic); color: var(--cyan-300); }
 .gear-chip[data-rarity="legendary"] { box-shadow: inset 0 0 0 1px var(--tier-legendary), 0 0 12px rgba(217, 164, 65, 0.35); color: var(--tier-legendary); }
+
+/* ---- Team Wheels ---- */
+.wheel-row {
+  display: flex; align-items: center; gap: var(--space-3);
+  padding: var(--space-2) 0;
+  border-bottom: var(--border-width) solid var(--color-border);
+}
+.wheel-row:last-child { border-bottom: none; }
+.wheel-row__title { flex: 1; font-size: var(--text-sm); }
+.wheel-row.is-complete .wheel-row__title { color: var(--teal-050); font-weight: 600; }
+.wheel-row__wedges { display: inline-flex; gap: var(--space-1); }
+.wheel-wedge {
+  width: 14px; height: 14px;
+  border-radius: 50% 50% 50% 0;
+  transform: rotate(-45deg);
+  box-shadow: inset 0 0 0 1px var(--color-border-strong);
+}
+.wheel-wedge.is-filled { background: var(--grad-water); box-shadow: 0 0 8px rgba(0, 211, 243, 0.5); }
+.wheel-row.is-complete .wheel-wedge.is-filled { background: var(--green-400); box-shadow: var(--glow-green); }
+
+/* ---- Instructor cohort table ---- */
+.cohort-table { width: 100%; border-collapse: collapse; font-size: var(--text-sm); }
+.cohort-table th {
+  text-align: left;
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--teal-400);
+  padding: var(--space-2);
+  border-bottom: var(--border-width) solid var(--color-border-strong);
+}
+.cohort-table td { padding: var(--space-2); border-bottom: var(--border-width) solid var(--color-border); }
+.cohort-table tr.is-stuck td { color: var(--orange-500); }
+.cohort-table a { color: var(--cyan-300); text-decoration: none; }

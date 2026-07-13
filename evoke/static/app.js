@@ -63,6 +63,8 @@ const Evoke = (() => {
     worldState: () => apiGet("/api/world-state"),
     minecraftStatus: () => apiGet("/api/minecraft/status"),
     companionInfo: () => apiGet("/api/companion/info"),
+    teamWheel: (teamId) => apiGet(`/api/team/${teamId}/wheel`),
+    adminCohort: (userId) => apiGet(`/api/admin/cohort?user_id=${userId}`),
     gear: (userId) => apiGet(`/api/gear/${userId}`),
     equipGear: (userId, keys) => {
       const fd = new FormData();

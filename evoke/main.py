@@ -193,6 +193,35 @@ async def startup():
         db_execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS avatar_object_key TEXT")
         db_execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS sigil TEXT")
         db_execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS equipped_gear TEXT")
+        db_execute("""CREATE TABLE IF NOT EXISTS mc_quest_triggers (
+            id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+            quest_id UUID NOT NULL REFERENCES mc_quests(id),
+            objective VARCHAR(64) NOT NULL,
+            threshold INTEGER NOT NULL DEFAULT 1,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            UNIQUE(quest_id, objective)
+        )""")
+
+        # Scoreboard-driven quest triggers (GAME_DESIGN §6.2's implementation
+        # note): map real in-world mechanics' scoreboards to quests, keyed by
+        # quest title so this works on any volume where seed.py already ran.
+        # - rentPaid >= 1: set by halyard_rent_functions/start_rent_timer --
+        #   the learner engaged Halyard's rent/budgeting mechanic (mission 5's
+        #   quest). Verified against the committed datapack, not guessed.
+        # - evoke_walked >= 1: a reserved hook objective for 'Walk the
+        #   Mountain' -- the world (a command block / future datapack) sets it
+        #   when the learner completes the tour; documented convention, so
+        #   world-builders can wire triggers without touching this code.
+        for quest_title, objective, threshold in [
+            ("Factory Crafting I", "rentPaid", 1),
+            ("Walk the Mountain", "evoke_walked", 1),
+        ]:
+            db_execute(
+                """INSERT INTO mc_quest_triggers (quest_id, objective, threshold)
+                   SELECT id, %s, %s FROM mc_quests WHERE title = %s
+                   ON CONFLICT (quest_id, objective) DO NOTHING""",
+                (objective, threshold, quest_title)
+            )
 
     except Exception as e:
         logger.error(f"Startup error: {e}")
@@ -1024,6 +1053,19 @@ async def submit_evidence(
 
         submission_id = str(uuid.uuid4())
 
+        # Revise-and-resubmit is a first-class path (GAPS.md #3): a later
+        # submission of the same mission re-runs the AI review (which can
+        # upgrade the award tier) but must NOT re-fire the one-time
+        # completion effects -- previously every resubmission re-published
+        # MissionCompleted/XPGranted/BadgeAwarded and duplicate AwardGranted
+        # feed events, which both spammed the feed and made resubmission an
+        # infinite +100 XP faucet.
+        prior = db_fetch_one(
+            "SELECT 1 FROM submissions WHERE user_id = %s::uuid AND mission_id = %s::uuid LIMIT 1",
+            (user_id, mission_id)
+        )
+        is_resubmission = bool(prior)
+
         # Store file in MinIO
         file_bytes = await file.read()
         object_key = f"evoke-evidence/{mission_id}/{user_id}_{file.filename}"
@@ -1124,6 +1166,13 @@ async def submit_evidence(
             "object_key": object_key,
             "filename": file.filename
         })
+
+        if is_resubmission:
+            # Re-run the AI review (the upgrade path), skip every one-time
+            # completion effect, and tell the client which case this was.
+            if AI_ENABLED:
+                await trigger_ai_review(user_id, mission_id, object_key)
+            return {"status": "success", "submission_id": submission_id, "resubmission": True}
 
         # Grant common tier award locally
         award_id = str(uuid.uuid4())
@@ -1235,7 +1284,8 @@ async def submit_evidence(
         return {
             "status": "success",
             "submission_id": submission_id,
-            "award_id": str(award_id_from_db)
+            "award_id": str(award_id_from_db),
+            "resubmission": False
         }
     except HTTPException:
         raise
@@ -2248,6 +2298,100 @@ async def signal_progress(user_id: str):
         "total": len(SIGNAL_FRAGMENT_KEYS),
         "unlocked": "unlocked" in keys,
     }
+
+
+# ========== Team Wheel ==========
+@app.get("/api/team/{team_id}/wheel")
+async def team_wheel(team_id: str):
+    """GAME_DESIGN §7.1's Team Wheel, rolling-roster variant: one wheel per
+    released mission, a wedge per *current* member, filled when that member
+    has submitted the mission. Computed live from submissions, so roster
+    changes are reflected immediately (variant #1) and wheels never expire
+    (variant #3)."""
+    try:
+        members = db_fetch_all(
+            """SELECT tm.user_id, u.display_name FROM team_members tm
+               JOIN users u ON u.id = tm.user_id WHERE tm.team_id = %s::uuid""",
+            (team_id,)
+        )
+        roster = [{"user_id": str(m[0]), "display_name": m[1]} for m in members]
+        roster_ids = [m[0] for m in members]
+
+        campaign_row = db_fetch_one("SELECT id FROM campaigns WHERE key = 'evoke-prosperity'")
+        missions = db_fetch_all(
+            """SELECT id, title, week FROM missions
+               WHERE campaign_id = %s::uuid AND released_at IS NOT NULL ORDER BY week, sequence""",
+            (campaign_row[0],)
+        ) if campaign_row else []
+
+        wheels = []
+        for mission_id, title, week in missions:
+            done_rows = db_fetch_all(
+                "SELECT DISTINCT user_id FROM submissions WHERE mission_id = %s::uuid AND user_id = ANY(%s::uuid[])",
+                (mission_id, roster_ids)
+            ) if roster_ids else []
+            done = {str(r[0]) for r in done_rows}
+            wheels.append({
+                "mission_id": str(mission_id), "title": title, "week": week,
+                "wedges": [{**m, "filled": m["user_id"] in done} for m in roster],
+                "complete": bool(roster) and len(done) == len(roster),
+            })
+        return {"team_id": team_id, "roster_size": len(roster), "wheels": wheels}
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+# ========== Instructor Ops Deck ==========
+@app.get("/api/admin/cohort")
+async def admin_cohort(user_id: str):
+    """Per-learner overview for the instructor: level/XP, missions done,
+    last activity, and what's waiting on the teacher. Same unprotected-dev
+    status as the rest of /api/admin (see the release routes' note)."""
+    try:
+        org_row = db_fetch_one("SELECT org_id FROM users WHERE id = %s::uuid", (user_id,))
+        if not org_row:
+            raise HTTPException(status_code=404, detail="User/org not found")
+        learners = db_fetch_all(
+            "SELECT id, display_name, email FROM users WHERE org_id = %s::uuid AND role = 'learner' ORDER BY display_name",
+            (org_row[0],)
+        )
+        out = []
+        for lid, name, email in learners:
+            lid = str(lid)
+            try:
+                profile = os_client.get(index="player-profile", id=lid)["_source"]
+            except Exception:
+                profile = {}
+            last_sub = db_fetch_one(
+                "SELECT MAX(submitted_at) FROM submissions WHERE user_id = %s::uuid", (lid,)
+            )
+            last_checkin = db_fetch_one(
+                "SELECT MAX(checkin_date) FROM checkins WHERE user_id = %s::uuid", (lid,)
+            )
+            # Waiting on the teacher: submitted missions with no
+            # teacher_review award yet.
+            pending = db_fetch_one(
+                """SELECT COUNT(DISTINCT s.mission_id) FROM submissions s
+                   WHERE s.user_id = %s::uuid AND NOT EXISTS (
+                     SELECT 1 FROM awards a WHERE a.user_id = s.user_id
+                       AND a.mission_id = s.mission_id AND a.source = 'teacher_review')""",
+                (lid,)
+            )
+            out.append({
+                "user_id": lid, "display_name": name, "email": email,
+                "level": profile.get("level", 1),
+                "xp": profile.get("xp", 0),
+                "rank_title": progression.level_title(profile.get("level", 1)),
+                "missions_completed": len(profile.get("missions_completed", [])),
+                "last_submission": last_sub[0].isoformat() if last_sub and last_sub[0] else None,
+                "last_checkin": last_checkin[0].isoformat() if last_checkin and last_checkin[0] else None,
+                "pending_teacher_reviews": pending[0] if pending else 0,
+            })
+        return {"cohort": out}
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e))
 
 
 # ========== Identity: avatars & Agent Sigils ==========

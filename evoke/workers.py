@@ -445,6 +445,60 @@ def _process_event(event: dict, producer):
             os_client.index(index="world-state", id="keel", body=world, refresh=True)
 
     # -------------------------------------------------------------
+    # 5b. TEAM WHEEL WORKER (GAME_DESIGN §7.1, variants #1 + #3)
+    # -------------------------------------------------------------
+    # A team's wheel for a mission completes when every *current* roster
+    # member has submitted it (rolling roster, no deadline -- the doc's own
+    # recommended combination). Purely additive/celebratory: publishes
+    # TeamWheelCompleted, never gates anyone. MissionCompleted fires once
+    # per (user, mission) (resubmissions don't re-fire it), so this fires
+    # exactly once, on the final member's completion.
+    if event_type == "MissionCompleted":
+        user_id = event['data']['user_id']
+        mission_id = event['data']['mission_id']
+        now_str = datetime.datetime.now().isoformat()
+        try:
+            team_rows = _db_fetch_all("SELECT team_id FROM team_members WHERE user_id = %s::uuid", (user_id,))
+            for (team_id,) in team_rows:
+                team_id = str(team_id)
+                roster = [str(r[0]) for r in _db_fetch_all(
+                    "SELECT user_id FROM team_members WHERE team_id = %s::uuid", (team_id,)
+                )]
+                if not roster:
+                    continue
+                completed = _db_fetch_all(
+                    "SELECT DISTINCT user_id FROM submissions WHERE mission_id = %s::uuid AND user_id = ANY(%s::uuid[])",
+                    (mission_id, roster)
+                )
+                if len(completed) < len(roster):
+                    continue
+                team_name_row = _db_fetch_one("SELECT name FROM teams WHERE id = %s::uuid", (team_id,))
+                mission_row = _db_fetch_one("SELECT title FROM missions WHERE id = %s::uuid", (mission_id,))
+                team_name = team_name_row[0] if team_name_row else "A team"
+                mission_title = mission_row[0] if mission_row else "a mission"
+                producer.send('evoke-events', value={
+                    "event_type": "TeamWheelCompleted",
+                    "version": "1.0.0",
+                    "timestamp": now_str,
+                    "data": {
+                        "team_id": str(team_id), "team_name": team_name,
+                        "mission_id": mission_id, "mission_title": mission_title,
+                        "roster_size": len(roster),
+                    },
+                })
+                producer.flush()
+                wheel_activity = {
+                    "timestamp": now_str, "user_id": None, "display_name": team_name,
+                    "kind": "team_wheel", "tier": None,
+                    "message": f"◎ Team {team_name} completed the wheel for {mission_title} — every member, nobody left behind",
+                }
+                os_client.index(index="activity-feed", body=wheel_activity)
+                live_hub.broadcast({"type": "ActivityPosted", "data": wheel_activity})
+                print(f"[TEAM WHEEL] {team_name} completed {mission_title} as a full roster.")
+        except Exception as e:
+            print(f"[TEAM WHEEL] evaluation failed: {e}")
+
+    # -------------------------------------------------------------
     # 6. PRESENCE WORKER — who's in the Basin right now
     # -------------------------------------------------------------
     # The bridge's presence loop publishes MinecraftPresence snapshots;

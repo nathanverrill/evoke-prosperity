@@ -222,6 +222,9 @@ async def process_event(event: dict):
         if event_type == 'LevelUpped':
             handle_level_up(data)
             return
+        if event_type == 'TeamWheelCompleted':
+            handle_team_wheel(data)
+            return
         if event_type == 'MissionCompleted':
             handle_mission_completed(data)
             return
@@ -724,6 +727,122 @@ def handle_world_advanced(data: dict):
         rcon.close()
 
 
+def handle_team_wheel(data: dict):
+    """A whole team finished the same mission (GAME_DESIGN §7.1's Team
+    Wheel) -- announce it in Basin chat, because 'nobody left behind' is
+    exactly the ethic the shared world is supposed to celebrate."""
+    rcon = _rcon()
+    if not rcon:
+        return
+    try:
+        if not rcon.get_online_players():
+            return
+        payload = json.dumps([
+            {"text": "◎ ", "color": "aqua"},
+            {"text": f"Team {data.get('team_name', 'Unknown')} — every member completed ", "color": "yellow"},
+            {"text": data.get('mission_title', 'a mission'), "color": "gold", "bold": True},
+            {"text": ". Nobody left behind.", "color": "yellow"},
+        ])
+        rcon.execute_command(f"tellraw @a {payload}")
+        rcon.execute_command("playsound minecraft:ui.toast.challenge_complete master @a")
+    finally:
+        rcon.close()
+
+
+# ---------------------------------------------------------------------------
+# Scoreboard-driven quest completion: the world reports itself
+# ---------------------------------------------------------------------------
+# GAME_DESIGN §6.2's implementation note made real: the world's own
+# mechanics (e.g. halyard_rent_functions' rentPaid scoreboard) complete
+# quests automatically for linked players -- no self-report needed for
+# mechanics the world can actually observe. Triggers live in
+# mc_quest_triggers (seeded by the web app, extensible by world-builders
+# without touching this code). Completion goes through the exact same
+# idempotent path /api/mc-quests/{id}/submit uses: mc_quest_completions
+# dedupe + QuestCompleted + XPGranted through the real pipeline.
+
+QUEST_TRIGGER_INTERVAL = 30
+
+
+def _score_for(rcon: "RCONClient", player: str, objective: str):
+    """Read one player's score; None when unset/invalid. Response shape:
+    '<player> has <N> [<objective>]' -- anything else means no score."""
+    resp = rcon.execute_command(f"scoreboard players get {player} {objective}")
+    if " has " not in resp:
+        return None
+    try:
+        return int(resp.split(" has ", 1)[1].split()[0])
+    except (ValueError, IndexError):
+        return None
+
+
+async def quest_trigger_loop():
+    while True:
+        try:
+            await asyncio.sleep(QUEST_TRIGGER_INTERVAL)
+            conn = get_db_connection()
+            try:
+                cur = conn.cursor()
+                # Linked players × triggers, minus already-completed quests.
+                cur.execute(
+                    """SELECT ml.minecraft_username, ml.user_id, t.quest_id, t.objective, t.threshold,
+                              q.title, q.mission_id, q.kind
+                       FROM mc_quest_triggers t
+                       JOIN mc_quests q ON q.id = t.quest_id
+                       CROSS JOIN minecraft_links ml
+                       WHERE ml.server_id = 'default'
+                         AND NOT EXISTS (SELECT 1 FROM mc_quest_completions c
+                                         WHERE c.user_id = ml.user_id AND c.quest_id = t.quest_id)"""
+                )
+                pending = cur.fetchall()
+            finally:
+                return_db_connection(conn)
+
+            if not pending:
+                continue
+            rcon = _rcon()
+            if not rcon:
+                continue
+            try:
+                for username, user_id, quest_id, objective, threshold, title, mission_id, kind in pending:
+                    score = _score_for(rcon, username, objective)
+                    if score is None or score < threshold:
+                        continue
+                    conn = get_db_connection()
+                    try:
+                        cur = conn.cursor()
+                        cur.execute(
+                            "INSERT INTO mc_quest_completions (user_id, quest_id) VALUES (%s::uuid, %s::uuid) ON CONFLICT DO NOTHING",
+                            (str(user_id), str(quest_id))
+                        )
+                        conn.commit()
+                    finally:
+                        return_db_connection(conn)
+                    publish_event("QuestCompleted", {
+                        "user_id": str(user_id),
+                        "quest_id": str(quest_id),
+                        "mission_id": str(mission_id) if mission_id else None,
+                        "kind": kind,
+                        "source": "scoreboard",
+                    })
+                    publish_event("XPGranted", {
+                        "user_id": str(user_id),
+                        "amount": 40,
+                        "reason": "quest_completed",
+                        "quest_id": str(quest_id),
+                    })
+                    payload = json.dumps([
+                        {"text": "✔ ", "color": "green"},
+                        {"text": f"Quest logged: {title} — the Basin saw you do it.", "color": "yellow"},
+                    ])
+                    rcon.execute_command(f"tellraw {username} {payload}")
+                    print(f"✓ Scoreboard trigger: {username} completed '{title}' ({objective}>={threshold}, score {score})")
+            finally:
+                rcon.close()
+        except Exception as e:
+            print(f"Quest trigger loop error: {e}")
+
+
 # ---------------------------------------------------------------------------
 # Presence: who's in the Basin right now (feeds the web's live card)
 # ---------------------------------------------------------------------------
@@ -856,7 +975,8 @@ async def main():
         event_consumer_loop(),
         offline_delivery_loop(),
         heartbeat_loop(),
-        presence_loop()
+        presence_loop(),
+        quest_trigger_loop()
     )
 
 if __name__ == "__main__":

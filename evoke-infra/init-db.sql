@@ -281,6 +281,22 @@ CREATE TABLE minigame_scores (
 CREATE INDEX idx_minigame_scores_user_game ON minigame_scores(user_id, game_key);
 CREATE INDEX idx_minigame_scores_game_score ON minigame_scores(game_key, score DESC);
 
+-- Scoreboard-driven quest triggers: "the world reports itself"
+-- (GAME_DESIGN.md §6.2's implementation note: wire QuestCompleted to the
+-- real in-world mechanics' scoreboards instead of relying on self-report).
+-- The bridge polls each linked player's score for `objective`; score >=
+-- threshold auto-completes the mapped quest through the normal pipeline.
+-- Rows are seeded idempotently by main.py startup (title-keyed), so this
+-- also works on pre-existing volumes.
+CREATE TABLE mc_quest_triggers (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    quest_id UUID NOT NULL REFERENCES mc_quests(id),
+    objective VARCHAR(64) NOT NULL,
+    threshold INTEGER NOT NULL DEFAULT 1,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE(quest_id, objective)
+);
+
 -- Small key-value store for world-anchored facts the bridge must remember
 -- across restarts -- currently just 'beacon_pos', the spot where the Keel
 -- Restoration Beacon was anchored (see evoke-minecraft-bridge/bridge.py's

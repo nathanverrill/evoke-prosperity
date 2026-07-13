@@ -17,8 +17,18 @@ function missionState(mission, profile) {
   return completed.includes(mission.id) ? "complete" : "available";
 }
 
+// Backend timestamps are naive UTC (datetime.now() in a UTC container, no
+// timezone suffix) -- JS would parse them as *local* time, shifting
+// everything by the viewer's UTC offset (surfaced as "-1d ago" on the Ops
+// Deck). Append Z unless the string already carries zone info.
+function parseUtc(isoTimestamp) {
+  if (!isoTimestamp) return null;
+  const hasZone = /Z$|[+-]\d\d:?\d\d$/.test(isoTimestamp);
+  return new Date(hasZone ? isoTimestamp : isoTimestamp + "Z");
+}
+
 function timeAgo(isoTimestamp) {
-  const seconds = Math.floor((Date.now() - new Date(isoTimestamp)) / 1000);
+  const seconds = Math.max(0, Math.floor((Date.now() - parseUtc(isoTimestamp)) / 1000));
   if (seconds < 60) return "just now";
   if (seconds < 3600) return `${Math.floor(seconds / 60)}m ago`;
   if (seconds < 86400) return `${Math.floor(seconds / 3600)}h ago`;
@@ -396,16 +406,23 @@ Evoke.screens.missionBrief = async function missionBrief(missionId) {
         </div>
       ` : ""}
 
+      ${(() => {
+        // Revise-and-resubmit is a visible, welcomed path (GAPS.md #3), not
+        // a loophole: a prior submission changes the framing, never blocks.
+        const alreadySubmitted = timeline && (timeline.timeline || []).some(s => s.id === "submitted" && s.status === "completed");
+        return `
       <div class="card">
-        <div class="card__eyebrow">Submit Evidence</div>
+        <div class="card__eyebrow">${alreadySubmitted ? "Resubmit — strengthen your work" : "Submit Evidence"}</div>
+        ${alreadySubmitted ? `<p class="empty-state">You've already completed this mission. A stronger resubmission can upgrade your award tier — your first take is never punished, and nothing you earned gets taken back.</p>` : ""}
         <form class="evidence-form" id="evidence-form">
           <input type="file" name="file" required>
           <label for="evidence-reflection">Field Note ${mission.superpower ? `— what did this mission teach you about being a ${Evoke.escapeHtml(mission.superpower)}?` : ""}</label>
           <textarea id="evidence-reflection" name="reflection" rows="3" placeholder="Optional — B1llbot reads these."></textarea>
-          <button type="submit" class="btn btn-primary">Submit Mission Evidence</button>
+          <button type="submit" class="btn btn-primary">${alreadySubmitted ? "Resubmit Evidence" : "Submit Mission Evidence"}</button>
         </form>
         <p id="evidence-status"></p>
-      </div>
+      </div>`;
+      })()}
     </div>
   `);
 
@@ -422,9 +439,17 @@ Evoke.screens.missionBrief = async function missionBrief(missionId) {
     if (reflectionInput.value.trim()) formData.append("reflection", reflectionInput.value.trim());
     statusEl.textContent = "Submitting...";
     try {
-      await api.submitEvidence(formData);
-      statusEl.textContent = "Submitted!";
-      setTimeout(() => { location.hash = `#/mission/${missionId}/debrief?fresh=1`; }, 800);
+      const res = await api.submitEvidence(formData);
+      if (res.resubmission) {
+        // No fresh-completion celebration for a resubmission -- toast the
+        // upgrade path and land on the normal debrief instead.
+        Evoke.toast("Resubmitted — the AI Coach is re-reviewing. Improvements can upgrade your award tier.");
+        statusEl.textContent = "Resubmitted!";
+        setTimeout(() => { location.hash = `#/mission/${missionId}/debrief`; }, 800);
+      } else {
+        statusEl.textContent = "Submitted!";
+        setTimeout(() => { location.hash = `#/mission/${missionId}/debrief?fresh=1`; }, 800);
+      }
     } catch (err) {
       statusEl.textContent = "Submission failed: " + err.message;
     }
@@ -865,7 +890,10 @@ Evoke.screens.playerProfile = async function playerProfile(userId) {
 
 Evoke.screens.teamProfile = async function teamProfile(teamId) {
   const { api, mount } = Evoke;
-  const team = await api.teamProfile(teamId);
+  const [team, wheelRes] = await Promise.all([
+    api.teamProfile(teamId),
+    api.teamWheel(teamId).catch(() => ({ wheels: [], roster_size: 0 })),
+  ]);
 
   mount(`
     <div class="stack">
@@ -879,6 +907,22 @@ Evoke.screens.teamProfile = async function teamProfile(teamId) {
       <section class="card">
         <div class="card__eyebrow">Team Mission Progress</div>
         <p>${team.missions_completed_count} / 12 complete (team-wide)</p>
+      </section>
+
+      <section class="card">
+        <div class="card__eyebrow">Team Wheels — nobody left behind</div>
+        <p class="empty-state">One wheel per released mission; a wedge fills when that member submits it. The wheel completing is a team celebration, never a gate — a wedge stays open as long as it needs to.</p>
+        <div class="stack-sm">
+          ${(wheelRes.wheels || []).length ? wheelRes.wheels.map(w => `
+            <div class="wheel-row ${w.complete ? "is-complete" : ""}">
+              <span class="wheel-row__title">${w.complete ? "◎ " : ""}${Evoke.escapeHtml(w.title)}</span>
+              <span class="wheel-row__wedges">
+                ${w.wedges.map(wd => `<span class="wheel-wedge ${wd.filled ? "is-filled" : ""}" title="${Evoke.escapeHtml(wd.display_name)}${wd.filled ? " — submitted" : " — not yet"}"></span>`).join("")}
+              </span>
+              <span class="empty-state">${w.complete ? "complete — every member" : `${w.wedges.filter(x => x.filled).length}/${w.wedges.length}`}</span>
+            </div>
+          `).join("") : `<p class="empty-state">No released missions yet.</p>`}
+        </div>
       </section>
 
       <section class="card">
@@ -910,12 +954,51 @@ Evoke.screens.teamProfile = async function teamProfile(teamId) {
 // today, not a promoted destination.
 Evoke.screens.admin = async function admin() {
   const { api, mount } = Evoke;
-  const missionsRes = await api.adminMissions(Evoke.state.userId).catch(() => ({ missions: [] }));
+  const [missionsRes, cohortRes, world, mcStatus] = await Promise.all([
+    api.adminMissions(Evoke.state.userId).catch(() => ({ missions: [] })),
+    api.adminCohort(Evoke.state.userId).catch(() => ({ cohort: [] })),
+    api.worldState().catch(() => null),
+    api.minecraftStatus().catch(() => null),
+  ]);
   const missions = missionsRes.missions || [];
+  const cohort = cohortRes.cohort || [];
+  const daysAgo = (iso) => iso ? Math.max(0, Math.floor((Date.now() - parseUtc(iso)) / 86400000)) : null;
 
   mount(`
     <div class="stack">
-      <h1>Mission Release — Admin</h1>
+      <div class="row-between">
+        <h1>Instructor Ops Deck</h1>
+        <span class="row">
+          ${world ? `<span class="chip">KEEL STAGE ${world.stage}/${world.total_stages}</span>` : ""}
+          <span class="chip ${mcStatus && mcStatus.server_online ? "chip--green" : ""}">${mcStatus && mcStatus.server_online ? `<span class="dot"></span>BASIN ONLINE · ${(mcStatus.online_players || []).length} IN-WORLD` : "BASIN STATUS UNKNOWN"}</span>
+        </span>
+      </div>
+
+      <section class="card">
+        <div class="card__eyebrow">Cohort — who needs you</div>
+        ${cohort.length ? `
+          <table class="cohort-table">
+            <thead><tr><th>Agent</th><th>Rank</th><th>Missions</th><th>Last submission</th><th>Waiting on you</th></tr></thead>
+            <tbody>
+              ${cohort.map(c => {
+                const days = daysAgo(c.last_submission);
+                const stuck = days === null || days >= 7;
+                return `
+                <tr class="${stuck ? "is-stuck" : ""}">
+                  <td><a href="#/profile/${c.user_id}">${Evoke.escapeHtml(c.display_name)}</a></td>
+                  <td>Lv ${c.level} · ${Evoke.escapeHtml(c.rank_title)}</td>
+                  <td>${c.missions_completed}/12</td>
+                  <td>${days === null ? `<span class="empty-state">never</span>` : (days === 0 ? "today" : `${days}d ago`)}${stuck ? " ⚠" : ""}</td>
+                  <td>${c.pending_teacher_reviews ? `<strong>${c.pending_teacher_reviews} review${c.pending_teacher_reviews === 1 ? "" : "s"}</strong>` : `<span class="empty-state">—</span>`}</td>
+                </tr>`;
+              }).join("")}
+            </tbody>
+          </table>
+          <p class="empty-state" style="margin-top:var(--space-2)">⚠ = no submission in 7+ days. Reviews happen in the Brightspace sim's teacher screen; awards land here automatically.</p>
+        ` : `<p class="empty-state">No learners in this org yet.</p>`}
+      </section>
+
+      <h2 class="section-title">Mission Release</h2>
       <p class="empty-state">Missions are gated by manual release, not automatic order. Week 1's first mission releases on its own; everything else waits here.</p>
       <div class="stack-sm">
         ${missions.map(m => `
@@ -1060,7 +1143,10 @@ Evoke.screens.vault = async function vault(missionId) {
           : `<p class="empty-state">No awards yet for this mission.</p>`}
       </div>
 
-      <a class="btn" href="#/">← Back to Operations Hub</a>
+      <div class="row">
+        <a class="btn" href="#/">← Back to Operations Hub</a>
+        <a class="btn btn-primary" href="#/mission/${missionId}">Strengthen &amp; Resubmit →</a>
+      </div>
     </div>
   `);
   Evoke.signal?.bindNodes();
