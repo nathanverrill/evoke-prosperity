@@ -35,7 +35,7 @@ echo "✓ Postgres is ready"
 # Seed database
 echo ""
 echo "🌱 Seeding database with missions, quests, and test users..."
-python seed.py || {
+python3 seed.py || {
     echo "⚠️  Seed script failed. Make sure Postgres is healthy."
     exit 1
 }
