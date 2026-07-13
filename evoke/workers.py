@@ -519,6 +519,19 @@ def _process_event(event: dict, producer):
         os_client.index(index="activity-feed", body=doc)
         live_hub.broadcast({"type": "ActivityPosted", "data": doc})
 
+    # Season drop (console-UX gap #10): a mission release is a cohort-wide
+    # event, not tied to one learner's own actions -- no user_id to key the
+    # feed doc on the way the other ANNOUNCEMENTS rows do above.
+    if event_type == "MissionReleased":
+        now_str = datetime.datetime.now().isoformat()
+        doc = {
+            "timestamp": now_str, "user_id": None, "display_name": None,
+            "kind": "mission_released", "tier": None,
+            "message": f"🎬 NEW MISSION — Week {event['data']['week']}: {event['data']['title']} is live",
+        }
+        os_client.index(index="activity-feed", body=doc)
+        live_hub.broadcast({"type": "ActivityPosted", "data": doc})
+
     # -------------------------------------------------------------
     # 6. PRESENCE WORKER — who's in the Basin right now
     # -------------------------------------------------------------

@@ -594,6 +594,12 @@ a.objectives-list__label:hover { color: var(--cyan-300); }
 .toast[data-kind="world"] {
   box-shadow: inset 0 0 0 1px var(--tier-legendary), 0 0 30px rgba(217, 164, 65, 0.4);
 }
+/* Season drop (console-UX gap #10) -- cyan-accented, distinct from the
+   amber world-state toast, so a new mission reads as "new content" rather
+   than "cohort progress." */
+.toast[data-kind="release"] {
+  box-shadow: inset 0 0 0 1px var(--cyan-500), var(--glow-md);
+}
 .toast.is-leaving { opacity: 0; transition: opacity 0.4s; }
 @keyframes toast-in {
   from { transform: translateY(8px); opacity: 0; }

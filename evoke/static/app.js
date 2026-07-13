@@ -277,7 +277,21 @@ const Evoke = (() => {
     } else if (msg.type === "ActivityPosted") {
       // Someone else's award/quest landing right now -- worth a nudge, but
       // not for my own actions (those already celebrate full-screen).
-      if (d.user_id !== state.userId) toast(escapeHtml(d.message || ""));
+      // mission_released gets its own richer season-drop toast below
+      // (same underlying release, two live-hub broadcasts -- this feed
+      // copy would otherwise double up with it).
+      if (d.user_id !== state.userId && d.kind !== "mission_released") toast(escapeHtml(d.message || ""));
+    } else if (msg.type === "MissionReleased") {
+      // Season drop (console-UX gap #10): mission release is already this
+      // campaign's real content-drop mechanic, just never announced. Every
+      // connected browser gets this, including the releasing instructor's.
+      sfx.award();
+      toast(
+        `<span class="chip chip--green" style="margin-bottom:var(--space-2);display:inline-flex">NEW</span><br>` +
+        `<strong>Week ${d.week}: ${escapeHtml(d.title || "")}</strong><br>` +
+        `<a href="#/mission/${d.mission_id}">Open Mission Brief →</a>`,
+        { kind: "release", ttl: 12000 }
+      );
     } else if (msg.type === "XPGranted" && d.user_id === state.userId) {
       sfx.xpTick();
       renderTopbar();

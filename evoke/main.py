@@ -1049,11 +1049,30 @@ async def admin_list_missions(user_id: str):
 
 @app.post("/api/admin/missions/{mission_id}/release")
 async def admin_release_mission(mission_id: str):
+    """Console-player feedback (BUILD_PLAN_2's "season drops" gap): a
+    stage/mission release is already this campaign's real content-drop
+    mechanic, but nothing ever announced it -- CoD frames a season launch
+    with a NEW banner naming what's inside; this just gives our existing
+    mechanic the same framing. Checks released_at *before* the UPDATE
+    (db_execute doesn't surface RETURNING, and db_fetch_one doesn't commit
+    -- see their definitions above -- so this can't be done in one
+    UPDATE...RETURNING call) to know whether this call actually flipped it,
+    so a repeat call on an already-released mission never fires a duplicate
+    announcement."""
     try:
+        mission = db_fetch_one("SELECT title, week, arc, released_at FROM missions WHERE id = %s::uuid", (mission_id,))
+        was_locked = bool(mission) and mission[3] is None
         db_execute(
             "UPDATE missions SET released_at = CURRENT_TIMESTAMP WHERE id = %s::uuid AND released_at IS NULL",
             (mission_id,)
         )
+        if was_locked:
+            await publish_event("MissionReleased", {
+                "mission_id": mission_id,
+                "title": mission[0],
+                "week": mission[1],
+                "arc": mission[2],
+            })
         return {"status": "released"}
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))
