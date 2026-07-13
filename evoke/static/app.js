@@ -36,6 +36,7 @@ const Evoke = (() => {
     missions: (userId) => apiGet(`/api/missions?user_id=${userId}`),
     submitEvidence: (formData) => apiPostForm("/api/submit-evidence", formData),
     notifications: (userId) => apiGet(`/api/notifications/${userId}`),
+    guideOverlay: (userId) => apiGet(`/api/guide-overlay/${userId}`),
     awards: (userId) => apiGet(`/api/awards/${userId}`),
     collectAward: (awardId, userId) => fetch(`/api/awards/${awardId}/collect?user_id=${userId}`, { method: "POST" }).then(r => r.json()),
     playerProfile: (userId) => apiGet(`/api/profile/player/${userId}`),
@@ -291,10 +292,107 @@ const Evoke = (() => {
       <div class="topbar__right">
         <span class="xp-meter">${state.displayName || "Agent"} · Lv ${level}${rank ? ` ${rank}` : ""} · ${xp} XP</span>
         <span class="streak-pill" title="Streak tracking not built yet">🔥 —</span>
-        <a href="#/profile" class="notif-bell ${unreadCount ? "has-unread" : ""}">🔔 ${unreadCount}</a>
+        <button type="button" id="notif-bell-btn" class="notif-bell ${unreadCount ? "has-unread" : ""}">🔔 ${unreadCount}</button>
       </div>
     `;
     renderRail();
+    document.getElementById("notif-bell-btn")?.addEventListener("click", toggleGuideOverlay);
+  }
+
+  // ---------- Guide overlay (console-UX gap #6) ----------
+  // Xbox-button-from-anywhere pattern: notifications, pending awards, and
+  // recent wisdom in a panel that opens over whatever screen you're on,
+  // instead of the bell navigating away to the Dossier.
+  async function renderGuideOverlay() {
+    const data = await api.guideOverlay(state.userId).catch(() => null);
+    if (!data) return;
+    let el = document.getElementById("guide-overlay");
+    if (!el) {
+      el = document.createElement("div");
+      el.id = "guide-overlay";
+      el.className = "guide-overlay";
+      el.addEventListener("click", (e) => { if (e.target === el) closeGuideOverlay(); });
+      document.body.appendChild(el);
+    }
+    el.innerHTML = `
+      <div class="card guide-overlay__panel">
+        <div class="row-between">
+          <div class="card__eyebrow">Guide</div>
+          <button type="button" class="btn" id="guide-overlay-close">✕</button>
+        </div>
+
+        <div class="guide-overlay__section">
+          <div class="card__eyebrow">Pending Awards</div>
+          ${data.pending_awards.length ? data.pending_awards.map(a => `
+            <div class="award is-pending" data-tier="${a.tier}">
+              <div>
+                <span class="award__tier">${a.tier}</span>
+                <span>${escapeHtml(a.mission_title)}</span>
+              </div>
+              <button type="button" class="btn btn-primary guide-overlay__collect" data-award-id="${a.id}">Collect</button>
+            </div>
+          `).join("") : `<p class="empty-state">Nothing waiting — you're all caught up.</p>`}
+        </div>
+
+        ${data.link_request.pending ? `
+          <div class="guide-overlay__section">
+            <div class="card__eyebrow">Basin Link Request</div>
+            <p><strong>${escapeHtml(data.link_request.minecraft_username)}</strong> wants to link to your account.</p>
+            <div class="row">
+              <button type="button" class="btn btn-primary" id="guide-overlay-link-accept">Accept</button>
+              <button type="button" class="btn" id="guide-overlay-link-reject">Reject</button>
+            </div>
+          </div>
+        ` : ""}
+
+        <div class="guide-overlay__section">
+          <div class="card__eyebrow">Recent Wisdom</div>
+          ${data.recent_wisdom ? `<p class="wisdom-line">“${escapeHtml(data.recent_wisdom)}” <span class="empty-state">— B1llbot</span></p>` : `<p class="empty-state">File a Field Report to start your journal.</p>`}
+        </div>
+
+        <a class="btn" href="#/profile" id="guide-overlay-dossier">Open full Dossier →</a>
+      </div>
+    `;
+
+    document.getElementById("guide-overlay-close").addEventListener("click", closeGuideOverlay);
+    document.getElementById("guide-overlay-dossier").addEventListener("click", closeGuideOverlay);
+    el.querySelectorAll(".guide-overlay__collect").forEach(btn => {
+      btn.addEventListener("click", async () => {
+        btn.disabled = true;
+        btn.textContent = "Collecting...";
+        try {
+          await api.collectAward(btn.dataset.awardId, state.userId);
+          await renderGuideOverlay();
+          await renderTopbar();
+        } catch (e) {
+          btn.disabled = false;
+          btn.textContent = "Collect";
+        }
+      });
+    });
+    document.getElementById("guide-overlay-link-accept")?.addEventListener("click", () => resolveLinkRequest(true));
+    document.getElementById("guide-overlay-link-reject")?.addEventListener("click", () => resolveLinkRequest(false));
+  }
+
+  async function resolveLinkRequest(accept) {
+    const fd = new FormData();
+    fd.append("accept", accept);
+    try {
+      await apiPostForm(`/api/minecraft/link-confirm?user_id=${state.userId}`, fd);
+    } catch (e) { /* surfaced by the panel just not clearing below */ }
+    await renderGuideOverlay();
+  }
+
+  function toggleGuideOverlay() {
+    const el = document.getElementById("guide-overlay");
+    if (el && el.classList.contains("is-open")) { closeGuideOverlay(); return; }
+    renderGuideOverlay().then(() => {
+      document.getElementById("guide-overlay")?.classList.add("is-open");
+    });
+  }
+
+  function closeGuideOverlay() {
+    document.getElementById("guide-overlay")?.classList.remove("is-open");
   }
 
   // ---------- B1llbot drawer ----------
@@ -413,6 +511,12 @@ const Evoke = (() => {
 
   function setupKeyboardNav() {
     document.addEventListener("keydown", (e) => {
+      const overlayOpen = document.getElementById("guide-overlay")?.classList.contains("is-open");
+      if (e.key === "Escape" && overlayOpen) {
+        e.preventDefault();
+        closeGuideOverlay();
+        return;
+      }
       if (e.key === "Escape" || (e.key === "Backspace" && !isEditableTarget(document.activeElement))) {
         e.preventDefault();
         history.back();

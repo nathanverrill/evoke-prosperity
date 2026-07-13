@@ -1510,6 +1510,45 @@ async def get_notifications(user_id: str):
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))
 
+
+@app.get("/api/guide-overlay/{user_id}")
+async def get_guide_overlay(user_id: str):
+    """Console-player feedback (BUILD_PLAN_2's "Guide overlay" gap): the
+    Xbox-button overlay pattern -- notifications, awards, presence, all from
+    wherever you are, without leaving what you're doing. Aggregates three
+    things that already had their own endpoints (pending awards, the link-
+    confirm flow, the daily wisdom line) into one call so the bell can open
+    an in-place panel instead of navigating to the Dossier."""
+    try:
+        pending = db_fetch_all(
+            """SELECT a.id, a.tier, a.source, m.title
+               FROM awards a JOIN missions m ON m.id = a.mission_id
+               WHERE a.user_id = %s::uuid AND a.collected_at IS NULL
+               ORDER BY a.awarded_at DESC""",
+            (user_id,)
+        )
+        pending_awards = [{"id": str(a[0]), "tier": a[1], "source": a[2], "mission_title": a[3]} for a in pending]
+
+        wisdom_row = db_fetch_one(
+            "SELECT wisdom FROM daily_reflections WHERE user_id = %s::uuid ORDER BY reflection_date DESC LIMIT 1",
+            (user_id,)
+        )
+
+        link_row = db_fetch_one(
+            """SELECT code, minecraft_username FROM mc_link_codes
+               WHERE user_id = %s::uuid AND status = 'matched' ORDER BY created_at DESC LIMIT 1""",
+            (user_id,)
+        )
+
+        return {
+            "pending_awards": pending_awards,
+            "recent_wisdom": wisdom_row[0] if wisdom_row else None,
+            "link_request": {"pending": True, "minecraft_username": link_row[1]} if link_row else {"pending": False},
+        }
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
 @app.get("/api/awards/{user_id}")
 async def get_awards(user_id: str):
     """Get all awards for a user"""
