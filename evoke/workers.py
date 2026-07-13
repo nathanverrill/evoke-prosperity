@@ -8,7 +8,8 @@ from kafka import KafkaConsumer
 import psycopg2
 from psycopg2.pool import SimpleConnectionPool
 from evoke.clients import s3_client, os_client, ai_client, get_producer, REDPANDA_BROKER, AI_ENABLED, AI_MODEL
-from evoke import skills_framework
+from evoke import skills_framework, progression, world_state
+from evoke.live import live_hub
 
 # Small, self-contained Postgres pool for the PROFILE WORKER's team-membership
 # lookups. Deliberately not shared with main.py's db_pool (a separate pool
@@ -39,16 +40,10 @@ def _db_fetch_all(query: str, params=None):
         _db_pool.putconn(conn)
 
 
-def xp_to_level(xp: int) -> int:
-    """Placeholder level curve (overview.md's example table: 0/100/250/450...)
-    — GAPS.md flags the real XP economy as still undecided; this just gives
-    profiles something coherent to render in the meantime."""
-    thresholds = [0, 100, 250, 450, 700, 1000, 1350, 1750, 2200, 2700]
-    level = 1
-    for i, t in enumerate(thresholds):
-        if xp >= t:
-            level = i + 1
-    return level
+# Level curve + rank titles moved to evoke/progression.py (levels now have
+# names and a level-up moment, not just a number); re-exported so anything
+# importing xp_to_level from here keeps working.
+xp_to_level = progression.xp_to_level
 
 
 def generate_ai_insight(preview_text: str) -> str:
@@ -265,8 +260,35 @@ def _process_event(event: dict, producer):
                     badge["earned_at"] = now_str
 
         elif event_type == "XPGranted":
+            old_level = profile.get("level", 1)
             profile["xp"] = profile.get("xp", 0) + event['data']['amount']
             profile["level"] = xp_to_level(profile["xp"])
+            if profile["level"] > old_level:
+                # A rank-up is its own event (LevelUpped), not just a bigger
+                # number in the projection — the bridge turns it into an
+                # in-game title/fireworks for a linked player, the web gets
+                # a celebration via the live hub, and the feed announces it.
+                title = progression.level_title(profile["level"])
+                name_row = _db_fetch_one("SELECT display_name FROM users WHERE id = %s", (user_id,))
+                display_name = name_row[0] if name_row else "An agent"
+                producer.send('evoke-events', value={
+                    "event_type": "LevelUpped",
+                    "version": "1.0.0",
+                    "timestamp": now_str,
+                    "data": {
+                        "user_id": user_id,
+                        "level": profile["level"],
+                        "title": title,
+                        "xp": profile["xp"],
+                        "display_name": display_name,
+                    },
+                })
+                producer.flush()
+                os_client.index(index="activity-feed", body={
+                    "timestamp": now_str, "user_id": user_id, "display_name": display_name,
+                    "kind": "level_up", "tier": None,
+                    "message": f"{display_name} reached Level {profile['level']} — {title}",
+                })
 
         elif event_type == "QuestCompleted":
             quest_id = event['data']['quest_id']
@@ -353,10 +375,96 @@ def _process_event(event: dict, producer):
             message = f"{display_name} completed {quest_title} in the Basin Simulation"
             kind, tier_out = "quest_completed", None
 
-        os_client.index(index="activity-feed", body={
+        activity_doc = {
             "timestamp": now_str, "user_id": user_id, "display_name": display_name,
             "kind": kind, "tier": tier_out, "message": message,
-        })
+        }
+        os_client.index(index="activity-feed", body=activity_doc)
+        # The feed message carries the display name the raw event lacks --
+        # broadcast it too so browsers can toast/prepend without a lookup.
+        live_hub.broadcast({"type": "ActivityPosted", "data": activity_doc})
+
+    # -------------------------------------------------------------
+    # 5. WORLD WORKER — collective world-state (GAPS.md #5)
+    # -------------------------------------------------------------
+    # Every distinct (learner, mission) completion anywhere in the cohort
+    # advances Keel's restoration; see evoke/world_state.py for the design
+    # and its variants. Standalone `if` for the same reason the ACTIVITY
+    # WORKER is: MissionCompleted is also consumed by the PROFILE WORKER's
+    # elif chain above, and elif chains are mutually exclusive.
+    if event_type == "MissionCompleted":
+        user_id = event['data']['user_id']
+        mission_id = event['data']['mission_id']
+        now_str = datetime.datetime.now().isoformat()
+
+        try:
+            world = os_client.get(index="world-state", id="keel")['_source']
+        except Exception:
+            world = {"completions": 0, "stage": 0, "counted": {}, "history": []}
+
+        # Dedupe by (user, mission): /api/submit-evidence publishes
+        # MissionCompleted on *every* submission, including resubmissions of
+        # the same mission — those shouldn't advance the world twice.
+        counted = world.setdefault("counted", {})
+        user_missions = counted.setdefault(user_id, [])
+        if mission_id not in user_missions:
+            user_missions.append(mission_id)
+            world["completions"] = world.get("completions", 0) + 1
+            old_stage = world.get("stage", 0)
+            new_stage = world_state.stage_for(world["completions"])
+            world["stage"] = new_stage
+            world["updated_at"] = now_str
+
+            if new_stage > old_stage:
+                meta = world_state.stage_meta(new_stage)
+                world.setdefault("history", []).append(
+                    {"stage": new_stage, "title": meta["title"], "at": now_str}
+                )
+                producer.send('evoke-events', value={
+                    "event_type": "WorldStateAdvanced",
+                    "version": "1.0.0",
+                    "timestamp": now_str,
+                    "data": {
+                        "stage": new_stage,
+                        "total_stages": meta["total_stages"],
+                        "title": meta["title"],
+                        "narrative": meta["narrative"],
+                        "completions": world["completions"],
+                    },
+                })
+                producer.flush()
+                world_activity = {
+                    "timestamp": now_str, "user_id": None, "display_name": "Keel",
+                    "kind": "world_state", "tier": None,
+                    "message": f"⚡ Keel Restoration reached Stage {new_stage}: {meta['title']} — {meta['narrative']}",
+                }
+                os_client.index(index="activity-feed", body=world_activity)
+                live_hub.broadcast({"type": "ActivityPosted", "data": world_activity})
+                print(f"[WORLD WORKER] Keel advanced to stage {new_stage} ({meta['title']}).")
+
+            os_client.index(index="world-state", id="keel", body=world, refresh=True)
+
+    # -------------------------------------------------------------
+    # 6. PRESENCE WORKER — who's in the Basin right now
+    # -------------------------------------------------------------
+    # The bridge's presence loop publishes MinecraftPresence snapshots;
+    # projecting them here (rather than the web app polling RCON itself)
+    # keeps RCON access single-owner in the bridge, per the existing split.
+    if event_type == "MinecraftPresence":
+        os_client.index(index="minecraft-status", id="default", body={
+            "server_online": event['data'].get('server_online', False),
+            "online_players": event['data'].get('online_players', []),
+            "linked_players": event['data'].get('linked_players', {}),
+            "updated_at": datetime.datetime.now().isoformat(),
+        }, refresh=True)
+
+    # -------------------------------------------------------------
+    # Live push — every processed event goes to connected browsers
+    # -------------------------------------------------------------
+    # The workers and the FastAPI app share one process/loop, so this is a
+    # plain in-process fan-out (evoke/live.py). Browsers use it for
+    # freshness only; the projections above remain the source of truth.
+    live_hub.broadcast({"type": event_type, "data": event.get('data', {})})
 
 
 async def evoke_workers_loop():

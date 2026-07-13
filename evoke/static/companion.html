@@ -3,14 +3,27 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>EVOKE Companion</title>
+  <title>EVOKE Field Kit</title>
+  <meta name="theme-color" content="#2c3e50">
+  <link rel="manifest" href="manifest.webmanifest">
+  <link rel="icon" href="fieldkit-icon.svg" type="image/svg+xml">
   <link rel="stylesheet" href="tokens.css">
   <link rel="stylesheet" href="layout.css">
   <link rel="stylesheet" href="theme.css">
 </head>
 <body>
   <div class="companion-page stack" id="companion-root">
-    <h1 class="card__title">EVOKE Companion</h1>
+    <h1 class="card__title">EVOKE Field Kit</h1>
+
+    <section class="card world-meter">
+      <div class="card__eyebrow">Keel Restoration</div>
+      <div id="world">Loading...</div>
+    </section>
+
+    <section class="card">
+      <div class="card__eyebrow"><span class="presence-dot" id="presence-dot"></span> In the Basin</div>
+      <div id="presence" class="empty-state">Loading...</div>
+    </section>
 
     <section class="card">
       <div class="card__eyebrow">Current Mission</div>
@@ -52,14 +65,62 @@
     }
 
     async function init() {
+      if ("serviceWorker" in navigator) {
+        navigator.serviceWorker.register("sw.js").catch(() => {});
+      }
       const res = await fetch("/api/dev-login", { method: "POST" }).then(r => r.json());
       userId = res.user_id;
+      connectLive();
       await loadData();
       setInterval(loadData, 10000);
     }
 
+    // Live push channel -- same /ws feed the Hub uses. The 10s poll below
+    // stays as the safety net; this just makes the phone feel alive
+    // (presence flips, world stages, awards) without waiting for it.
+    function connectLive() {
+      let retryMs = 2000;
+      function open() {
+        const proto = location.protocol === "https:" ? "wss" : "ws";
+        const ws = new WebSocket(`${proto}://${location.host}/ws`);
+        ws.onopen = () => { retryMs = 2000; };
+        ws.onmessage = (e) => {
+          let msg;
+          try { msg = JSON.parse(e.data); } catch { return; }
+          if (["MinecraftPresence", "WorldStateAdvanced", "AwardGranted", "MissionCompleted"].includes(msg.type)) loadData();
+        };
+        ws.onclose = () => { setTimeout(open, retryMs); retryMs = Math.min(retryMs * 2, 15000); };
+      }
+      open();
+    }
+
+    async function loadWorldAndPresence() {
+      try {
+        const world = await fetch("/api/world-state").then(r => r.json());
+        const pct = Math.round((world.stage / world.total_stages) * 100);
+        document.getElementById("world").innerHTML = `
+          <strong>Stage ${world.stage}: ${escapeHtml(world.current.title)}</strong>
+          <div class="world-meter__track" style="margin-top:8px"><div class="world-meter__fill" style="width:${pct}%"></div></div>
+          <p class="empty-state" style="margin-top:8px">${escapeHtml(world.current.narrative)}</p>`;
+      } catch (e) { /* leave last reading */ }
+      try {
+        const st = await fetch("/api/minecraft/status").then(r => r.json());
+        document.getElementById("presence-dot").classList.toggle("is-online", !!st.server_online);
+        const players = st.online_players || [];
+        document.getElementById("presence").innerHTML = st.server_online
+          ? (players.length
+              ? players.map(p => {
+                  const l = (st.linked_players || {})[p];
+                  return `<p>${l ? `<strong>${escapeHtml(l.display_name)}</strong> as ${escapeHtml(p)}` : escapeHtml(p)}</p>`;
+                }).join("")
+              : `<span class="empty-state">The Basin is quiet.</span>`)
+          : `<span class="empty-state">Status unknown right now.</span>`;
+      } catch (e) { /* leave last reading */ }
+    }
+
     async function loadData() {
       if (!userId) return;
+      loadWorldAndPresence();
       try {
         const missions = await fetch(`/api/missions?user_id=${userId}`).then(r => r.json());
         const m = (missions.missions || [])[0];

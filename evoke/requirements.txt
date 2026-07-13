@@ -10,3 +10,4 @@ psycopg2-binary==2.9.9
 httpx==0.25.2
 asyncpg==0.29.0
 PyJWT==2.13.0
+qrcode==7.4.2

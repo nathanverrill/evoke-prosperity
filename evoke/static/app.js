@@ -60,6 +60,9 @@ const Evoke = (() => {
     adminMissions: (userId) => apiGet(`/api/admin/missions?user_id=${userId}`),
     adminRelease: (missionId) => fetch(`/api/admin/missions/${missionId}/release`, { method: "POST" }).then(r => r.json()),
     adminUnrelease: (missionId) => fetch(`/api/admin/missions/${missionId}/unrelease`, { method: "POST" }).then(r => r.json()),
+    worldState: () => apiGet("/api/world-state"),
+    minecraftStatus: () => apiGet("/api/minecraft/status"),
+    companionInfo: () => apiGet("/api/companion/info"),
   };
 
   // ---------- Auth (dev-login only; see CONCEPTS.md's known gaps) ----------
@@ -72,14 +75,105 @@ const Evoke = (() => {
     localStorage.setItem("evoke_display_name", state.displayName);
   }
 
+  // ---------- Live layer (WebSocket) ----------
+  // One socket per page load, auto-reconnecting. Two consumer levels:
+  // app-level reactions here (toasts, topbar refresh, level-up overlay),
+  // plus a single screen-level handler slot (state.onLive) the current
+  // screen may set to react in place (hub re-render on feed/world/presence
+  // changes). Projections/APIs stay the source of truth -- this is a
+  // freshness signal, not a data channel the UI depends on.
+  function connectLive() {
+    let ws;
+    let retryMs = 1000;
+    function open() {
+      const proto = location.protocol === "https:" ? "wss" : "ws";
+      ws = new WebSocket(`${proto}://${location.host}/ws`);
+      ws.onopen = () => { retryMs = 1000; };
+      ws.onmessage = (e) => {
+        let msg;
+        try { msg = JSON.parse(e.data); } catch { return; }
+        handleLiveEvent(msg);
+        if (typeof state.onLive === "function") {
+          try { state.onLive(msg); } catch (err) { console.error(err); }
+        }
+      };
+      ws.onclose = () => {
+        setTimeout(open, retryMs);
+        retryMs = Math.min(retryMs * 2, 15000);
+      };
+    }
+    open();
+  }
+
+  function toast(html, opts = {}) {
+    let box = document.getElementById("toast-box");
+    if (!box) {
+      box = document.createElement("div");
+      box.id = "toast-box";
+      box.className = "toast-box";
+      document.body.appendChild(box);
+    }
+    const el = document.createElement("div");
+    el.className = "toast";
+    if (opts.kind) el.dataset.kind = opts.kind;
+    el.innerHTML = html;
+    box.appendChild(el);
+    setTimeout(() => el.classList.add("is-leaving"), opts.ttl || 6000);
+    setTimeout(() => el.remove(), (opts.ttl || 6000) + 400);
+  }
+
+  function showLevelUpOverlay(data) {
+    document.getElementById("levelup-overlay")?.remove();
+    const overlay = document.createElement("div");
+    overlay.id = "levelup-overlay";
+    overlay.className = "celebration-overlay";
+    overlay.innerHTML = `
+      <div class="card celebration-card" data-tier="legendary">
+        <div class="card__eyebrow">Rank Advancement</div>
+        <h1>Level ${data.level}</h1>
+        <p class="celebration-tier">You are now a <strong>${escapeHtml(data.title)}</strong></p>
+        <p>The Basin remembers who shows up.</p>
+        <button class="btn btn-primary" id="levelup-continue">Carry On →</button>
+      </div>
+    `;
+    document.body.appendChild(overlay);
+    document.getElementById("levelup-continue").addEventListener("click", () => overlay.remove());
+  }
+
+  function handleLiveEvent(msg) {
+    const d = msg.data || {};
+    if (msg.type === "LevelUpped") {
+      if (d.user_id === state.userId) {
+        showLevelUpOverlay(d);
+        renderTopbar();
+      } else {
+        toast(`⬆ ${escapeHtml(d.display_name || "An agent")} reached Level ${d.level} — ${escapeHtml(d.title || "")}`);
+      }
+    } else if (msg.type === "WorldStateAdvanced") {
+      toast(
+        `⚡ <strong>Keel Restoration — Stage ${d.stage}: ${escapeHtml(d.title || "")}</strong><br>${escapeHtml(d.narrative || "")}`,
+        { kind: "world", ttl: 10000 }
+      );
+    } else if (msg.type === "ActivityPosted") {
+      // Someone else's award/quest landing right now -- worth a nudge, but
+      // not for my own actions (those already celebrate full-screen).
+      if (d.user_id !== state.userId) toast(escapeHtml(d.message || ""));
+    } else if (msg.type === "XPGranted" && d.user_id === state.userId) {
+      renderTopbar();
+    } else if (msg.type === "AwardGranted" && d.user_id === state.userId) {
+      renderTopbar();
+    }
+  }
+
   // ---------- Top bar ----------
   async function renderTopbar() {
     const el = document.getElementById("topbar");
-    let xp = 0, level = 1;
+    let xp = 0, level = 1, rank = "";
     try {
       state.profile = await api.playerProfile(state.userId);
       xp = state.profile.xp;
       level = state.profile.level;
+      rank = state.profile.rank_title || "";
     } catch (e) { /* profile not ready yet -- empty state is fine */ }
 
     let unreadCount = 0;
@@ -94,21 +188,42 @@ const Evoke = (() => {
 
     el.innerHTML = `
       <div class="topbar__left">
-        <a href="#/" class="topbar__brand">EVOKE Prosperity</a>
+        <a href="#/" class="topbar__brand" aria-label="EVOKE Prosperity — home">
+          <span class="glyph" aria-hidden="true"></span>
+          <span class="word">EVOKE</span>
+          <span class="word--sub">Prosperity</span>
+        </a>
         <nav class="topbar__nav">
           ${navLink("#/", "Operations Hub")}
           ${navLink("#/novel", "Novel")}
           ${navLink("#/gallery", "Gallery")}
-          ${navLink("#/profile", "Profile")}
+          ${navLink("#/arcade", "Training")}
+          ${navLink("#/profile", "Dossier")}
           ${navLink("#/billbot", "B1llbot")}
         </nav>
       </div>
       <div class="topbar__right">
-        <span class="xp-meter">${state.displayName || "Agent"} · Lv ${level} · ${xp} XP</span>
+        <span class="xp-meter">${state.displayName || "Agent"} · Lv ${level}${rank ? ` ${rank}` : ""} · ${xp} XP</span>
         <span class="streak-pill" title="Streak tracking not built yet">🔥 —</span>
         <a href="#/profile" class="notif-bell ${unreadCount ? "has-unread" : ""}">🔔 ${unreadCount}</a>
       </div>
     `;
+
+    // Easter egg (Alchemy Signal fragment 1/5): triple-click the glyph.
+    // preventDefault so hunting the glyph doesn't navigate mid-count --
+    // the wordmark next to it still goes home.
+    let glyphClicks = 0, glyphTimer = null;
+    el.querySelector(".glyph")?.addEventListener("click", (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      glyphClicks++;
+      clearTimeout(glyphTimer);
+      glyphTimer = setTimeout(() => { glyphClicks = 0; }, 2500);
+      if (glyphClicks >= 3) {
+        glyphClicks = 0;
+        Evoke.signal?.collect("glyph");
+      }
+    });
   }
 
   // ---------- B1llbot drawer ----------
@@ -135,6 +250,9 @@ const Evoke = (() => {
       const input = document.getElementById("billbot-input");
       const msg = input.value.trim();
       if (!msg) return;
+      // Easter egg (Alchemy Signal fragment): asking B1llbot about the
+      // name he won't explain.
+      if (/alchemy/i.test(msg)) Evoke.signal?.collect("billbot");
       const log = document.getElementById("billbot-log");
       log.insertAdjacentHTML("beforeend", `<div class="billbot-msg" data-from="user">${escapeHtml(msg)}</div>`);
       input.value = "";
@@ -175,11 +293,16 @@ const Evoke = (() => {
     { pattern: /^#\/profile\/([^/]+)$/, screen: "playerProfile" },
     { pattern: /^#\/team\/([^/]+)$/, screen: "teamProfile" },
     { pattern: /^#\/admin$/, screen: "admin" },
+    { pattern: /^#\/arcade$/, screen: "arcade" },
+    { pattern: /^#\/game\/flow$/, screen: "gameFlow" },
+    { pattern: /^#\/game\/decrypt$/, screen: "gameDecrypt" },
+    { pattern: /^#\/alchemy$/, screen: "alchemy" },
   ];
 
   async function router() {
     const hash = location.hash || "#/";
     const screenEl = document.getElementById("screen");
+    state.onLive = null; // screens opt back in after render; stale handlers must not survive navigation
     for (const route of routes) {
       const match = hash.match(route.pattern);
       if (match) {
@@ -208,6 +331,7 @@ const Evoke = (() => {
     // "have I already checked in" tracking to keep in sync with the server).
     api.checkin(state.userId).then(r => { state.checkinResult = r; }).catch(() => {});
     renderBillbotDrawer();
+    connectLive();
     await renderTopbar();
     window.addEventListener("hashchange", router);
     // First-run onboarding (GAPS.md: "No onboarding" -- found missing by
@@ -222,5 +346,5 @@ const Evoke = (() => {
     await router();
   }
 
-  return { state, api, mount, boot, escapeHtml, screens: {} };
+  return { state, api, mount, boot, escapeHtml, toast, screens: {} };
 })();

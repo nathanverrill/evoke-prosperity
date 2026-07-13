@@ -1,0 +1,12 @@
+{
+  "name": "EVOKE Field Kit",
+  "short_name": "Field Kit",
+  "description": "Companion for EVOKE Prosperity agents in the field — quests, awards, Basin status, and B1llbot.",
+  "start_url": "/companion.html",
+  "display": "standalone",
+  "background_color": "#f4f4f4",
+  "theme_color": "#2c3e50",
+  "icons": [
+    { "src": "fieldkit-icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any" }
+  ]
+}

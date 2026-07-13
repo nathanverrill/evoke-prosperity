@@ -4,7 +4,7 @@ import datetime
 import asyncio
 import uuid
 from typing import Optional, List
-from fastapi import FastAPI, HTTPException, File, UploadFile, Form, Depends, Response
+from fastapi import FastAPI, HTTPException, File, UploadFile, Form, Depends, Response, Request, WebSocket, WebSocketDisconnect
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse, JSONResponse, RedirectResponse
 from fastapi.middleware.cors import CORSMiddleware
@@ -19,7 +19,8 @@ from evoke.clients import s3_client, os_client, get_producer
 from evoke.workers import evoke_workers_loop
 from evoke.lms import get_brightspace_lms
 from evoke.lti import BrightspaceLTIProvider
-from evoke import skills_framework
+from evoke import skills_framework, progression, world_state
+from evoke.live import live_hub
 
 logger = logging.getLogger(__name__)
 
@@ -172,6 +173,20 @@ async def startup():
             logger.warning("LTI provider not available")
 
         await sync_missions_from_lms()
+
+        # Idempotent DDL for tables newer than a deployment's Postgres
+        # volume -- init-db.sql only runs on a *fresh* volume, so anything
+        # added later needs a create-if-missing here to work on existing
+        # installs. Matches the bridge's own world_meta bootstrap.
+        db_execute("""CREATE TABLE IF NOT EXISTS minigame_scores (
+            id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+            user_id UUID NOT NULL REFERENCES users(id),
+            game_key VARCHAR(64) NOT NULL,
+            score INTEGER NOT NULL DEFAULT 0,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )""")
+        db_execute("CREATE INDEX IF NOT EXISTS idx_minigame_scores_user_game ON minigame_scores(user_id, game_key)")
+        db_execute("CREATE INDEX IF NOT EXISTS idx_minigame_scores_game_score ON minigame_scores(game_key, score DESC)")
 
     except Exception as e:
         logger.error(f"Startup error: {e}")
@@ -1477,6 +1492,8 @@ async def get_player_profile(user_id: str):
             "minecraft_username": minecraft_link[0] if minecraft_link else None,
             "xp": profile.get("xp", 0),
             "level": profile.get("level", 1),
+            "rank_title": progression.level_title(profile.get("level", 1)),
+            "next_level_xp": progression.next_threshold(profile.get("xp", 0)),
             "badges": profile.get("badges", {}),
             "missions_completed": missions_completed,
             "missions_completed_count": len(missions_completed),
@@ -1979,6 +1996,253 @@ async def billbot_chat(user_id: str, message: str):
     except Exception as e:
         logger.warning(f"B1llbot chat error: {e}")
         return {"reply": f"Error: {str(e)}"}
+
+# ========== Live layer (WebSocket) ==========
+@app.websocket("/ws")
+async def websocket_live(ws: WebSocket):
+    """One-way live push of processed stream events to the browser (Hub,
+    Companion) — see evoke/live.py. Inbound messages are ignored (clients
+    may send pings to keep intermediaries from idling the socket)."""
+    await ws.accept()
+    live_hub.register(ws)
+    try:
+        while True:
+            await ws.receive_text()
+    except WebSocketDisconnect:
+        live_hub.unregister(ws)
+    except Exception:
+        live_hub.unregister(ws)
+
+
+# ========== World State ==========
+@app.get("/api/world-state")
+async def get_world_state():
+    """Keel's collective restoration state (GAPS.md #5) — the WORLD WORKER's
+    projection over every learner's MissionCompleted events, plus the full
+    stage table so the UI can render the whole arc, not just the current
+    reading."""
+    try:
+        world = os_client.get(index="world-state", id="keel")["_source"]
+    except Exception:
+        world = {"completions": 0, "stage": 0, "history": []}
+
+    stage = world.get("stage", 0)
+    completions = world.get("completions", 0)
+    next_at = (stage + 1) * world_state.STAGE_STEP if stage < world_state.MAX_STAGE else None
+    return {
+        "stage": stage,
+        "total_stages": world_state.MAX_STAGE,
+        "completions": completions,
+        "step": world_state.STAGE_STEP,
+        "next_stage_at": next_at,
+        "current": world_state.stage_meta(stage),
+        "stages": [world_state.stage_meta(i) for i in range(world_state.MAX_STAGE + 1)],
+        "history": world.get("history", []),
+    }
+
+
+# ========== Minecraft live status ==========
+@app.get("/api/minecraft/status")
+async def minecraft_status():
+    """Who's in the Basin right now — the PRESENCE WORKER's projection of
+    the bridge's MinecraftPresence snapshots. Staleness matters: if the
+    bridge hasn't reported in a while, say "unknown" rather than repeating
+    a dead snapshot as if it were live."""
+    try:
+        doc = os_client.get(index="minecraft-status", id="default")["_source"]
+    except Exception:
+        return {"server_online": False, "online_players": [], "linked_players": {}, "stale": True}
+
+    stale = True
+    try:
+        updated = datetime.datetime.fromisoformat(doc.get("updated_at"))
+        stale = (datetime.datetime.now() - updated).total_seconds() > 90
+    except Exception:
+        pass
+    return {
+        "server_online": doc.get("server_online", False) and not stale,
+        "online_players": doc.get("online_players", []) if not stale else [],
+        "linked_players": doc.get("linked_players", {}),
+        "stale": stale,
+    }
+
+
+# ========== Companion (phone) ==========
+def _companion_url(request: Request) -> str:
+    """Best-effort URL a *phone* can reach. Priority: explicit override
+    (PUBLIC_WEB_URL) > the host the browser itself used (works when the
+    user opened the app via LAN IP) > localhost (QR still renders; the UI
+    explains it won't scan usefully until opened via LAN IP)."""
+    override = os.getenv("PUBLIC_WEB_URL", "")
+    if override:
+        return override.rstrip("/") + "/companion.html"
+    host = request.headers.get("host", "localhost:8000")
+    return f"http://{host}/companion.html"
+
+
+@app.get("/api/companion/info")
+async def companion_info(request: Request):
+    url = _companion_url(request)
+    return {"url": url, "scannable": not url.startswith("http://localhost") and not url.startswith("http://127.")}
+
+
+@app.get("/api/companion/qr.svg")
+async def companion_qr(request: Request):
+    import io
+    import qrcode
+    import qrcode.image.svg
+    img = qrcode.make(_companion_url(request), image_factory=qrcode.image.svg.SvgPathImage, box_size=12)
+    buf = io.BytesIO()
+    img.save(buf)
+    return Response(content=buf.getvalue(), media_type="image/svg+xml")
+
+
+# ========== Minigames (Training Sims) ==========
+# Browser minigames -- the same optionality rule as Minecraft quests applies
+# (self-directed, never gates or grades a mission), and the same XP-through-
+# the-real-pipeline rule as everything else: completions publish XPGranted
+# events, never write projections directly. XP per game is capped at one
+# grant per calendar day (plus a small personal-best bonus) so grinding a
+# minigame can't out-earn actual missions -- the quest-XP-cap principle
+# GAPS.md asks for, applied here from day one.
+
+MINIGAME_KEYS = {"flow-control", "signal-decrypt"}
+MINIGAME_DAILY_XP = 25
+MINIGAME_BEST_BONUS = 10
+
+# The Alchemy Signal hunt: 5 fragments hidden across the app. NOTE:
+# GAME_DESIGN.md §13.5 explicitly leaves Alchemy's encrypted-signal beats
+# as an open narrative question -- the unlock copy stays deliberately
+# minimal (no invented backstory) until the narrative team answers it.
+SIGNAL_FRAGMENT_KEYS = {"glyph", "konami", "novel", "vault", "billbot"}
+SIGNAL_UNLOCK_XP = 150
+
+
+@app.post("/api/minigames/{game_key}/score")
+async def submit_minigame_score(game_key: str, user_id: str, score: int = Form(...)):
+    if game_key not in MINIGAME_KEYS:
+        raise HTTPException(status_code=404, detail="Unknown training sim")
+    try:
+        prev_best = db_fetch_one(
+            "SELECT MAX(score) FROM minigame_scores WHERE user_id = %s::uuid AND game_key = %s",
+            (user_id, game_key)
+        )
+        prev_best = prev_best[0] if prev_best and prev_best[0] is not None else None
+
+        already_today = db_fetch_one(
+            """SELECT 1 FROM minigame_scores
+               WHERE user_id = %s::uuid AND game_key = %s AND created_at::date = CURRENT_DATE LIMIT 1""",
+            (user_id, game_key)
+        )
+
+        db_execute(
+            "INSERT INTO minigame_scores (user_id, game_key, score) VALUES (%s::uuid, %s, %s)",
+            (user_id, game_key, score)
+        )
+
+        xp = 0
+        if not already_today:
+            xp += MINIGAME_DAILY_XP
+        is_best = prev_best is None or score > prev_best
+        if is_best and prev_best is not None:
+            xp += MINIGAME_BEST_BONUS
+        if xp:
+            await publish_event("XPGranted", {
+                "user_id": user_id, "amount": xp,
+                "reason": "minigame", "game_key": game_key,
+            })
+        return {"status": "recorded", "xp_granted": xp, "personal_best": is_best}
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@app.get("/api/minigames/{game_key}/leaderboard")
+async def minigame_leaderboard(game_key: str, user_id: Optional[str] = None, limit: int = 10):
+    if game_key not in MINIGAME_KEYS:
+        raise HTTPException(status_code=404, detail="Unknown training sim")
+    rows = db_fetch_all(
+        """SELECT u.display_name, MAX(s.score) AS best
+           FROM minigame_scores s JOIN users u ON u.id = s.user_id
+           WHERE s.game_key = %s GROUP BY u.id, u.display_name
+           ORDER BY best DESC LIMIT %s""",
+        (game_key, limit)
+    )
+    personal = None
+    if user_id:
+        best = db_fetch_one(
+            "SELECT MAX(score) FROM minigame_scores WHERE user_id = %s::uuid AND game_key = %s",
+            (user_id, game_key)
+        )
+        personal = best[0] if best and best[0] is not None else None
+    return {
+        "leaderboard": [{"display_name": r[0], "best": r[1]} for r in rows],
+        "personal_best": personal,
+    }
+
+
+@app.post("/api/minigames/signal/fragment")
+async def collect_signal_fragment(user_id: str, fragment: str = Form(...)):
+    """One fragment of the Alchemy Signal found. Server-tracked (not just
+    localStorage) so the unlock XP can't be re-farmed by clearing the
+    browser, and so finding all 5 lands in the class feed."""
+    if fragment not in SIGNAL_FRAGMENT_KEYS:
+        raise HTTPException(status_code=404, detail="No such signal source")
+    try:
+        game_key = f"signal:{fragment}"
+        already = db_fetch_one(
+            "SELECT 1 FROM minigame_scores WHERE user_id = %s::uuid AND game_key = %s LIMIT 1",
+            (user_id, game_key)
+        )
+        if not already:
+            db_execute(
+                "INSERT INTO minigame_scores (user_id, game_key, score) VALUES (%s::uuid, %s, 1)",
+                (user_id, game_key)
+            )
+
+        found_rows = db_fetch_all(
+            "SELECT DISTINCT game_key FROM minigame_scores WHERE user_id = %s::uuid AND game_key LIKE 'signal:%%'",
+            (user_id,)
+        )
+        found = sorted(r[0].split(":", 1)[1] for r in found_rows)
+
+        unlocked = False
+        if len(found) == len(SIGNAL_FRAGMENT_KEYS):
+            already_unlocked = db_fetch_one(
+                "SELECT 1 FROM minigame_scores WHERE user_id = %s::uuid AND game_key = 'signal:unlocked' LIMIT 1",
+                (user_id,)
+            )
+            if not already_unlocked:
+                db_execute(
+                    "INSERT INTO minigame_scores (user_id, game_key, score) VALUES (%s::uuid, 'signal:unlocked', 1)",
+                    (user_id,)
+                )
+                await publish_event("XPGranted", {
+                    "user_id": user_id, "amount": SIGNAL_UNLOCK_XP, "reason": "alchemy_signal",
+                })
+                unlocked = True
+
+        return {"found": found, "total": len(SIGNAL_FRAGMENT_KEYS), "unlocked": unlocked}
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@app.get("/api/minigames/signal/{user_id}")
+async def signal_progress(user_id: str):
+    rows = db_fetch_all(
+        "SELECT DISTINCT game_key FROM minigame_scores WHERE user_id = %s::uuid AND game_key LIKE 'signal:%%'",
+        (user_id,)
+    )
+    keys = {r[0].split(":", 1)[1] for r in rows}
+    return {
+        "found": sorted(k for k in keys if k != "unlocked"),
+        "total": len(SIGNAL_FRAGMENT_KEYS),
+        "unlocked": "unlocked" in keys,
+    }
+
 
 # ========== Static Files ==========
 # Resolved relative to this file, not the process's working directory --

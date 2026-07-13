@@ -1,45 +1,74 @@
 /* tokens.css — every color, font, radius, shadow, and spacing step lives here
-   and ONLY here, per UI_SPEC.md's wireframe skinning contract. The UX
-   designer restyles by replacing this file (and theme.css), never markup or
-   JS. Wireframe values on purpose: grayscale + one flat accent, system font
-   stack, 1px borders, no shadows/gradients — it should look like a
-   wireframe so nobody mistakes it for the shipped design. */
+   and ONLY here, per UI_SPEC.md's wireframe skinning contract. This is the
+   production skin, ported from the design team's approved look in
+   ui/Final Prosperity Showcase.html: deep-navy ops-center surfaces, cyan
+   signal glow, teal text hierarchy, orange XP energy, Unbounded display
+   type. Fonts load from Google Fonts with system fallbacks — offline, the
+   app degrades to system-ui and stays fully usable. */
+
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&family=Unbounded:wght@600;700;800&family=Cousine:wght@400;700&display=swap');
 
 :root {
-  /* Color */
-  --color-bg: #f4f4f4;
-  --color-surface: #ffffff;
-  --color-border: #cccccc;
-  --color-text: #1a1a1a;
-  --color-text-muted: #666666;
-  --color-text-inverse: #ffffff;
-  --color-accent: #2c3e50;
-  --color-accent-text: #ffffff;
-  --color-locked: #dddddd;
-  --color-locked-text: #999999;
+  /* Showcase base palette */
+  --navy-900: #0a1a33;
+  --navy-800: #13233f;
+  --navy-700: #1a2b48;
+  --navy-600: #27395a;
+  --navy-500: #3a4d6e;
+  --navy-400: #6b7ba6;
+  --cyan-500: #00d3f3;
+  --cyan-300: #59c8ff;
+  --cyan-100: #83eafd;
+  --blue-500: #2b7fff;
+  --teal-600: #0a778e;
+  --teal-500: #009689;
+  --teal-400: #4db8c4;
+  --teal-200: #7dc8c4;
+  --teal-100: #91d1d1;
+  --teal-050: #a5ede9;
+  --green-400: #00d492;
+  --orange-500: #ffa759;
+  --orange-600: #e8842f;
+  --amber: #d9a441;
+  --slate-200: #e2e8f0;
+
+  /* Semantic color API (names consumed by theme.css) */
+  --color-bg: var(--navy-900);
+  --color-surface: rgba(20, 34, 54, 0.86);
+  --color-surface-dim: rgba(15, 23, 43, 0.7);
+  --color-border: rgba(145, 209, 209, 0.18);
+  --color-border-strong: #2a9fb5;
+  --color-text: var(--slate-200);
+  --color-text-muted: var(--teal-200);
+  --color-text-heading: var(--teal-050);
+  --color-text-inverse: #06121f;
+  --color-accent: var(--cyan-500);
+  --color-accent-text: #06121f;
+  --color-locked: var(--navy-800);
+  --color-locked-text: #9aa8cd;
 
   /* Award tiers */
-  --tier-common: #8a8a8a;
-  --tier-epic: #3a6ea5;
-  --tier-legendary: #b8860b;
+  --tier-common: var(--navy-500);
+  --tier-epic: var(--blue-500);
+  --tier-legendary: var(--amber);
 
   /* Arc colors (Explore / Imagine / Act / Communicate) */
-  --arc-explore: #4a7a4a;
-  --arc-imagine: #6a4a9a;
-  --arc-act: #a55a3a;
-  --arc-communicate: #3a7a9a;
+  --arc-explore: var(--green-400);
+  --arc-imagine: var(--cyan-300);
+  --arc-act: var(--orange-500);
+  --arc-communicate: var(--teal-500);
 
   /* State */
-  --state-locked-bg: #eaeaea;
-  --state-available-bg: #ffffff;
-  --state-submitted-bg: #fff9e6;
-  --state-inreview-bg: #eef3ff;
-  --state-complete-bg: #eefbee;
+  --state-locked-bg: rgba(10, 26, 51, 0.55);
+  --state-available-bg: rgba(20, 34, 54, 0.86);
+  --state-submitted-bg: rgba(217, 164, 65, 0.10);
+  --state-inreview-bg: rgba(89, 200, 255, 0.10);
+  --state-complete-bg: rgba(0, 212, 146, 0.08);
 
   /* Typography */
-  --font-display: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
-  --font-body: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
-  --font-mono: ui-monospace, "SF Mono", Menlo, monospace;
+  --font-display: 'Unbounded', system-ui, sans-serif;
+  --font-body: 'Inter', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  --font-mono: 'Cousine', ui-monospace, "SF Mono", Menlo, monospace;
 
   --text-xs: 0.75rem;
   --text-sm: 0.875rem;
@@ -57,7 +86,24 @@
   --space-6: 40px;
 
   /* Shape */
-  --radius: 4px;
+  --radius: 12px;
+  --radius-lg: 16px;
+  --radius-pill: 999px;
   --border-width: 1px;
-  --shadow: none;
+
+  /* Elevation + glow (the showcase's glass language) */
+  --shadow: inset 0 0 0 1px rgba(42, 159, 181, 0.4), 0 25px 50px -12px rgba(0, 184, 219, 0.28);
+  --glow-md: 0 10px 15px -3px rgba(0, 184, 219, 0.5), 0 4px 6px -4px rgba(0, 184, 219, 0.5);
+  --glow-text: 0 0 40px rgba(0, 211, 243, 0.42), 0 0 6px rgba(0, 211, 243, 0.4);
+  --glow-green: 0 0 10px var(--green-400);
+
+  /* Gradients */
+  --grad-logo: linear-gradient(135deg, #00d3f3 0%, #2b7fff 50%, #009689 100%);
+  --grad-logo-inner: linear-gradient(135deg, #00d3f3 0%, #009689 100%);
+  --grad-page: radial-gradient(120% 80% at 50% 0%, #1b2d4e 0%, #13233f 45%, #0a1a33 100%);
+  --grad-divider: linear-gradient(90deg, rgba(0, 0, 0, 0) 0%, #00d3f3 50%, rgba(0, 0, 0, 0) 100%);
+  --grad-xp: linear-gradient(90deg, #ffa759 0%, #e8842f 100%);
+  --grad-water: linear-gradient(90deg, #009689 0%, #00d3f3 100%);
+
+  --ease-out: cubic-bezier(0.16, 1, 0.3, 1);
 }

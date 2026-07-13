@@ -30,6 +30,7 @@ Evoke.screens.welcome = async function welcome() {
   mount(`
     <div class="stack celebration-screen">
       <div class="card celebration-card">
+        <span class="chip chip--green" style="margin-bottom:var(--space-3)"><span class="dot"></span>System Online · ID: EVOKE</span>
         <div class="card__eyebrow">Case File — Basin Region</div>
         <h1>Welcome to Keel</h1>
         <p>The water's scarce here. The power's unstable. But the people get by on something the mountain above them ran out of a long time ago: each other.</p>
@@ -46,13 +47,16 @@ Evoke.screens.welcome = async function welcome() {
 
 Evoke.screens.hub = async function hub() {
   const { api, state, mount } = Evoke;
-  const [missionsRes, notifRes, activityRes, checkinRes, mcLink, mcConnect] = await Promise.all([
+  const [missionsRes, notifRes, activityRes, checkinRes, mcLink, mcConnect, world, mcStatus, companion] = await Promise.all([
     api.missions(state.userId),
     api.notifications(state.userId).catch(() => ({ notifications: [] })),
     api.activity(20).catch(() => ({ activity: [] })),
     api.checkin(state.userId).catch(() => null),
     api.minecraftLink(state.userId).catch(() => ({ linked: false })),
     api.minecraftConnectInfo().catch(() => null),
+    api.worldState().catch(() => null),
+    api.minecraftStatus().catch(() => null),
+    api.companionInfo().catch(() => null),
   ]);
   const missions = missionsRes.missions || [];
   const profile = state.profile;
@@ -79,9 +83,70 @@ Evoke.screens.hub = async function hub() {
   const guideKey = `evoke_hub_guide_dismissed_${state.userId}`;
   const showGuide = !localStorage.getItem(guideKey);
 
+  // Keel Restoration meter -- the collective world-state (the class's
+  // combined effort, not personal progress). Segment per stage; the fill
+  // animates via CSS width transition on live updates.
+  const worldSection = world ? (() => {
+    const pct = Math.round((world.stage / world.total_stages) * 100);
+    const remaining = world.next_stage_at !== null ? world.next_stage_at - world.completions : null;
+    return `
+      <section class="card world-meter" id="world-meter">
+        <div class="card__eyebrow">Keel Restoration — the whole cohort's work</div>
+        <div class="row-between">
+          <h2 class="card__title">Stage ${world.stage}: ${Evoke.escapeHtml(world.current.title)}</h2>
+          <span class="empty-state">${world.completions} mission log${world.completions === 1 ? "" : "s"} banked</span>
+        </div>
+        <p class="world-meter__narrative">${Evoke.escapeHtml(world.current.narrative)}</p>
+        <div class="world-meter__track">
+          <div class="world-meter__fill" style="width:${pct}%"></div>
+          ${world.stages.slice(1).map((s, i) => `
+            <span class="world-meter__tick ${world.stage > i ? "is-reached" : ""}"
+                  style="left:${((i + 1) / world.total_stages) * 100}%"
+                  title="Stage ${i + 1}: ${Evoke.escapeHtml(s.title)}"></span>
+          `).join("")}
+        </div>
+        <p class="empty-state" style="margin-top:var(--space-2)">
+          ${world.stage >= world.total_stages
+            ? "The water has risen. Keel prospers — and every mission log helped."
+            : `${remaining} more mission log${remaining === 1 ? "" : "s"} from the cohort until Stage ${world.stage + 1}: ${Evoke.escapeHtml(world.stages[world.stage + 1].title)} — it changes the Basin Simulation world too.`}
+        </p>
+      </section>
+    `;
+  })() : "";
+
+  const presenceCard = (() => {
+    const online = mcStatus && mcStatus.server_online;
+    const players = (mcStatus && mcStatus.online_players) || [];
+    const linked = (mcStatus && mcStatus.linked_players) || {};
+    return `
+      <div class="card" id="presence-card">
+        <div class="card__eyebrow"><span class="presence-dot ${online ? "is-online" : ""}"></span> In the Basin right now</div>
+        ${online
+          ? (players.length
+              ? players.map(p => {
+                  const l = linked[p];
+                  return `<p>${l ? `<strong>${Evoke.escapeHtml(l.display_name)}</strong> <span class="empty-state">as ${Evoke.escapeHtml(p)}</span>` : Evoke.escapeHtml(p)}</p>`;
+                }).join("")
+              : `<p class="empty-state">The Basin is quiet — nobody online.</p>`)
+          : `<p class="empty-state">Basin Simulation status unknown right now.</p>`}
+      </div>
+    `;
+  })();
+
+  const fieldKitCard = companion ? `
+    <div class="card" id="fieldkit-card">
+      <div class="card__eyebrow">Field Kit — your phone</div>
+      <div class="fieldkit-qr"><img src="/api/companion/qr.svg" alt="QR code to the Companion Field Kit"></div>
+      <p class="empty-state">${companion.scannable
+        ? "Scan to open the Companion on your phone — quests, awards, and B1llbot from the field."
+        : "Open this site from your machine's LAN IP (not localhost) and this QR becomes scannable from your phone."}</p>
+    </div>
+  ` : "";
+
   mount(`
     <div class="hub-layout">
       <div class="stack">
+        ${worldSection}
         ${showGuide ? `
           <section class="card" id="hub-guide">
             <div class="card__eyebrow">Orientation</div>
@@ -146,6 +211,8 @@ Evoke.screens.hub = async function hub() {
           <p>Level ${profile ? profile.level : 1} · ${profile ? profile.xp : 0} XP</p>
           <a class="btn" href="#/profile">View Profile</a>
         </div>
+        ${presenceCard}
+        ${fieldKitCard}
         <div class="card">
           <div class="card__eyebrow">Team</div>
           <p class="empty-state">No "my team" lookup exists yet — open a team profile directly at #/team/&lt;id&gt;.</p>
@@ -181,6 +248,21 @@ Evoke.screens.hub = async function hub() {
     localStorage.setItem(guideKey, "1");
     document.getElementById("hub-guide").remove();
   });
+
+  // Live refresh: the Hub is an ops center, so it re-renders itself when
+  // something it displays changes (feed entries, world stage, presence).
+  // Throttled -- bursts of events (one submission fires several) collapse
+  // into one refresh; the checkin call inside is dedupe-safe server-side.
+  let refreshQueued = false;
+  state.onLive = (msg) => {
+    if (!["ActivityPosted", "WorldStateAdvanced", "MinecraftPresence", "MissionCompleted", "AwardGranted"].includes(msg.type)) return;
+    if (refreshQueued) return;
+    refreshQueued = true;
+    setTimeout(() => {
+      refreshQueued = false;
+      if ((location.hash || "#/") === "#/") Evoke.screens.hub();
+    }, 1500);
+  };
 };
 
 Evoke.screens.novel = async function novel() {
@@ -231,7 +313,7 @@ Evoke.screens.novel = async function novel() {
         </div>
         <div class="row-between">
           <button id="novel-prev" ${panelIndex === 0 ? "disabled" : ""}>← Back</button>
-          <span class="empty-state">Panel ${panelIndex + 1} / ${chapter.panels.length}</span>
+          <span class="empty-state">Panel ${panelIndex + 1} / ${chapter.panels.length} ${Evoke.signal ? Evoke.signal.nodeHtml("novel") : ""}</span>
           ${isLast
             ? (chapter.ctaMission
                 ? `<a class="btn btn-primary" href="#/mission/${chapter.ctaMission.id}">Open Mission Brief →</a>`
@@ -242,6 +324,7 @@ Evoke.screens.novel = async function novel() {
     `);
     document.getElementById("novel-prev")?.addEventListener("click", () => { panelIndex--; renderChapter(); });
     document.getElementById("novel-next")?.addEventListener("click", () => { panelIndex++; renderChapter(); });
+    Evoke.signal?.bindNodes();
     document.querySelectorAll("[data-chapter-index]").forEach(el => {
       el.addEventListener("click", (e) => {
         e.preventDefault();
@@ -491,14 +574,21 @@ Evoke.screens.gallery = async function gallery() {
   `);
 };
 
+/* The Agent Dossier — the profile as a video-game loadout/dossier screen:
+   identity block with clearance chips and an XP charge bar, the 4
+   Superpowers as loadout slots with pip progress, the 16 Powers as a skill
+   matrix, awards as commendations, quests as the field-ops log. Same data,
+   same trophy-case principle as before (every slot visible, earned or
+   not); only the presentation changed. */
 Evoke.screens.playerProfile = async function playerProfile(userId) {
   const { api, state, mount } = Evoke;
   const id = userId || state.userId;
-  const [profile, achievementsRes, missionsRes, questsRes] = await Promise.all([
+  const [profile, achievementsRes, missionsRes, questsRes, mcStatus] = await Promise.all([
     api.playerProfile(id),
     api.achievements(id).catch(() => ({ qualities: {}, powers: {} })),
     api.missions(id).catch(() => ({ missions: [] })),
     api.mcQuests().catch(() => ({ quests: [] })),
+    api.minecraftStatus().catch(() => null),
   ]);
   const badgeKeys = ["Empathetic Changemaker", "Systems Thinker", "Creative Visionary", "Deep Collaborator"];
   const powers = achievementsRes.powers || {};
@@ -519,24 +609,54 @@ Evoke.screens.playerProfile = async function playerProfile(userId) {
     if (!current || TIER_RANK[a.tier] > TIER_RANK[current.tier]) bestAwardByMission[a.mission_id] = a;
   });
 
+  const name = profile.display_name || "Agent";
+  const monogram = name.split(/\s+/).map(w => w[0]).join("").slice(0, 2).toUpperCase();
+  const inBasin = !!(mcStatus && mcStatus.server_online && profile.minecraft_username
+    && (mcStatus.online_players || []).includes(profile.minecraft_username));
+
+  // XP charge bar: progress through the current level's band.
+  const nextXp = profile.next_level_xp;
+  const xpPct = nextXp ? Math.min(100, Math.round((profile.xp / nextXp) * 100)) : 100;
+
+  const completedIds = new Set(profile.missions_completed || []);
+
   mount(`
-    <div class="stack">
-      <div class="card">
-        <h1>${Evoke.escapeHtml(profile.display_name || "Agent")}</h1>
-        <p>Level ${profile.level} · ${profile.xp} XP</p>
-        <p>${profile.minecraft_username ? `Minecraft: ${Evoke.escapeHtml(profile.minecraft_username)}` : `<span class="empty-state">No Minecraft account linked</span>`}</p>
+    <div class="stack dossier">
+      <div class="card dossier-header">
+        <div class="dossier-header__id">
+          <div class="dossier-monogram" aria-hidden="true">${Evoke.escapeHtml(monogram)}</div>
+          <div>
+            <div class="card__eyebrow">Agent Dossier · Basin Field Division</div>
+            <h1>${Evoke.escapeHtml(name)}</h1>
+            <div class="row" style="margin-top:var(--space-2)">
+              <span class="chip">LV ${profile.level} · ${Evoke.escapeHtml(profile.rank_title || "")}</span>
+              <span class="chip">CLEARANCE ${String(profile.level).padStart(2, "0")}</span>
+              <span class="chip ${inBasin ? "chip--green" : ""}">${inBasin ? `<span class="dot"></span>IN THE BASIN` : (profile.minecraft_username ? `CALLSIGN ${Evoke.escapeHtml(profile.minecraft_username.toUpperCase())}` : "CALLSIGN UNASSIGNED")}</span>
+            </div>
+          </div>
+        </div>
+        <div class="dossier-xp">
+          <div class="row-between">
+            <span class="card__eyebrow">XP Charge</span>
+            <span class="mono-rank">${profile.xp}${nextXp ? ` / ${nextXp}` : " · MAX"}</span>
+          </div>
+          <div class="world-meter__track"><div class="world-meter__fill is-xp" style="width:${xpPct}%"></div></div>
+          ${nextXp ? `<p class="empty-state" style="margin-top:var(--space-1)">${nextXp - profile.xp} XP to next rank</p>` : ""}
+        </div>
       </div>
 
       <section>
-        <h2 class="section-title">Superpowers</h2>
-        <div class="badge-wall">
+        <h2 class="section-title">Loadout — Superpowers</h2>
+        <div class="badge-wall dossier-loadout">
           ${badgeKeys.map(key => {
             const b = (profile.badges || {})[key];
-            const powersEarned = b ? b.progress : 0;
+            const earnedCount = b ? b.progress : 0;
             return `
-              <div class="badge-tile ${b && b.earned ? "is-earned" : "is-dimmed"}">
+              <div class="badge-tile loadout-slot ${b && b.earned ? "is-earned" : "is-dimmed"}">
+                <div class="loadout-slot__frame">${b && b.earned ? "◈" : "◇"}</div>
                 <div class="badge-tile__name">${key}</div>
-                <div class="badge-tile__progress">${powersEarned} of 4 Powers</div>
+                <div class="loadout-pips">${[0, 1, 2, 3].map(i => `<span class="loadout-pip ${i < earnedCount ? "is-lit" : ""}"></span>`).join("")}</div>
+                <div class="badge-tile__progress">${b && b.earned ? "EQUIPPED" : `${earnedCount}/4 Powers`}</div>
               </div>
             `;
           }).join("")}
@@ -544,16 +664,16 @@ Evoke.screens.playerProfile = async function playerProfile(userId) {
       </section>
 
       <section>
-        <h2 class="section-title">Achievements</h2>
-        <p class="empty-state">The 16 Powers behind the 4 Superpowers (World Bank EVOKE framework). Hover a tile for what it means.</p>
+        <h2 class="section-title">Skill Matrix — 16 Powers</h2>
+        <p class="empty-state">World Bank EVOKE framework. Hover a node for its definition.</p>
         ${badgeKeys.map(quality => `
-          <div class="stack-sm">
+          <div class="stack-sm" style="margin-bottom:var(--space-3)">
             <div class="card__eyebrow">${quality}</div>
-            <div class="badge-wall">
+            <div class="skill-matrix">
               ${Object.entries(powers).filter(([, p]) => p.quality === quality).map(([powerKey, p]) => `
-                <div class="badge-tile ${p.earned ? "is-earned" : "is-dimmed"}" title="${Evoke.escapeHtml(p.definition)}">
-                  <div class="badge-tile__name">${Evoke.escapeHtml(powerKey)}</div>
-                  <div class="badge-tile__progress">${p.earned ? (p.tag_type === "behavioral" ? "earned" : `earned · ${p.tag_type}`) : "locked"}</div>
+                <div class="skill-node ${p.earned ? "is-earned" : ""}" title="${Evoke.escapeHtml(p.definition)}">
+                  <span class="skill-node__dot"></span>${Evoke.escapeHtml(powerKey)}
+                  ${p.earned ? `<span class="skill-node__how">${p.tag_type === "behavioral" ? "field-observed" : p.tag_type}</span>` : ""}
                 </div>
               `).join("")}
             </div>
@@ -561,30 +681,22 @@ Evoke.screens.playerProfile = async function playerProfile(userId) {
         `).join("")}
       </section>
 
-      <section class="card">
-        <div class="card__eyebrow">Missions</div>
-        <p>${profile.missions_completed_count} / 12 complete</p>
-      </section>
-
       <section>
-        <h2 class="section-title">Quests</h2>
-        <p class="empty-state">${profile.quests_completed_count} of ${allQuests.length} completed — every quest in the Basin Simulation, whether you've done it yet or not.</p>
-        <div class="badge-wall">
-          ${allQuests.length ? allQuests.map(q => {
-            const completedAt = questCompletions[q.id];
-            return `
-              <div class="badge-tile ${completedAt ? "is-earned" : "is-dimmed"}" title="${Evoke.escapeHtml(q.description || "")}">
-                <div class="badge-tile__name">${Evoke.escapeHtml(q.title)}</div>
-                <div class="badge-tile__progress">${completedAt ? `done ${new Date(completedAt).toLocaleDateString()}` : (q.kind === "side_quest" ? "side quest — not done" : "not done")}</div>
-              </div>
-            `;
-          }).join("") : `<p class="empty-state">No quests configured for this campaign yet.</p>`}
+        <h2 class="section-title">Mission Record</h2>
+        <div class="card">
+          <div class="row-between">
+            <span class="card__eyebrow">Campaign Progress</span>
+            <span class="mono-rank">${profile.missions_completed_count} / 12</span>
+          </div>
+          <div class="mission-pips">
+            ${allMissions.map(m => `<span class="mission-pip ${completedIds.has(m.id) ? "is-done" : (m.released ? "" : "is-locked")}" title="${Evoke.escapeHtml(m.title)}"></span>`).join("")}
+          </div>
         </div>
       </section>
 
       <section>
-        <h2 class="section-title">Award Cabinet</h2>
-        <p class="empty-state">Every mission's trophy slot — your best tier so far, or empty until you submit.</p>
+        <h2 class="section-title">Commendations</h2>
+        <p class="empty-state">Every mission's slot — your best tier so far, or empty until you submit.</p>
         <div class="stack-sm">
           ${allMissions.length ? allMissions.map(m => {
             const best = bestAwardByMission[m.id];
@@ -601,6 +713,22 @@ Evoke.screens.playerProfile = async function playerProfile(userId) {
               </div>
             `;
           }).join("") : `<p class="empty-state">No missions synced yet.</p>`}
+        </div>
+      </section>
+
+      <section>
+        <h2 class="section-title">Field Ops Log — Basin Simulation</h2>
+        <p class="empty-state">${profile.quests_completed_count} of ${allQuests.length} logged. Self-reported, never graded, never required.</p>
+        <div class="badge-wall">
+          ${allQuests.length ? allQuests.map(q => {
+            const completedAt = questCompletions[q.id];
+            return `
+              <div class="badge-tile ${completedAt ? "is-earned" : "is-dimmed"}" title="${Evoke.escapeHtml(q.description || "")}">
+                <div class="badge-tile__name">${Evoke.escapeHtml(q.title)}</div>
+                <div class="badge-tile__progress">${completedAt ? `LOGGED ${new Date(completedAt).toLocaleDateString()}` : (q.kind === "side_quest" ? "SIDE OP" : "OPEN")}</div>
+              </div>
+            `;
+          }).join("") : `<p class="empty-state">No quests configured for this campaign yet.</p>`}
         </div>
       </section>
     </div>
@@ -719,6 +847,7 @@ Evoke.screens.billbot = async function billbot() {
     const input = document.getElementById("billbot-fs-input");
     const msg = input.value.trim();
     if (!msg) return;
+    if (/alchemy/i.test(msg)) Evoke.signal?.collect("billbot");
     const log = document.getElementById("billbot-fs-log");
     log.insertAdjacentHTML("beforeend", `<div class="billbot-msg" data-from="user">${Evoke.escapeHtml(msg)}</div>`);
     input.value = "";
@@ -797,7 +926,7 @@ Evoke.screens.vault = async function vault(missionId) {
       </div>
 
       <div class="card">
-        <div class="card__eyebrow">What You Earned</div>
+        <div class="card__eyebrow">What You Earned ${Evoke.signal ? Evoke.signal.nodeHtml("vault") : ""}</div>
         ${missionAwards.length
           ? missionAwards.map(a => `<span class="award" data-tier="${a.tier}" style="display:inline-flex"><span class="award__tier">${a.tier}</span></span>`).join(" ")
           : `<p class="empty-state">No awards yet for this mission.</p>`}
@@ -806,4 +935,5 @@ Evoke.screens.vault = async function vault(missionId) {
       <a class="btn" href="#/">← Back to Operations Hub</a>
     </div>
   `);
+  Evoke.signal?.bindNodes();
 };

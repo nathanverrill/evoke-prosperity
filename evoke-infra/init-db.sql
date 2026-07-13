@@ -267,6 +267,30 @@ CREATE TABLE billbot_chat_log (
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
+-- Browser minigame ("Training Sim") score log + the Alchemy Signal
+-- scavenger-hunt fragments (game_key 'signal:<fragment>' rows, score=1).
+-- Append-only; personal bests and daily-XP dedupe are computed by query.
+-- main.py also CREATE TABLE IF NOT EXISTS this for pre-existing volumes.
+CREATE TABLE minigame_scores (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    user_id UUID NOT NULL REFERENCES users(id),
+    game_key VARCHAR(64) NOT NULL,
+    score INTEGER NOT NULL DEFAULT 0,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+CREATE INDEX idx_minigame_scores_user_game ON minigame_scores(user_id, game_key);
+CREATE INDEX idx_minigame_scores_game_score ON minigame_scores(game_key, score DESC);
+
+-- Small key-value store for world-anchored facts the bridge must remember
+-- across restarts -- currently just 'beacon_pos', the spot where the Keel
+-- Restoration Beacon was anchored (see evoke-minecraft-bridge/bridge.py's
+-- _get_beacon_anchor; the bridge also CREATE TABLE IF NOT EXISTS this, so
+-- existing volumes that predate this file's version work too).
+CREATE TABLE world_meta (
+    key TEXT PRIMARY KEY,
+    value TEXT
+);
+
 -- Indexes for common queries
 CREATE INDEX idx_users_org_id ON users(org_id);
 CREATE INDEX idx_teams_org_id ON teams(org_id);

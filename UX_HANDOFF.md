@@ -1,5 +1,17 @@
 # EVOKE Prosperity — handoff to UX design
 
+> **Status update (July 2026):** the skin pass this doc anticipates has now
+> happened — `tokens.css`/`theme.css` carry a production look ported from
+> the design team's approved `ui/Final Prosperity Showcase.html` (navy
+> ops-center glass, cyan glow headings in Unbounded, the EVOKE gradient
+> glyph lockup). References below to "deliberate wireframe style" describe
+> the state this doc was written against; the skinning *contract* (restyle
+> via tokens.css + theme.css, never markup or JS) is unchanged and remains
+> the way to iterate on the design. New since this doc was written:
+> `#/arcade` (Training Sims), `#/alchemy` (hidden), the Dossier treatment
+> of the profile, the Hub's Keel Restoration meter / Basin presence /
+> Field Kit QR cards, and live toasts + level-up overlay.
+
 This covers the **entire application** — every screen that exists today, every screen that's designed but not yet built, and where the other two pieces of the product (the graphic novel and the Minecraft world) fit around the web app you're actually restyling.
 
 ---

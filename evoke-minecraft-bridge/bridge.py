@@ -16,6 +16,7 @@ import psycopg2
 import requests
 from psycopg2.pool import SimpleConnectionPool
 import socket
+import struct
 from datetime import datetime
 from kafka import KafkaConsumer, KafkaProducer
 
@@ -35,6 +36,22 @@ ONLINE_XP_AMOUNT = 5
 ITEM_DROP_PROBABILITY = 0.1   # ~once per 10 online-minutes per player
 LORE_MESSAGE_PROBABILITY = 0.05  # ~once per 20 online-minutes per player
 PLAYER_ONE_EMAIL = "player1@evoke.local"  # must match evoke-infra/seed.py
+
+# Presence loop -- faster than the heartbeat because it feeds the web's
+# live "who's in the Basin" card, and 60s-stale presence reads as broken.
+# Publishes on change immediately, and a keepalive snapshot every
+# PRESENCE_KEEPALIVE seconds so the web side can distinguish "nobody
+# online" from "bridge is down" (staleness check in /api/minecraft/status).
+PRESENCE_INTERVAL = 15
+PRESENCE_KEEPALIVE = 60
+
+# Where the Keel Restoration Beacon gets built as the cohort advances the
+# world state. Explicit coords via env for a real, curated world (pick a
+# visible spot in Keel); unset, the bridge anchors it once, near the first
+# player online at the moment of the first stage advance, and remembers
+# the spot in Postgres (world_meta) so later stages stack on the same
+# structure.
+KEEL_BEACON_POS = os.getenv("KEEL_BEACON_POS", "")
 
 OPENWEBUI_URL = os.getenv("OPENWEBUI_URL", "http://open-webui:8080")
 OPENWEBUI_API_KEY = os.getenv("OPENWEBUI_API_KEY", "")
@@ -75,47 +92,88 @@ def publish_event(event_type: str, data: dict):
     get_producer().send("evoke-events", value=event)
     get_producer().flush()
 
-# RCON client
+# RCON client — implements the actual Source RCON wire protocol
+# (length-prefixed binary packets: SERVERDATA_AUTH=3, EXECCOMMAND=2).
+#
+# The previous version of this class sent raw text lines ("password ...\n",
+# "list\n") over the socket, which is not RCON at all — the server accepts
+# the TCP connection and then silently ignores everything, so every recv()
+# returned b"". Nothing errored, but get_online_players() always parsed ""
+# into [], which meant: no player ever read as online, no reward was ever
+# delivered live, the heartbeat never auto-linked or XP-ticked anyone, and
+# every in-game surface of the pipeline silently no-oped. Verified directly
+# against the running server: the text approach gets empty responses; the
+# packet protocol below authenticates and executes commands correctly.
 class RCONClient:
+    _AUTH = 3
+    _EXECCOMMAND = 2
+
     def __init__(self, host, port, password):
         self.host = host
         self.port = port
         self.password = password
         self.socket = None
+        self._req_id = 0
+
+    def _send_packet(self, ptype: int, payload: str) -> int:
+        self._req_id += 1
+        body = struct.pack("<ii", self._req_id, ptype) + payload.encode("utf-8") + b"\x00\x00"
+        self.socket.sendall(struct.pack("<i", len(body)) + body)
+        return self._req_id
+
+    def _read_packet(self):
+        raw_len = b""
+        while len(raw_len) < 4:
+            chunk = self.socket.recv(4 - len(raw_len))
+            if not chunk:
+                raise ConnectionError("RCON socket closed")
+            raw_len += chunk
+        (length,) = struct.unpack("<i", raw_len)
+        data = b""
+        while len(data) < length:
+            chunk = self.socket.recv(length - len(data))
+            if not chunk:
+                raise ConnectionError("RCON socket closed mid-packet")
+            data += chunk
+        req_id, ptype = struct.unpack("<ii", data[:8])
+        return req_id, ptype, data[8:-2].decode("utf-8", errors="replace")
 
     def connect(self):
         try:
             self.socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            self.socket.settimeout(10)
             self.socket.connect((self.host, self.port))
-            self._authenticate()
+            self._send_packet(self._AUTH, self.password)
+            req_id, _, _ = self._read_packet()
+            if req_id == -1:  # protocol's explicit auth-failure marker
+                print("RCON authentication failed (bad password)")
+                self.close()
+                return False
             return True
         except Exception as e:
             print(f"RCON connection failed: {e}")
+            self.socket = None
             return False
 
-    def _authenticate(self):
-        # RCON authentication
-        auth_payload = f"password {self.password}\n"
-        self.socket.sendall(auth_payload.encode())
-        # Read response
-        self.socket.recv(1024)
-
     def execute_command(self, command: str) -> str:
-        if not self.socket:
-            self.connect()
-
+        if not self.socket and not self.connect():
+            return ""
         try:
-            self.socket.sendall(f"{command}\n".encode())
-            response = self.socket.recv(4096).decode()
-            return response
+            self._send_packet(self._EXECCOMMAND, command)
+            _, _, payload = self._read_packet()
+            return payload
         except Exception as e:
             print(f"RCON command failed: {e}")
-            self.connect()  # Reconnect
+            self.close()
             return ""
 
     def close(self):
         if self.socket:
-            self.socket.close()
+            try:
+                self.socket.close()
+            except Exception:
+                pass
+        self.socket = None
 
     def get_online_players(self) -> list:
         """Get list of online player usernames"""
@@ -161,6 +219,15 @@ async def process_event(event: dict):
         event_type = event.get('event_type')
         data = event.get('data', {})
 
+        if event_type == 'LevelUpped':
+            handle_level_up(data)
+            return
+        if event_type == 'MissionCompleted':
+            handle_mission_completed(data)
+            return
+        if event_type == 'WorldStateAdvanced':
+            handle_world_advanced(data)
+            return
         if event_type != 'RewardCollected':
             return
 
@@ -317,10 +384,22 @@ async def event_consumer_loop():
 
     print("Minecraft Reward Bridge started, listening for events...")
 
+    # Non-blocking poll, same pattern as evoke/workers.py -- the previous
+    # `for message in consumer:` iterator blocks the thread indefinitely
+    # between messages, which starved every other coroutine in the
+    # asyncio.gather (offline delivery, heartbeat, presence): they ran
+    # until their first await, then never again. With poll(), the event
+    # loop breathes between batches and all four loops actually run.
     try:
-        for message in consumer:
-            event = message.value
-            await process_event(event)
+        while True:
+            msg_pack = consumer.poll(timeout_ms=500)
+            for tp, messages in msg_pack.items():
+                for message in messages:
+                    try:
+                        await process_event(message.value)
+                    except Exception as e:
+                        print(f"Event processing error (skipping one event): {e}")
+            await asyncio.sleep(0.2)
     except Exception as e:
         print(f"Consumer error: {e}")
         await asyncio.sleep(5)
@@ -448,6 +527,264 @@ def send_tellraw(rcon: "RCONClient", player_name: str, message: str):
     payload = json.dumps({"text": f"B1llbot: {message}", "color": "gray", "italic": True})
     rcon.execute_command(f"tellraw {player_name} {payload}")
 
+# ---------------------------------------------------------------------------
+# Transmedia reactions: web/cohort events made physical in the Basin
+# ---------------------------------------------------------------------------
+
+def _rcon():
+    rcon = RCONClient(MINECRAFT_HOST, MINECRAFT_PORT, RCON_PASSWORD)
+    return rcon if rcon.connect() else None
+
+
+def _linked_username(user_id: str):
+    conn = get_db_connection()
+    try:
+        cur = conn.cursor()
+        cur.execute(
+            "SELECT minecraft_username FROM minecraft_links WHERE user_id = %s::uuid AND server_id = 'default'",
+            (user_id,)
+        )
+        row = cur.fetchone()
+        return row[0] if row else None
+    finally:
+        return_db_connection(conn)
+
+
+def handle_level_up(data: dict):
+    """A learner ranked up on the web side -- if they're a linked, online
+    player, make it land in-world: full-screen title, the classic level-up
+    sound, a burst of totem particles. Version-safe commands only (title/
+    playsound/particle), no NBT-heavy fireworks that break across
+    Minecraft versions."""
+    username = _linked_username(data.get('user_id', ''))
+    if not username:
+        return
+    rcon = _rcon()
+    if not rcon:
+        return
+    try:
+        if username not in rcon.get_online_players():
+            return
+        level = data.get('level')
+        title = data.get('title', '')
+        rcon.execute_command(
+            f'title {username} subtitle {json.dumps({"text": title, "color": "aqua"})}'
+        )
+        rcon.execute_command(
+            f'title {username} title {json.dumps({"text": f"LEVEL {level}", "color": "gold", "bold": True})}'
+        )
+        rcon.execute_command(f'playsound minecraft:entity.player.levelup master {username}')
+        rcon.execute_command(f'execute at {username} run particle minecraft:totem_of_undying ~ ~1 ~ 0.5 1 0.5 0.2 100')
+        print(f"✓ In-game level-up celebration for {username} (Level {level} — {title})")
+    finally:
+        rcon.close()
+
+
+def handle_mission_completed(data: dict):
+    """Cohort visibility inside the game: any learner submitting mission
+    evidence on the web announces in Basin chat, so players see the class
+    moving even when the mover isn't in Minecraft at all. Skipped when
+    nobody's online (no one to tell)."""
+    rcon = _rcon()
+    if not rcon:
+        return
+    try:
+        if not rcon.get_online_players():
+            return
+        conn = get_db_connection()
+        try:
+            cur = conn.cursor()
+            cur.execute("SELECT display_name FROM users WHERE id = %s::uuid", (data.get('user_id', ''),))
+            row = cur.fetchone()
+            display_name = row[0] if row else "An agent"
+        finally:
+            return_db_connection(conn)
+        payload = json.dumps([
+            {"text": "✦ ", "color": "gold"},
+            {"text": f"Agent {display_name} logged mission evidence — the Basin grows stronger.", "color": "yellow"},
+        ])
+        rcon.execute_command(f"tellraw @a {payload}")
+    finally:
+        rcon.close()
+
+
+def _ensure_world_meta(conn):
+    cur = conn.cursor()
+    try:
+        cur.execute("CREATE TABLE IF NOT EXISTS world_meta (key TEXT PRIMARY KEY, value TEXT)")
+        conn.commit()
+    finally:
+        cur.close()
+
+
+def _get_beacon_anchor(conn, rcon: "RCONClient"):
+    """(x, y, z) ground anchor for the Restoration Beacon. Priority:
+    KEEL_BEACON_POS env (curated world, a chosen spot in Keel) > previously
+    stored anchor (world_meta) > derive once from the first online player's
+    position and store it. Returns None when nothing can be derived yet
+    (nobody online at the moment of the advance) -- fine, because the
+    builder always re-builds every layer up to the current stage, so the
+    structure catches up on the next advance."""
+    if KEEL_BEACON_POS:
+        try:
+            x, y, z = [int(float(p)) for p in KEEL_BEACON_POS.split()]
+            return x, y, z
+        except Exception:
+            print(f"Bad KEEL_BEACON_POS {KEEL_BEACON_POS!r}; expected 'x y z'")
+
+    _ensure_world_meta(conn)
+    cur = conn.cursor()
+    try:
+        cur.execute("SELECT value FROM world_meta WHERE key = 'beacon_pos'")
+        row = cur.fetchone()
+        if row:
+            x, y, z = [int(p) for p in row[0].split()]
+            return x, y, z
+
+        players = rcon.get_online_players()
+        if not players:
+            return None
+        # "Pos" query response looks like: "Player has the following entity
+        # data: [12.5d, 64.0d, -3.25d]"
+        response = rcon.execute_command(f"data get entity {players[0]} Pos")
+        if "[" not in response:
+            return None
+        coords = response.split("[", 1)[1].split("]", 1)[0]
+        px, py, pz = [int(float(c.strip().rstrip("d"))) for c in coords.split(",")]
+        x, y, z = px + 6, py, pz + 6  # near, not on top of, the player
+        rcon.execute_command(f"forceload add {x} {z}")  # survive chunk unloads for later stages
+        cur.execute(
+            "INSERT INTO world_meta (key, value) VALUES ('beacon_pos', %s) ON CONFLICT (key) DO NOTHING",
+            (f"{x} {y} {z}",)
+        )
+        conn.commit()
+        print(f"✓ Restoration Beacon anchored at {x} {y} {z} (near {players[0]})")
+        return x, y, z
+    finally:
+        cur.close()
+
+
+def _build_beacon(rcon: "RCONClient", anchor, stage: int, total_stages: int):
+    """The physical, shared, growing monument to the cohort's progress: a
+    polished-deepslate plinth plus one glowing column block per stage;
+    completing the final stage caps it with a real, activated beacon
+    (3x3 iron base + beacon block). Idempotent by construction -- every
+    call rebuilds layers 1..stage, so a missed stage (server down, nobody
+    online) self-heals on the next advance."""
+    x, y, z = anchor
+    # Idempotent + cheap; matters most for env-configured coords, whose
+    # chunk may never have been loaded by a player at all.
+    rcon.execute_command(f"forceload add {x-2} {z-2} {x+2} {z+2}")
+    rcon.execute_command(f"fill {x-2} {y} {z-2} {x+2} {y} {z+2} minecraft:polished_deepslate")
+    for n in range(1, stage + 1):
+        block = "minecraft:sea_lantern" if n % 2 else "minecraft:glowstone"
+        rcon.execute_command(f"setblock {x} {y+n} {z} {block}")
+    if stage >= total_stages:
+        rcon.execute_command(f"fill {x-1} {y+stage+1} {z-1} {x+1} {y+stage+1} {z+1} minecraft:iron_block")
+        rcon.execute_command(f"setblock {x} {y+stage+2} {z} minecraft:beacon")
+
+
+def handle_world_advanced(data: dict):
+    """The cohort pushed Keel to a new restoration stage -- the flagship
+    transmedia moment (GAPS.md #5). Everyone online gets the stage title
+    full-screen, the narrative line in chat, a challenge-complete sound,
+    totem particles, and the Restoration Beacon physically grows."""
+    stage = data.get('stage', 0)
+    total = data.get('total_stages', 8)
+    title = data.get('title', '')
+    narrative = data.get('narrative', '')
+
+    rcon = _rcon()
+    if not rcon:
+        return
+    try:
+        rcon.execute_command(
+            f'title @a subtitle {json.dumps({"text": title, "color": "aqua"})}'
+        )
+        rcon.execute_command(
+            f'title @a title {json.dumps({"text": f"KEEL — STAGE {stage}", "color": "gold", "bold": True})}'
+        )
+        rcon.execute_command(
+            f'tellraw @a {json.dumps([{"text": "⚡ ", "color": "gold"}, {"text": f"{title}: ", "color": "gold", "bold": True}, {"text": narrative, "color": "aqua"}])}'
+        )
+        rcon.execute_command("playsound minecraft:ui.toast.challenge_complete master @a")
+        rcon.execute_command("execute at @a run particle minecraft:totem_of_undying ~ ~1 ~ 1 1 1 0.3 200")
+
+        conn = get_db_connection()
+        try:
+            anchor = _get_beacon_anchor(conn, rcon)
+        finally:
+            return_db_connection(conn)
+        if anchor:
+            _build_beacon(rcon, anchor, stage, total)
+            print(f"✓ Restoration Beacon grew to stage {stage} at {anchor}")
+        else:
+            print(f"World advanced to stage {stage}, but no beacon anchor yet (nobody online) — will catch up next stage")
+    finally:
+        rcon.close()
+
+
+# ---------------------------------------------------------------------------
+# Presence: who's in the Basin right now (feeds the web's live card)
+# ---------------------------------------------------------------------------
+
+def _linked_players_info(conn, online_players: list) -> dict:
+    """{minecraft_username: {user_id, display_name}} for online players
+    with a link -- the web side wants names, not UUIDs."""
+    if not online_players:
+        return {}
+    cur = conn.cursor()
+    try:
+        cur.execute(
+            """SELECT ml.minecraft_username, u.id, u.display_name
+               FROM minecraft_links ml JOIN users u ON u.id = ml.user_id
+               WHERE ml.server_id = 'default' AND ml.minecraft_username = ANY(%s::text[])""",
+            (online_players,)
+        )
+        return {name: {"user_id": str(uid), "display_name": dn} for name, uid, dn in cur.fetchall()}
+    finally:
+        cur.close()
+
+
+async def presence_loop():
+    """Publishes MinecraftPresence snapshots for the web's live "who's in
+    the Basin" card. Change-triggered plus a keepalive every
+    PRESENCE_KEEPALIVE seconds; /api/minecraft/status treats a silence
+    longer than ~90s as "unknown", so the keepalive is what lets an empty
+    server still read as *online*."""
+    last_snapshot = None
+    last_published = 0.0
+    while True:
+        try:
+            await asyncio.sleep(PRESENCE_INTERVAL)
+            rcon = RCONClient(MINECRAFT_HOST, MINECRAFT_PORT, RCON_PASSWORD)
+            server_online = rcon.connect()
+            online_players = rcon.get_online_players() if server_online else []
+            if server_online:
+                rcon.close()
+
+            linked = {}
+            if online_players:
+                conn = get_db_connection()
+                try:
+                    linked = _linked_players_info(conn, online_players)
+                finally:
+                    return_db_connection(conn)
+
+            snapshot = (server_online, tuple(sorted(online_players)))
+            now = asyncio.get_event_loop().time()
+            if snapshot != last_snapshot or (now - last_published) >= PRESENCE_KEEPALIVE:
+                publish_event("MinecraftPresence", {
+                    "server_online": server_online,
+                    "online_players": online_players,
+                    "linked_players": linked,
+                })
+                last_snapshot = snapshot
+                last_published = now
+        except Exception as e:
+            print(f"Presence loop error: {e}")
+
+
 async def heartbeat_loop():
     """Runs continuously: auto-links the first real player to Player One,
     then gives everyone currently online a small XP tick plus occasional
@@ -518,7 +855,8 @@ async def main():
     await asyncio.gather(
         event_consumer_loop(),
         offline_delivery_loop(),
-        heartbeat_loop()
+        heartbeat_loop(),
+        presence_loop()
     )
 
 if __name__ == "__main__":
