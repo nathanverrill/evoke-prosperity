@@ -3013,11 +3013,13 @@ async def get_gear(user_id: str):
     """Full catalog with unlocked flags + the user's equipped selection.
     Unlocks are computed at read time from existing facts, so they can
     never drift from the truth (see evoke/gear.py)."""
-    items = gear_catalog.evaluate_gear(_gear_facts(user_id))
+    facts = _gear_facts(user_id)
+    items = gear_catalog.evaluate_gear(facts)
     row = db_fetch_one("SELECT equipped_gear, sigil, avatar_object_key FROM users WHERE id = %s::uuid", (user_id,))
     equipped = json.loads(row[0]) if row and row[0] else []
     unlocked_keys = {i["key"] for i in items if i["unlocked"]}
     equipped = [k for k in equipped if k in unlocked_keys]  # never display gear that's no longer earned
+    best_sim_score = max(facts["game_best"].values()) if facts["game_best"] else None
     return {
         "gear": items,
         "equipped": equipped,
@@ -3026,6 +3028,7 @@ async def get_gear(user_id: str):
         "sigil": json.loads(row[1]) if row and row[1] else None,
         "has_avatar": bool(row and row[2]),
         "next_unlock": gear_catalog.pick_next_unlock(items),
+        "best_sim_score": best_sim_score,
     }
 
 

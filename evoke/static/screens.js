@@ -918,6 +918,22 @@ Evoke.screens.playerProfile = async function playerProfile(userId) {
 
   const completedIds = new Set(profile.missions_completed || []);
 
+  // Service Record (console-UX gap #8): lifetime stats in one glanceable
+  // strip -- every number here already existed somewhere else on this
+  // screen, just never summarized together the way a combat record does.
+  const RARITY_RANK = { standard: 1, epic: 2, legendary: 3 };
+  const rarestGear = (gearRes.gear || [])
+    .filter(g => g.unlocked)
+    .sort((a, b) => (RARITY_RANK[b.rarity] || 0) - (RARITY_RANK[a.rarity] || 0))[0];
+  const statTiles = [
+    { icon: "flag", n: `${profile.missions_completed_count}/12`, l: "Missions" },
+    { icon: "explore", n: String(profile.quests_completed_count), l: "Quests" },
+    { icon: "sports_esports", n: gearRes.best_sim_score != null ? String(gearRes.best_sim_score) : "—", l: "Best Sim Score" },
+    { icon: "auto_stories", n: String(reflectionsRes.total || 0), l: "Wisdom Entries" },
+    { icon: "inventory_2", n: `${gearRes.unlocked_count}/${gearRes.total}`, l: "Gear Recovered" },
+    { icon: "workspace_premium", n: rarestGear ? rarestGear.icon : "—", l: rarestGear ? `Rarest: ${Evoke.escapeHtml(rarestGear.name)}` : "Rarest Gear" },
+  ];
+
   mount(`
     <div class="stack dossier">
       <div class="card dossier-header">
@@ -966,6 +982,19 @@ Evoke.screens.playerProfile = async function playerProfile(userId) {
           ${nextXp ? `<p class="empty-state" style="margin-top:var(--space-1)">${nextXp - profile.xp} XP to next rank</p>` : ""}
         </div>
       </div>
+
+      <section>
+        <h2 class="section-title">Service Record</h2>
+        <div class="stat-tiles">
+          ${statTiles.map(t => `
+            <div class="stat-tile">
+              <span class="ms" aria-hidden="true">${t.icon}</span>
+              <div class="stat-tile__n">${t.n}</div>
+              <div class="stat-tile__l">${t.l}</div>
+            </div>
+          `).join("")}
+        </div>
+      </section>
 
       <section>
         <h2 class="section-title">Field Gear</h2>

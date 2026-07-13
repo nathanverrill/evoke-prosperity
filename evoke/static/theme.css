@@ -782,6 +782,25 @@ a.objectives-list__label:hover { color: var(--cyan-300); }
   flex: none;
 }
 .dossier-xp { margin-top: var(--space-4); }
+
+/* Service Record stat tiles (console-UX gap #8) -- ported from the
+   showcase's .pf-stats/.pf-stat: lifetime stats in one glanceable strip
+   instead of scattered across separate sections the Dossier already has. */
+.stat-tiles { display: grid; grid-template-columns: repeat(3, 1fr); gap: var(--space-3); margin: var(--space-4) 0; }
+.stat-tile {
+  position: relative;
+  padding: var(--space-3) var(--space-2) var(--space-2);
+  border-radius: var(--radius-lg);
+  background: var(--color-surface);
+  box-shadow: var(--shadow);
+  text-align: center;
+  overflow: hidden;
+}
+.stat-tile::before { content: ""; position: absolute; top: 0; left: 0; right: 0; height: 3px; background: var(--cyan-500); box-shadow: 0 0 12px var(--cyan-500); }
+.stat-tile .ms { font-size: 22px; display: block; margin-bottom: var(--space-1); color: var(--cyan-300); filter: drop-shadow(0 0 7px var(--cyan-300)); }
+.stat-tile__n { font-family: var(--font-display); font-weight: 800; font-size: var(--text-xl); color: var(--color-text-heading); text-shadow: 0 0 16px rgba(0, 211, 243, 0.4); }
+.stat-tile__l { font-family: var(--font-mono); font-size: var(--text-xs); letter-spacing: 0.08em; color: var(--color-text-muted); margin-top: var(--space-1); text-transform: uppercase; }
+@media (max-width: 560px) { .stat-tiles { grid-template-columns: repeat(2, 1fr); } }
 .world-meter__fill.is-xp { background: var(--grad-xp); box-shadow: 0 0 14px rgba(232, 132, 47, 0.6); }
 
 .loadout-slot { padding: var(--space-4); }
