@@ -53,6 +53,15 @@ PRESENCE_KEEPALIVE = 60
 # structure.
 KEEL_BEACON_POS = os.getenv("KEEL_BEACON_POS", "")
 
+# Same idea, for the B1llbot Signal Post (console-UX follow-up: "find a
+# B1llbot location in-world, then enter the code" instead of typing
+# /trigger from anywhere with no discovery). Real in-game B1llbot chat is
+# still blocked on the Fabric mod's Yarn-mappings gap (see this repo's
+# Dockerfile comment) -- this is world dressing, not a conversation. The
+# /trigger command itself still works from anywhere; nothing here enforces
+# proximity, this just gives the fiction a real place to point players to.
+BILLBOT_POST_POS = os.getenv("BILLBOT_POST_POS", "")
+
 OPENWEBUI_URL = os.getenv("OPENWEBUI_URL", "http://open-webui:8080")
 OPENWEBUI_API_KEY = os.getenv("OPENWEBUI_API_KEY", "")
 
@@ -687,6 +696,114 @@ def _build_beacon(rcon: "RCONClient", anchor, stage: int, total_stages: int):
         rcon.execute_command(f"setblock {x} {y+stage+2} {z} minecraft:beacon")
 
 
+def _get_billbot_post_anchor(conn, rcon: "RCONClient"):
+    """(x, y, z) for the B1llbot Signal Post. Same priority order as
+    _get_beacon_anchor and for the same reason: BILLBOT_POST_POS env (a
+    curated world) > previously stored anchor (world_meta) > derive once
+    from the first online player's position and store it."""
+    if BILLBOT_POST_POS:
+        try:
+            x, y, z = [int(float(p)) for p in BILLBOT_POST_POS.split()]
+            return x, y, z
+        except Exception:
+            print(f"Bad BILLBOT_POST_POS {BILLBOT_POST_POS!r}; expected 'x y z'")
+
+    _ensure_world_meta(conn)
+    cur = conn.cursor()
+    try:
+        cur.execute("SELECT value FROM world_meta WHERE key = 'billbot_post_pos'")
+        row = cur.fetchone()
+        if row:
+            x, y, z = [int(p) for p in row[0].split()]
+            return x, y, z
+
+        players = rcon.get_online_players()
+        if not players:
+            return None
+        response = rcon.execute_command(f"data get entity {players[0]} Pos")
+        if "[" not in response:
+            return None
+        coords = response.split("[", 1)[1].split("]", 1)[0]
+        px, py, pz = [int(float(c.strip().rstrip("d"))) for c in coords.split(",")]
+        x, y, z = px - 6, py, pz - 6  # near, not on top of, the player -- opposite corner from the beacon
+        rcon.execute_command(f"forceload add {x} {z}")
+        cur.execute(
+            "INSERT INTO world_meta (key, value) VALUES ('billbot_post_pos', %s) ON CONFLICT (key) DO NOTHING",
+            (f"{x} {y} {z}",)
+        )
+        conn.commit()
+        print(f"✓ B1llbot Signal Post anchored at {x} {y} {z} (near {players[0]})")
+        return x, y, z
+    finally:
+        cur.close()
+
+
+def _build_billbot_post(rcon: "RCONClient", anchor):
+    """A small, findable landmark: a deepslate platform, an end rod for a
+    passive ambient glow (no scripted particle loop needed), a sign with
+    the actual link instructions, and a floating named text display so it
+    reads as "B1LLBOT" from a distance. Idempotent -- re-running just
+    re-places the same blocks/sign text; the text display is only summoned
+    once (checked via an entity selector) so repeat heartbeat ticks don't
+    stack duplicates on top of each other."""
+    x, y, z = anchor
+    rcon.execute_command(f"forceload add {x-2} {z-2} {x+2} {z+2}")
+    rcon.execute_command(f"fill {x-1} {y} {z-1} {x+1} {y} {z+1} minecraft:polished_deepslate")
+    rcon.execute_command(f"setblock {x} {y+1} {z+1} minecraft:end_rod")
+    rcon.execute_command(f"setblock {x} {y+1} {z} minecraft:oak_sign[rotation=8]")
+    lines = ["B1LLBOT", "Signal Post", "/trigger evoke_link", "set <code>"]
+    messages = ",".join(json.dumps(json.dumps(line)) for line in lines)
+    rcon.execute_command(f"data merge block {x} {y+1} {z} {{front_text:{{messages:[{messages}]}}}}")
+
+    existing = rcon.execute_command(f"data get entity @e[type=text_display,x={x},y={y+2},z={z+1},distance=..2,limit=1]")
+    if "no entity was found" in existing.lower() or not existing.strip():
+        text_json = json.dumps({"text": "B1LLBOT", "color": "aqua", "bold": True})
+        rcon.execute_command(
+            f'summon minecraft:text_display {x} {y+2} {z+1} '
+            f'{{text:{json.dumps(text_json)},billboard:"center",see_through:1b}}'
+        )
+
+
+def _ensure_billbot_post():
+    """Builds the B1llbot Signal Post exactly once, the first heartbeat
+    tick after anyone's online -- cheap on every other tick (one indexed
+    Postgres lookup, no RCON) once the built flag is set."""
+    conn = get_db_connection()
+    try:
+        _ensure_world_meta(conn)
+        cur = conn.cursor()
+        try:
+            cur.execute("SELECT 1 FROM world_meta WHERE key = 'billbot_post_built'")
+            if cur.fetchone():
+                return
+        finally:
+            cur.close()
+
+        rcon = RCONClient(MINECRAFT_HOST, MINECRAFT_PORT, RCON_PASSWORD)
+        if not rcon.connect():
+            return
+        try:
+            anchor = _get_billbot_post_anchor(conn, rcon)
+            if not anchor:
+                return
+            _build_billbot_post(rcon, anchor)
+            cur = conn.cursor()
+            try:
+                cur.execute(
+                    "INSERT INTO world_meta (key, value) VALUES ('billbot_post_built', '1') ON CONFLICT (key) DO NOTHING"
+                )
+                conn.commit()
+            finally:
+                cur.close()
+            print(f"✓ B1llbot Signal Post built at {anchor}")
+        finally:
+            rcon.close()
+    except Exception as e:
+        print(f"B1llbot Signal Post build error: {e}")
+    finally:
+        return_db_connection(conn)
+
+
 def handle_world_advanced(data: dict):
     """The cohort pushed Keel to a new restoration stage -- the flagship
     transmedia moment (GAPS.md #5). Everyone online gets the stage title
@@ -1006,6 +1123,8 @@ async def heartbeat_loop():
                 linked = get_online_linked_players(conn, online_players)
             finally:
                 return_db_connection(conn)
+
+            _ensure_billbot_post()
 
             for player_name, user_id in linked.items():
                 publish_event("XPGranted", {
