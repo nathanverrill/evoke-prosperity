@@ -583,12 +583,13 @@ Evoke.screens.gallery = async function gallery() {
 Evoke.screens.playerProfile = async function playerProfile(userId) {
   const { api, state, mount } = Evoke;
   const id = userId || state.userId;
-  const [profile, achievementsRes, missionsRes, questsRes, mcStatus] = await Promise.all([
+  const [profile, achievementsRes, missionsRes, questsRes, mcStatus, gearRes] = await Promise.all([
     api.playerProfile(id),
     api.achievements(id).catch(() => ({ qualities: {}, powers: {} })),
     api.missions(id).catch(() => ({ missions: [] })),
     api.mcQuests().catch(() => ({ quests: [] })),
     api.minecraftStatus().catch(() => null),
+    api.gear(id).catch(() => ({ gear: [], equipped: [], sigil: null, has_avatar: false })),
   ]);
   const badgeKeys = ["Empathetic Changemaker", "Systems Thinker", "Creative Visionary", "Deep Collaborator"];
   const powers = achievementsRes.powers || {};
@@ -613,6 +614,31 @@ Evoke.screens.playerProfile = async function playerProfile(userId) {
   const monogram = name.split(/\s+/).map(w => w[0]).join("").slice(0, 2).toUpperCase();
   const inBasin = !!(mcStatus && mcStatus.server_online && profile.minecraft_username
     && (mcStatus.online_players || []).includes(profile.minecraft_username));
+  const isOwn = id === state.userId;
+
+  // Identity visual, in priority order: uploaded photo > chosen Agent
+  // Sigil (curated glyph + hue) > monogram fallback.
+  const sigil = gearRes.sigil;
+  const avatarHtml = gearRes.has_avatar
+    ? `<img class="dossier-monogram dossier-avatar" src="/api/avatar/${id}?t=${Date.now()}" alt="${Evoke.escapeHtml(name)}'s avatar">`
+    : (sigil
+        ? `<div class="dossier-monogram dossier-sigil" style="--sigil-hue:${sigil.hue}" aria-hidden="true">${Evoke.escapeHtml(sigil.glyph)}</div>`
+        : `<div class="dossier-monogram" aria-hidden="true">${Evoke.escapeHtml(monogram)}</div>`);
+
+  const equippedItems = (gearRes.gear || []).filter(g => (gearRes.equipped || []).includes(g.key));
+
+  // "New gear unlocked" nudge: diff unlocked keys against what this browser
+  // saw last time (cosmetic-only, so localStorage is an honest enough memory).
+  if (isOwn) {
+    const seenKey = `evoke_gear_seen_${id}`;
+    const seen = new Set(JSON.parse(localStorage.getItem(seenKey) || "[]"));
+    const nowUnlocked = (gearRes.gear || []).filter(g => g.unlocked).map(g => g.key);
+    nowUnlocked.filter(k => !seen.has(k)).forEach(k => {
+      const g = (gearRes.gear || []).find(x => x.key === k);
+      if (seen.size) Evoke.toast(`◈ FIELD GEAR UNLOCKED — <strong>${Evoke.escapeHtml(g.name)}</strong><br>${Evoke.escapeHtml(g.flavor)}`, { ttl: 9000 });
+    });
+    localStorage.setItem(seenKey, JSON.stringify(nowUnlocked));
+  }
 
   // XP charge bar: progress through the current level's band.
   const nextXp = profile.next_level_xp;
@@ -624,7 +650,7 @@ Evoke.screens.playerProfile = async function playerProfile(userId) {
     <div class="stack dossier">
       <div class="card dossier-header">
         <div class="dossier-header__id">
-          <div class="dossier-monogram" aria-hidden="true">${Evoke.escapeHtml(monogram)}</div>
+          ${avatarHtml}
           <div>
             <div class="card__eyebrow">Agent Dossier · Basin Field Division</div>
             <h1>${Evoke.escapeHtml(name)}</h1>
@@ -633,8 +659,32 @@ Evoke.screens.playerProfile = async function playerProfile(userId) {
               <span class="chip">CLEARANCE ${String(profile.level).padStart(2, "0")}</span>
               <span class="chip ${inBasin ? "chip--green" : ""}">${inBasin ? `<span class="dot"></span>IN THE BASIN` : (profile.minecraft_username ? `CALLSIGN ${Evoke.escapeHtml(profile.minecraft_username.toUpperCase())}` : "CALLSIGN UNASSIGNED")}</span>
             </div>
+            ${equippedItems.length ? `
+              <div class="row" style="margin-top:var(--space-2)">
+                ${equippedItems.map(g => `<span class="gear-chip" data-rarity="${g.rarity}" title="${Evoke.escapeHtml(g.flavor)}">${g.icon} ${Evoke.escapeHtml(g.name)}</span>`).join("")}
+              </div>
+            ` : ""}
           </div>
+          ${isOwn ? `<button class="btn dossier-edit-btn" id="identity-edit">Customize Identity</button>` : ""}
         </div>
+        ${isOwn ? `
+        <div id="identity-editor" class="identity-editor" hidden>
+          <div class="card__eyebrow" style="margin-bottom:var(--space-2)">Agent Sigil — pick a mark and a color</div>
+          <div class="row" id="sigil-glyphs">
+            ${["⬡","◈","✦","☄","⚙","♜","⟁","◭","⬢","❖"].map(g => `<button class="sigil-pick ${sigil && sigil.glyph === g ? "is-current" : ""}" data-glyph="${g}">${g}</button>`).join("")}
+          </div>
+          <div class="row" style="margin-top:var(--space-2)">
+            <input type="range" id="sigil-hue" min="0" max="360" value="${sigil ? sigil.hue : 190}" style="flex:1">
+            <span class="dossier-monogram dossier-sigil sigil-preview" id="sigil-preview" style="--sigil-hue:${sigil ? sigil.hue : 190}; width:44px;height:44px;font-size:var(--text-lg)">${sigil ? Evoke.escapeHtml(sigil.glyph) : "⬡"}</span>
+          </div>
+          <div class="row" style="margin-top:var(--space-3)">
+            <label class="btn" style="cursor:pointer">Upload Photo<input type="file" id="avatar-file" accept="image/*" hidden></label>
+            ${gearRes.has_avatar ? `<button class="btn" id="avatar-remove">Remove Photo</button>` : ""}
+            <span class="empty-state">Photo is optional — the Sigil always works.</span>
+          </div>
+          <p id="identity-status" class="empty-state" style="margin-top:var(--space-2)"></p>
+        </div>
+        ` : ""}
         <div class="dossier-xp">
           <div class="row-between">
             <span class="card__eyebrow">XP Charge</span>
@@ -644,6 +694,25 @@ Evoke.screens.playerProfile = async function playerProfile(userId) {
           ${nextXp ? `<p class="empty-state" style="margin-top:var(--space-1)">${nextXp - profile.xp} XP to next rank</p>` : ""}
         </div>
       </div>
+
+      <section>
+        <h2 class="section-title">Field Gear</h2>
+        <p class="empty-state">${gearRes.unlocked_count} of ${gearRes.total} recovered. Unlocked by what you actually do — Powers, rank, sims, the Basin${isOwn ? ". Equip up to 3 to display on your dossier" : ""}.</p>
+        <div class="gear-grid">
+          ${(gearRes.gear || []).map(g => `
+            <div class="gear-item ${g.unlocked ? "is-unlocked" : "is-locked"}" data-rarity="${g.rarity}">
+              <div class="gear-item__icon">${g.unlocked || !g.secret ? g.icon : "?"}</div>
+              <div class="gear-item__name">${g.unlocked || !g.secret ? Evoke.escapeHtml(g.name) : "UNKNOWN ITEM"}</div>
+              <div class="gear-item__slot">${Evoke.escapeHtml(g.slot)} · ${Evoke.escapeHtml(g.rarity)}</div>
+              <p class="gear-item__text">${g.unlocked ? Evoke.escapeHtml(g.flavor) : Evoke.escapeHtml(g.hint || "Signal too weak to identify.")}</p>
+              ${isOwn && g.unlocked ? `
+                <button class="btn gear-equip-btn ${(gearRes.equipped || []).includes(g.key) ? "btn-primary" : ""}" data-gear-key="${g.key}">
+                  ${(gearRes.equipped || []).includes(g.key) ? "Equipped" : "Equip"}
+                </button>` : ""}
+            </div>
+          `).join("")}
+        </div>
+      </section>
 
       <section>
         <h2 class="section-title">Loadout — Superpowers</h2>
@@ -733,6 +802,65 @@ Evoke.screens.playerProfile = async function playerProfile(userId) {
       </section>
     </div>
   `);
+
+  if (!isOwn) return;
+
+  // --- identity editor ---
+  document.getElementById("identity-edit")?.addEventListener("click", () => {
+    const ed = document.getElementById("identity-editor");
+    ed.hidden = !ed.hidden;
+  });
+  const statusEl = () => document.getElementById("identity-status");
+  let pendingGlyph = sigil ? sigil.glyph : "⬡";
+  document.querySelectorAll(".sigil-pick").forEach(btn => btn.addEventListener("click", async () => {
+    pendingGlyph = btn.dataset.glyph;
+    const hue = Number(document.getElementById("sigil-hue").value);
+    const preview = document.getElementById("sigil-preview");
+    preview.textContent = pendingGlyph;
+    preview.style.setProperty("--sigil-hue", hue);
+    await api.setSigil(id, pendingGlyph, hue).catch(() => {});
+    statusEl().textContent = "Sigil saved.";
+    document.querySelectorAll(".sigil-pick").forEach(b => b.classList.toggle("is-current", b === btn));
+  }));
+  document.getElementById("sigil-hue")?.addEventListener("change", async (e) => {
+    const hue = Number(e.target.value);
+    document.getElementById("sigil-preview").style.setProperty("--sigil-hue", hue);
+    await api.setSigil(id, pendingGlyph, hue).catch(() => {});
+    statusEl().textContent = "Sigil saved.";
+  });
+  document.getElementById("avatar-file")?.addEventListener("change", async (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+    statusEl().textContent = "Uploading…";
+    try {
+      await api.uploadAvatar(id, file);
+      statusEl().textContent = "Photo set.";
+      Evoke.screens.playerProfile(userId);
+    } catch (err) {
+      statusEl().textContent = "Upload failed — images only, 2MB max.";
+    }
+  });
+  document.getElementById("avatar-remove")?.addEventListener("click", async () => {
+    await api.deleteAvatar(id).catch(() => {});
+    Evoke.screens.playerProfile(userId);
+  });
+
+  // --- gear equip toggles (max 3, server-validated) ---
+  document.querySelectorAll(".gear-equip-btn").forEach(btn => btn.addEventListener("click", async () => {
+    const key = btn.dataset.gearKey;
+    let next = [...(gearRes.equipped || [])];
+    if (next.includes(key)) next = next.filter(k => k !== key);
+    else {
+      if (next.length >= 3) { Evoke.toast("Three gear slots — unequip something first."); return; }
+      next.push(key);
+    }
+    try {
+      await api.equipGear(id, next);
+      Evoke.screens.playerProfile(userId);
+    } catch (e) {
+      Evoke.toast("Couldn't equip that just now.");
+    }
+  }));
 };
 
 Evoke.screens.teamProfile = async function teamProfile(teamId) {

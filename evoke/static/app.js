@@ -63,6 +63,24 @@ const Evoke = (() => {
     worldState: () => apiGet("/api/world-state"),
     minecraftStatus: () => apiGet("/api/minecraft/status"),
     companionInfo: () => apiGet("/api/companion/info"),
+    gear: (userId) => apiGet(`/api/gear/${userId}`),
+    equipGear: (userId, keys) => {
+      const fd = new FormData();
+      fd.append("keys", JSON.stringify(keys));
+      return apiPostForm(`/api/gear/${userId}/equip`, fd);
+    },
+    setSigil: (userId, glyph, hue) => {
+      const fd = new FormData();
+      fd.append("glyph", glyph);
+      fd.append("hue", String(hue));
+      return apiPostForm(`/api/profile/${userId}/sigil`, fd);
+    },
+    uploadAvatar: (userId, file) => {
+      const fd = new FormData();
+      fd.append("file", file);
+      return apiPostForm(`/api/avatar/${userId}`, fd);
+    },
+    deleteAvatar: (userId) => fetch(`/api/avatar/${userId}`, { method: "DELETE" }).then(r => r.json()),
   };
 
   // ---------- Auth (dev-login only; see CONCEPTS.md's known gaps) ----------

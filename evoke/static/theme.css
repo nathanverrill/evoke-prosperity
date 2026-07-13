@@ -677,3 +677,63 @@ input:focus, textarea:focus, select:focus {
 }
 .mission-pip.is-done { background: var(--grad-water); box-shadow: 0 0 8px rgba(0, 211, 243, 0.5); }
 .mission-pip.is-locked { opacity: 0.35; }
+
+/* ---- Identity: avatars & Agent Sigils ---- */
+.dossier-avatar { object-fit: cover; padding: 0; }
+.dossier-sigil {
+  background:
+    radial-gradient(120% 120% at 30% 20%,
+      hsl(var(--sigil-hue, 190) 85% 62%) 0%,
+      hsl(calc(var(--sigil-hue, 190) + 40) 70% 40%) 60%,
+      hsl(var(--sigil-hue, 190) 80% 22%) 100%);
+  color: rgba(255, 255, 255, 0.92);
+  text-shadow: 0 0 14px rgba(255, 255, 255, 0.5);
+}
+.dossier-edit-btn { margin-left: auto; align-self: flex-start; }
+.identity-editor {
+  margin-top: var(--space-4);
+  padding-top: var(--space-4);
+  border-top: var(--border-width) solid var(--color-border);
+}
+.sigil-pick { min-width: 44px; font-size: var(--text-lg); padding: var(--space-2); }
+.sigil-pick.is-current { box-shadow: inset 0 0 0 1px var(--cyan-500), var(--glow-md); }
+.sigil-preview { display: inline-flex; align-items: center; justify-content: center; border-radius: var(--radius); }
+
+/* ---- Field Gear ---- */
+.gear-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  gap: var(--space-3);
+}
+.gear-item {
+  background: var(--color-surface);
+  border-radius: var(--radius-lg);
+  padding: var(--space-4);
+  text-align: center;
+  box-shadow: inset 0 0 0 1px var(--color-border);
+  backdrop-filter: blur(16px);
+}
+.gear-item.is-locked { filter: saturate(0.35); color: var(--color-locked-text); }
+.gear-item.is-unlocked[data-rarity="standard"] { box-shadow: inset 0 0 0 1px var(--color-border-strong); }
+.gear-item.is-unlocked[data-rarity="epic"] { box-shadow: inset 0 0 0 1px var(--tier-epic), 0 0 16px rgba(43, 127, 255, 0.25); }
+.gear-item.is-unlocked[data-rarity="legendary"] { box-shadow: inset 0 0 0 1px var(--tier-legendary), 0 0 24px rgba(217, 164, 65, 0.35); }
+.gear-item__icon { font-size: var(--text-2xl); line-height: 1.2; }
+.gear-item.is-unlocked .gear-item__icon { text-shadow: 0 0 16px rgba(0, 211, 243, 0.6); }
+.gear-item__name { font-family: var(--font-display); font-weight: 700; font-size: var(--text-sm); margin-top: var(--space-1); color: var(--color-text-heading); }
+.gear-item.is-locked .gear-item__name { color: var(--color-locked-text); }
+.gear-item__slot { font-family: var(--font-mono); font-size: var(--text-xs); letter-spacing: 0.12em; text-transform: uppercase; color: var(--teal-400); margin: var(--space-1) 0; }
+.gear-item__text { font-size: var(--text-xs); color: var(--color-text-muted); min-height: 3em; }
+.gear-equip-btn { margin-top: var(--space-2); }
+
+.gear-chip {
+  display: inline-flex; align-items: center; gap: var(--space-1);
+  padding: var(--space-1) var(--space-3);
+  border-radius: var(--radius-pill);
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  letter-spacing: 0.06em;
+  background: var(--color-surface-dim);
+}
+.gear-chip[data-rarity="standard"] { box-shadow: inset 0 0 0 1px var(--color-border-strong); color: var(--teal-050); }
+.gear-chip[data-rarity="epic"] { box-shadow: inset 0 0 0 1px var(--tier-epic); color: var(--cyan-300); }
+.gear-chip[data-rarity="legendary"] { box-shadow: inset 0 0 0 1px var(--tier-legendary), 0 0 12px rgba(217, 164, 65, 0.35); color: var(--tier-legendary); }

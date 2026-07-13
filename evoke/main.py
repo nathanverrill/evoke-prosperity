@@ -19,7 +19,7 @@ from evoke.clients import s3_client, os_client, get_producer
 from evoke.workers import evoke_workers_loop
 from evoke.lms import get_brightspace_lms
 from evoke.lti import BrightspaceLTIProvider
-from evoke import skills_framework, progression, world_state
+from evoke import skills_framework, progression, world_state, gear as gear_catalog
 from evoke.live import live_hub
 
 logger = logging.getLogger(__name__)
@@ -187,6 +187,12 @@ async def startup():
         )""")
         db_execute("CREATE INDEX IF NOT EXISTS idx_minigame_scores_user_game ON minigame_scores(user_id, game_key)")
         db_execute("CREATE INDEX IF NOT EXISTS idx_minigame_scores_game_score ON minigame_scores(game_key, score DESC)")
+        # Identity customization: uploaded avatar (MinIO object key), the
+        # procedural Agent Sigil config (small JSON: glyph + hue), and the
+        # equipped Field Gear (JSON list of gear keys, validated on write).
+        db_execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS avatar_object_key TEXT")
+        db_execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS sigil TEXT")
+        db_execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS equipped_gear TEXT")
 
     except Exception as e:
         logger.error(f"Startup error: {e}")
@@ -2242,6 +2248,154 @@ async def signal_progress(user_id: str):
         "total": len(SIGNAL_FRAGMENT_KEYS),
         "unlocked": "unlocked" in keys,
     }
+
+
+# ========== Identity: avatars & Agent Sigils ==========
+# Two paths, safest first: a procedural Agent Sigil (curated glyph + hue,
+# no user-generated imagery at all — always appropriate for a minors
+# cohort) and an optional real photo upload. Uploads share the exact
+# moderation posture GAPS.md already flags for screenshot evidence
+# (teacher visibility/removal tooling needed before a real pilot) — same
+# open gap, one more surface, called out there rather than hidden here.
+
+AVATAR_MAX_BYTES = 2 * 1024 * 1024
+SIGIL_GLYPHS = ["⬡", "◈", "✦", "☄", "⚙", "♜", "⟁", "◭", "⬢", "❖"]
+
+
+@app.post("/api/avatar/{user_id}")
+async def upload_avatar(user_id: str, file: UploadFile = File(...)):
+    if not (file.content_type or "").startswith("image/"):
+        raise HTTPException(status_code=400, detail="Avatars must be an image")
+    data = await file.read()
+    if len(data) > AVATAR_MAX_BYTES:
+        raise HTTPException(status_code=400, detail="Avatar too large (2MB max)")
+    object_key = f"avatars/{user_id}"
+    s3_client.put_object(Bucket="default-bucket", Key=object_key, Body=data,
+                         ContentType=file.content_type)
+    db_execute("UPDATE users SET avatar_object_key = %s WHERE id = %s::uuid", (object_key, user_id))
+    return {"status": "ok"}
+
+
+@app.get("/api/avatar/{user_id}")
+async def get_avatar(user_id: str):
+    row = db_fetch_one("SELECT avatar_object_key FROM users WHERE id = %s::uuid", (user_id,))
+    if not row or not row[0]:
+        raise HTTPException(status_code=404, detail="No avatar")
+    try:
+        obj = s3_client.get_object(Bucket="default-bucket", Key=row[0])
+        return Response(content=obj["Body"].read(),
+                        media_type=obj.get("ContentType", "image/png"),
+                        headers={"Cache-Control": "no-cache"})
+    except Exception:
+        raise HTTPException(status_code=404, detail="No avatar")
+
+
+@app.delete("/api/avatar/{user_id}")
+async def delete_avatar(user_id: str):
+    db_execute("UPDATE users SET avatar_object_key = NULL WHERE id = %s::uuid", (user_id,))
+    return {"status": "removed"}
+
+
+@app.post("/api/profile/{user_id}/sigil")
+async def set_sigil(user_id: str, glyph: str = Form(...), hue: int = Form(...)):
+    if glyph not in SIGIL_GLYPHS:
+        raise HTTPException(status_code=400, detail="Pick a sigil from the curated set")
+    hue = max(0, min(360, hue))
+    db_execute("UPDATE users SET sigil = %s WHERE id = %s::uuid",
+               (json.dumps({"glyph": glyph, "hue": hue}), user_id))
+    return {"status": "ok", "sigil": {"glyph": glyph, "hue": hue}}
+
+
+# ========== Field Gear ==========
+def _gear_facts(user_id: str) -> dict:
+    """Assemble the facts evaluate_gear() reads, all from existing sources."""
+    try:
+        profile = os_client.get(index="player-profile", id=user_id)["_source"]
+    except Exception:
+        profile = {}
+    badges = profile.get("badges", {})
+    powers_earned = set()
+    quality_counts = {}
+    qualities_earned = 0
+    for quality, b in badges.items():
+        count = 0
+        for pkey, pstate in (b.get("powers") or {}).items():
+            if pstate.get("earned"):
+                powers_earned.add(pkey)
+                count += 1
+        quality_counts[quality] = count
+        if b.get("earned"):
+            qualities_earned += 1
+
+    score_rows = db_fetch_all(
+        "SELECT game_key, MAX(score) FROM minigame_scores WHERE user_id = %s::uuid GROUP BY game_key",
+        (user_id,)
+    )
+    game_best, games_played, fragments, signal_unlocked = {}, set(), 0, False
+    for game_key, best in score_rows:
+        if game_key.startswith("signal:"):
+            if game_key == "signal:unlocked":
+                signal_unlocked = True
+            else:
+                fragments += 1
+        else:
+            game_best[game_key] = best
+            games_played.add(game_key)
+
+    linked = db_fetch_one("SELECT 1 FROM minecraft_links WHERE user_id = %s::uuid", (user_id,))
+    peer_count = db_fetch_one(
+        "SELECT COUNT(*) FROM peer_insights_given WHERE from_user_id = %s::uuid", (user_id,)
+    )
+
+    return {
+        "level": profile.get("level", 1),
+        "missions": len(profile.get("missions_completed", [])),
+        "quests": len(profile.get("quests_completed", [])),
+        "powers_earned": powers_earned,
+        "quality_counts": quality_counts,
+        "qualities_earned": qualities_earned,
+        "game_best": game_best,
+        "games_played": games_played,
+        "fragments": fragments,
+        "signal_unlocked": signal_unlocked,
+        "minecraft_linked": bool(linked),
+        "peer_insights": peer_count[0] if peer_count else 0,
+    }
+
+
+@app.get("/api/gear/{user_id}")
+async def get_gear(user_id: str):
+    """Full catalog with unlocked flags + the user's equipped selection.
+    Unlocks are computed at read time from existing facts, so they can
+    never drift from the truth (see evoke/gear.py)."""
+    items = gear_catalog.evaluate_gear(_gear_facts(user_id))
+    row = db_fetch_one("SELECT equipped_gear, sigil, avatar_object_key FROM users WHERE id = %s::uuid", (user_id,))
+    equipped = json.loads(row[0]) if row and row[0] else []
+    unlocked_keys = {i["key"] for i in items if i["unlocked"]}
+    equipped = [k for k in equipped if k in unlocked_keys]  # never display gear that's no longer earned
+    return {
+        "gear": items,
+        "equipped": equipped,
+        "unlocked_count": len(unlocked_keys),
+        "total": len(items),
+        "sigil": json.loads(row[1]) if row and row[1] else None,
+        "has_avatar": bool(row and row[2]),
+    }
+
+
+@app.post("/api/gear/{user_id}/equip")
+async def equip_gear(user_id: str, keys: str = Form(...)):
+    """Equip up to 3 unlocked gear items for display on the Dossier."""
+    try:
+        wanted = [k for k in json.loads(keys) if isinstance(k, str)][:3]
+    except Exception:
+        raise HTTPException(status_code=400, detail="keys must be a JSON list")
+    unlocked = {i["key"] for i in gear_catalog.evaluate_gear(_gear_facts(user_id)) if i["unlocked"]}
+    invalid = [k for k in wanted if k not in unlocked]
+    if invalid:
+        raise HTTPException(status_code=400, detail=f"Not unlocked: {', '.join(invalid)}")
+    db_execute("UPDATE users SET equipped_gear = %s WHERE id = %s::uuid", (json.dumps(wanted), user_id))
+    return {"status": "equipped", "equipped": wanted}
 
 
 # ========== Static Files ==========
