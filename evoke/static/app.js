@@ -189,7 +189,12 @@ const Evoke = (() => {
     const d = msg.data || {};
     if (msg.type === "LevelUpped") {
       if (d.user_id === state.userId) {
-        showLevelUpOverlay(d);
+        // The fresh-completion after-action report (screens.js's
+        // renderMissionAAR) shows its own inline level-up beat when a
+        // mission submission crosses a threshold -- this global overlay
+        // would otherwise stack a second "you leveled up" moment on top
+        // of it for the exact same event.
+        if (!state.suppressLevelUpOverlay) showLevelUpOverlay(d);
         renderTopbar();
       } else {
         toast(`⬆ ${escapeHtml(d.display_name || "An agent")} reached Level ${d.level} — ${escapeHtml(d.title || "")}`);

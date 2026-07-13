@@ -440,6 +440,19 @@ input:focus, textarea:focus, select:focus {
 .celebration-tier { margin: var(--space-3) 0; }
 .celebration-card .btn { margin-top: var(--space-4); }
 
+/* After-action report beats (renderMissionAAR in screens.js) -- each stage
+   of the itemized reveal starts hidden and fades/slides in on its own
+   timer, so a mission completion reads as a sequence of small dopamine
+   hits rather than one static card landing all at once. */
+.aar-beat {
+  opacity: 0;
+  transform: translateY(6px);
+  transition: opacity 0.4s var(--ease-out), transform 0.4s var(--ease-out);
+}
+.aar-beat.is-visible { opacity: 1; transform: translateY(0); }
+.aar-beat:empty { display: none; }
+#aar-beat-xp .dossier-xp { margin: var(--space-3) 0; text-align: left; }
+
 .billbot-fullscreen {
   display: flex;
   flex-direction: column;

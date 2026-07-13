@@ -382,11 +382,22 @@ Evoke.screens.novel = async function novel() {
 
 Evoke.screens.missionBrief = async function missionBrief(missionId) {
   const { api, state, mount } = Evoke;
-  const [missionsRes, timeline, mcLink] = await Promise.all([
+  const [missionsRes, timeline, mcLink, aarProfile, aarAchievements] = await Promise.all([
     api.missions(state.userId),
     api.timeline(state.userId, missionId).catch(() => null),
     api.minecraftLink(state.userId).catch(() => ({ linked: false })),
+    api.playerProfile(state.userId).catch(() => null),
+    api.achievements(state.userId).catch(() => null),
   ]);
+  // Snapshot XP/level/achievements *before* any submission on this page, so
+  // a fresh completion can render an itemized after-action report (count up
+  // XP, flag a level-up, reveal newly-unlocked Powers/badges) instead of a
+  // single static card. Consumed by missionDebrief's fresh branch below;
+  // cleared there once used so a stale snapshot can't attach to a later,
+  // unrelated mission.
+  if (aarProfile && aarAchievements) {
+    state.aarBefore = { missionId, xp: aarProfile.xp, level: aarProfile.level, nextLevelXp: aarProfile.next_level_xp, achievements: aarAchievements };
+  }
   const mission = (missionsRes.missions || []).find(m => m.id === missionId);
   if (!mission) { mount(`<div class="card"><p>Mission not found.</p></div>`); return; }
 
@@ -495,6 +506,173 @@ Evoke.screens.missionBrief = async function missionBrief(missionId) {
   });
 };
 
+// After-action report: the fresh-completion celebration, sequenced as an
+// itemized reveal (mission complete -> award -> XP count-up -> level-up ->
+// new Power/badge unlocks) rather than one static card. Console games do
+// this on every match end; console-player feedback flagged the old static
+// card as the single biggest "feels like a document" gap in the loop.
+// The XP grant on submission is a fixed, known amount (main.py's
+// mission_completed XPGranted is always +100), so the count-up and bar
+// animate immediately off the "before" snapshot missionBrief captured --
+// no waiting on the event pipeline for that part. Level-up and Power/badge
+// unlocks depend on the async worker actually processing the events this
+// submission published, so those beats wait on one settle fetch instead.
+async function renderMissionAAR(mission, freshAward, missionId, targetUserIdParam) {
+  const { api, state, mount, escapeHtml } = Evoke;
+  const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+  const reveal = (id) => document.getElementById(id)?.classList.add("is-visible");
+
+  const before = state.aarBefore && state.aarBefore.missionId === missionId ? state.aarBefore : null;
+  state.aarBefore = null; // one-shot -- don't let it attach to a later mission
+
+  // No "before" snapshot (e.g. this URL was opened directly/reloaded) --
+  // fall back to the original single static card rather than guessing.
+  if (!before) {
+    mount(`
+      <div class="stack celebration-screen">
+        <div class="card celebration-card" data-tier="${freshAward ? freshAward.tier : "common"}">
+          <div class="card__eyebrow">Mission Complete</div>
+          <h1>${escapeHtml(mission.title)}</h1>
+          <p>Logged. Every drop counts — even the small ones.</p>
+          ${freshAward ? `<p class="celebration-tier">Award: <span class="award" data-tier="${freshAward.tier}" style="display:inline-flex"><span class="award__tier">${freshAward.tier}</span></span></p>` : ""}
+          <button class="btn btn-primary" id="celebration-continue">See Full Debrief →</button>
+        </div>
+      </div>
+    `);
+    document.getElementById("celebration-continue").addEventListener("click", () => {
+      history.replaceState(null, "", location.pathname + `#/mission/${missionId}/debrief`);
+      Evoke.screens.missionDebrief(missionId, targetUserIdParam);
+    });
+    return;
+  }
+
+  // Kicked off now, awaited later -- gives the worker the full length of
+  // the earlier beats to actually process the XP/badge events.
+  const settleFetch = Promise.all([
+    api.playerProfile(state.userId).catch(() => null),
+    api.achievements(state.userId).catch(() => null),
+  ]);
+
+  const guessXp = before.xp + 100;
+  const guessPct = before.nextLevelXp ? Math.min(100, Math.round((guessXp / before.nextLevelXp) * 100)) : 100;
+  const beforePct = before.nextLevelXp ? Math.min(100, Math.round((before.xp / before.nextLevelXp) * 100)) : 100;
+
+  mount(`
+    <div class="stack celebration-screen">
+      <div class="card celebration-card" data-tier="${freshAward ? freshAward.tier : "common"}" id="aar-card">
+        <div class="aar-beat is-visible">
+          <div class="card__eyebrow">Mission Complete</div>
+          <h1>${escapeHtml(mission.title)}</h1>
+          <p>Logged. Every drop counts — even the small ones.</p>
+        </div>
+
+        <div class="aar-beat" id="aar-beat-award">
+          ${freshAward ? `<p class="celebration-tier">Award: <span class="award" data-tier="${freshAward.tier}" style="display:inline-flex"><span class="award__tier">${freshAward.tier}</span></span></p>` : ""}
+        </div>
+
+        <div class="aar-beat" id="aar-beat-xp">
+          <div class="dossier-xp">
+            <div class="row-between">
+              <span class="card__eyebrow">+100 XP</span>
+              <span class="mono-rank" id="aar-xp-value">${before.xp}${before.nextLevelXp ? ` / ${before.nextLevelXp}` : " · MAX"}</span>
+            </div>
+            <div class="world-meter__track"><div class="world-meter__fill is-xp" id="aar-xp-fill" style="width:${beforePct}%"></div></div>
+          </div>
+        </div>
+
+        <div class="aar-beat" id="aar-beat-levelup"></div>
+        <div class="aar-beat" id="aar-beat-unlocks"></div>
+
+        <button class="btn btn-primary aar-beat" id="celebration-continue">See Full Debrief →</button>
+      </div>
+    </div>
+  `);
+
+  // The authoritative LevelUpped broadcast is a *second* Kafka round-trip
+  // (workers.py re-publishes it onto the same stream once XPGranted crosses
+  // a threshold, rather than emitting it inline), so it reliably arrives
+  // after this screen's own settle fetch below has already resolved --
+  // clearing the suppression right after that fetch was measured to still
+  // let the global overlay slip in a few seconds later, stacking a second
+  // "you leveled up" moment on top of this one's own inline beat. A fixed
+  // grace window is simpler and safer than trying to key off the event
+  // actually arriving.
+  state.suppressLevelUpOverlay = true;
+  setTimeout(() => { state.suppressLevelUpOverlay = false; }, 8000);
+
+  await sleep(500);
+  reveal("aar-beat-award");
+
+  await sleep(600);
+  reveal("aar-beat-xp");
+  requestAnimationFrame(() => {
+    const fill = document.getElementById("aar-xp-fill");
+    if (fill) fill.style.width = guessPct + "%";
+  });
+  const xpValueEl = document.getElementById("aar-xp-value");
+  const xpStart = performance.now();
+  const xpDuration = 900;
+  function tickXp(now) {
+    const t = Math.min(1, (now - xpStart) / xpDuration);
+    const shown = Math.round(before.xp + t * 100);
+    if (xpValueEl) xpValueEl.textContent = `${shown}${before.nextLevelXp ? ` / ${before.nextLevelXp}` : " · MAX"}`;
+    if (t < 1) requestAnimationFrame(tickXp);
+  }
+  requestAnimationFrame(tickXp);
+
+  await sleep(1000);
+  const [afterProfile, afterAchievements] = await settleFetch;
+
+  if (afterProfile && afterProfile.level > before.level) {
+    const beat = document.getElementById("aar-beat-levelup");
+    if (beat) {
+      beat.innerHTML = `
+        <div class="celebration-tier">
+          <div class="card__eyebrow">Rank Advancement</div>
+          <p>Level ${afterProfile.level} — you are now a <strong>${escapeHtml(afterProfile.rank_title)}</strong></p>
+        </div>
+      `;
+      // Authoritative XP/level landed -- true up the bar/number from the
+      // optimistic +100 guess in case the two disagree.
+      const fill = document.getElementById("aar-xp-fill");
+      const pct = afterProfile.next_level_xp ? Math.min(100, Math.round((afterProfile.xp / afterProfile.next_level_xp) * 100)) : 100;
+      if (fill) fill.style.width = pct + "%";
+      if (xpValueEl) xpValueEl.textContent = `${afterProfile.xp}${afterProfile.next_level_xp ? ` / ${afterProfile.next_level_xp}` : " · MAX"}`;
+    }
+    reveal("aar-beat-levelup");
+  }
+
+  if (afterAchievements && before.achievements) {
+    const newPowers = Object.entries(afterAchievements.powers || {})
+      .filter(([key, after]) => after.earned && !(before.achievements.powers[key] && before.achievements.powers[key].earned))
+      .map(([key]) => key);
+    const newBadges = Object.entries(afterAchievements.qualities || {})
+      .filter(([key, after]) => after.earned && !(before.achievements.qualities[key] && before.achievements.qualities[key].earned))
+      .map(([key]) => key);
+
+    if (newPowers.length || newBadges.length) {
+      const unlocksEl = document.getElementById("aar-beat-unlocks");
+      if (unlocksEl) {
+        unlocksEl.innerHTML = `
+          <div class="card__eyebrow">New Unlocks</div>
+          ${newBadges.map((q) => `<p class="celebration-tier">🏅 <strong>${escapeHtml(q)}</strong> badge complete</p>`).join("")}
+          ${newPowers.map((p) => `<p>⚡ New Power: <strong>${escapeHtml(p)}</strong></p>`).join("")}
+        `;
+      }
+      await sleep(500);
+      reveal("aar-beat-unlocks");
+      await sleep(500);
+    }
+  }
+
+  reveal("celebration-continue");
+
+  document.getElementById("celebration-continue").addEventListener("click", () => {
+    history.replaceState(null, "", location.pathname + `#/mission/${missionId}/debrief`);
+    Evoke.screens.missionDebrief(missionId, targetUserIdParam);
+  });
+}
+
 Evoke.screens.missionDebrief = async function missionDebrief(missionId, targetUserIdParam) {
   const { api, state, mount } = Evoke;
   Evoke.kit?.visit("pipes");
@@ -520,21 +698,7 @@ Evoke.screens.missionDebrief = async function missionDebrief(missionId, targetUs
   const isFresh = location.hash.includes("fresh=1");
   const freshAward = missionAwards.find(a => !a.collected_at);
   if (isOwn && isFresh && mission) {
-    mount(`
-      <div class="stack celebration-screen">
-        <div class="card celebration-card" data-tier="${freshAward ? freshAward.tier : "common"}">
-          <div class="card__eyebrow">Mission Complete</div>
-          <h1>${Evoke.escapeHtml(mission.title)}</h1>
-          <p>Logged. Every drop counts — even the small ones.</p>
-          ${freshAward ? `<p class="celebration-tier">Award: <span class="award" data-tier="${freshAward.tier}" style="display:inline-flex"><span class="award__tier">${freshAward.tier}</span></span></p>` : ""}
-          <button class="btn btn-primary" id="celebration-continue">See Full Debrief →</button>
-        </div>
-      </div>
-    `);
-    document.getElementById("celebration-continue").addEventListener("click", () => {
-      history.replaceState(null, "", location.pathname + `#/mission/${missionId}/debrief`);
-      Evoke.screens.missionDebrief(missionId, targetUserIdParam);
-    });
+    await renderMissionAAR(mission, freshAward, missionId, targetUserIdParam);
     return;
   }
 
