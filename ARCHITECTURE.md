@@ -273,7 +273,13 @@ services:
   open-webui:
     image: ghcr.io/open-webui/open-webui:main
     environment:
-      OLLAMA_BASE_URL: http://host.docker.internal:11434   # or a hosted OpenAI-compatible endpoint
+      # As actually shipped: defaults to a containerized `ollama` service
+      # (${OLLAMA_BASE_URL:-http://ollama:11434}) so a fresh clone needs no
+      # native install; override to host.docker.internal:11434 for a
+      # faster native Ollama (Mac especially -- Docker Desktop can't pass
+      # Metal/GPU through to a container there), or to a hosted
+      # OpenAI-compatible endpoint for production (see HOSTING_COST_MODEL.md).
+      OLLAMA_BASE_URL: ${OLLAMA_BASE_URL:-http://ollama:11434}
     ports:
       - "${PORT_OPENWEBUI:-3000}:8080"
     volumes:

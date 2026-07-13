@@ -9,15 +9,22 @@ Companion to [`BUILD_PLAN.md`](BUILD_PLAN.md). Defines the gamified web app this
 ## Information architecture
 
 ```
-/                      Operations Hub (home)
-/novel                 Graphic novel reader (current chapter)
-/mission/{id}          Mission brief + evidence submission
-/mission/{id}/debrief  Mission completion / debrief
-/profile               Player profile (own)
-/profile/{user_id}     Player profile (public view)
-/team/{team_id}        Team profile
-/companion             Companion Mode (separate narrow page, as today)
+/                        Operations Hub (home)
+/welcome                 First-run onboarding (shown once per learner, never on a deep link)
+/novel                   Graphic novel reader (current chapter)
+/gallery                 Class-wide gallery of completed mission work; open one to leave peer feedback
+/mission/{id}            Mission brief + evidence submission (locked/silhouetted if not yet released)
+/mission/{id}/debrief    Mission completion / debrief (?fresh=1 -> full-screen celebration first)
+/mission/{id}/vault      Revisit-anytime retrospective for a completed mission
+/profile                 Player profile (own) -- Superpowers, the 16-Power Achievements grid, Quests, Award Cabinet
+/profile/{user_id}       Player profile (public view)
+/team/{team_id}          Team profile
+/billbot                 Full-screen B1llbot chat (in addition to the persistent drawer on every screen)
+/admin                   Mission release gating -- not in the learner nav, direct-URL only, no role check yet
+/companion               Companion Mode (separate narrow page, as today)
 ```
+
+All of the above beyond the original six routes were added after this doc was first written — `GAPS.md` is the source of truth for what's shipped vs. still open; this list is kept in sync with it, not the other way around.
 
 Single static SPA served by FastAPI `StaticFiles` (no build pipeline, per `ARCHITECTURE.md`) — hash-or-history routing in vanilla JS is fine. Persistent elements on every screen: top bar (agent name, XP/level meter, streak, notification bell) and B1llbot chat drawer.
 

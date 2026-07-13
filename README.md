@@ -2,47 +2,49 @@
 
 A mission-based learning platform for teaching financial literacy and entrepreneurship, wrapped in a transmedia narrative (graphic novel + web app + optional Minecraft). Students complete real-world "missions" that are presented back to them as an unfolding story rather than assignments.
 
-**New to this repo?** Read [`CONCEPTS.md`](CONCEPTS.md) first — it's a glossary and orientation map (story terms, curriculum terms, canon vs. legacy docs, repo layout) written for anyone or any AI assistant picking this up cold.
+**New to this repo?** Read [`CONCEPTS.md`](CONCEPTS.md) first — it's a glossary and orientation map (story terms, curriculum terms, canon vs. legacy docs, repo layout) written for anyone or any AI assistant picking this up cold. Then [`GAPS.md`](GAPS.md) for an honest, current audit of what's built vs. still open — it's kept up to date far more actively than any prose summary would stay accurate.
 
 ---
 
 ## Quickstart
 
-Start infrastructure:
-
 ```
-cd evoke-infra
-docker compose up -d
+./quick-start.sh
 ```
 
-Start the app:
+Brings up both Docker Compose stacks (`evoke-infra` then `evoke`), seeds the database, and prints access points. Then open [http://localhost:8000](http://localhost:8000) — you're auto-signed-in as a demo learner, no login step needed.
 
-```
-cd evoke
-docker compose up -d --build
-```
+To reach it from another device on your network (a phone, to test Minecraft/Bedrock), use your machine's LAN IP instead of `localhost`.
 
-Then go to [http://localhost:8000](http://localhost:8000).
+AI feedback (the AI Coach on submissions, B1llbot chat) is on by default (`AI_ENABLED=true`) and needs a local LLM backend — `evoke-infra/docker-compose.yml` includes a containerized `ollama` service that pulls a model automatically on first boot, so this works out of the box. If you already run Ollama natively (faster on Mac, since Docker Desktop can't pass Metal/GPU through to a container there), override `OLLAMA_BASE_URL=http://host.docker.internal:11434` in a local `.env`.
 
-AI feedback is optional and off by default (`AI_ENABLED=false` in [`evoke/docker-compose.yml`](evoke/docker-compose.yml)). To enable it, point `OLLAMA_BASE_URL` at a local Ollama instance (or any OpenAI-compatible endpoint) and set `AI_ENABLED=true`.
+**One more one-time step for B1llbot specifically:** run `python3 evoke-infra/openwebui-bootstrap.py` once the stack is up. It creates B1llbot's persona (system prompt + knowledge base) inside OpenWebUI — without it, OpenWebUI has a base model but no "billbot" character configured, and B1llbot chat will error.
+
+Minecraft (optional, Prosperity-specific) comes up as part of `evoke-infra`. See `evoke-infra/minecraft/world-seed/README.md` for loading the real Basin Simulation world instead of a fresh vanilla one.
 
 ---
 
 ## Repo layout
 
 ```
-evoke/          FastAPI backend (current running prototype) — see evoke/main.py, workers.py, clients.py
-evoke-infra/    Shared infrastructure: MinIO, Redpanda, OpenSearch, Keycloak (docker-compose)
-ui/             Polished interactive UI mockup — design target, not yet wired to the backend
-docs/           Narrative, curriculum, and planning source material — see docs/README.md
+evoke/          FastAPI backend + vanilla-JS SPA — see evoke/main.py, workers.py, clients.py, static/
+evoke-infra/    Shared infrastructure: Postgres, MinIO, Redpanda, OpenSearch, OpenWebUI, Ollama, Minecraft (docker-compose)
+brightspace-sim/ Brightspace LMS simulator (real Brightspace API shapes) -- system of record for the 12 missions in dev
+evoke-minecraft-bridge/ Consumes RewardCollected events, delivers Minecraft rewards via RCON
+ui/             Older polished interactive UI mockup -- design reference for flow/feature set, not current code
+docs/           Narrative, curriculum, and planning source material -- see docs/README.md
 ```
 
 - [`CONCEPTS.md`](CONCEPTS.md) — glossary and orientation (start here)
-- [`ARCHITECTURE.md`](ARCHITECTURE.md) — target-state technical architecture and the reasoning behind it
-- [`BUILD_PLAN.md`](BUILD_PLAN.md) — the active build spec (custom Minecraft container, missions synced from the Brightspace sim, event catalog, profiles)
+- [`GAPS.md`](GAPS.md) — current, actively-maintained audit of what's built, partially built, and still open
+- [`GAME_DESIGN.md`](GAME_DESIGN.md) — world, characters, the World Bank skills framework the badge/achievement system is built on, B1llbot's voice and system prompt
+- [`ARCHITECTURE.md`](ARCHITECTURE.md) — the original target-state technical architecture and the reasoning behind it (largely executed at this point — treat as historical/rationale, defer to `GAPS.md` for current status)
+- [`BUILD_PLAN.md`](BUILD_PLAN.md) — the build spec this pass worked from (custom Minecraft container, missions synced from the Brightspace sim, event catalog, profiles)
 - [`UI_SPEC.md`](UI_SPEC.md) — the gamified web experience: mission loop, profile pages, Companion Mode, and the wireframe skinning contract
+- [`UX_HANDOFF.md`](UX_HANDOFF.md) — handoff doc for a UX designer restyling the app (which files are safe to edit, how to run it)
+- [`HOSTING_COST_MODEL.md`](HOSTING_COST_MODEL.md) — per-cohort AWS sizing/cost framework for real deployment
 - [`docs/README.md`](docs/README.md) — index of narrative/curriculum docs, split into `canon/` (current source of truth), `legacy/` (superseded drafts), and `process/` (meeting notes, planning chats)
 
 ## Status
 
-This is an early-stage prototype. The backend proves the core event pipeline (evidence submission → AI/instructor feedback → learner timeline) with a single hardcoded demo mission; the curriculum, identity/teams, and most of the UI mockup's features (XP, badges, Vault, Profile) are not yet wired up. See `CONCEPTS.md`'s "Known gaps / traps for agents" section for specifics.
+Read [`GAPS.md`](GAPS.md) for the real, current picture — it's updated after every build pass and is more trustworthy than a prose summary here would stay. In short: the 12-mission curriculum, teams, XP/level, the 4 Superpower badges plus their 16 constituent Powers, a peer-interaction gallery, a class-wide activity feed, mission release gating, a Minecraft connect flow, and B1llbot (both web chat via OpenWebUI and, when its mod is buildable again, in-game) are real and working end to end. `GAPS.md`'s own "five that matter most" section names the highest-leverage remaining gaps.

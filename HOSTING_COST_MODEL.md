@@ -33,6 +33,8 @@ Per `ARCHITECTURE.md`'s "one box per organization" principle, a single instance 
 
    **Recommendation: the hosted-API path.** It's cheaper for this usage pattern and avoids needing to manage model weights per instance — but the vendor's data-processing/no-training terms need to be settled as part of picking the vendor, not treated as a separate problem later.
 
+   **Not a contradiction of the above:** `evoke-infra/docker-compose.yml` now includes a containerized `ollama` service as the *local-dev/demo* default, so a fresh clone works without a native Ollama install. That's a developer-experience choice, sized for one laptop — it doesn't change the recommendation for real cohort instances, which is still the hosted-API path above (self-hosted CPU inference for a real classroom's actual concurrency needs a real GPU to stay responsive, which is the expensive path this section is steering away from).
+
 **Recommended instance: `m5.xlarge`** (4 vCPU / 16GB RAM, non-burstable) as the default when Minecraft is in play. Deliberately *not* the cheaper `t3.xlarge`: Minecraft's tick loop is sustained background load whenever anyone's connected, and a burstable (T-family) instance can exhaust its CPU credit balance mid-class, which is exactly the wrong moment for the box to throttle.
 
 **If a district opts out of Minecraft** (it's optional by design — see `GAPS.md`'s "Non-Minecraft students" gap), a much smaller box covers just the web app: **`t3.large`** (2 vCPU / 8GB) is fine, since there's no sustained background tick load to protect against and the workload is genuinely bursty (page loads, occasional AI calls).
