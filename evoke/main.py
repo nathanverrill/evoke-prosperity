@@ -1612,6 +1612,7 @@ async def get_player_profile(user_id: str):
             "level": profile.get("level", 1),
             "rank_title": progression.level_title(profile.get("level", 1)),
             "next_level_xp": progression.next_threshold(profile.get("xp", 0)),
+            "next_rank_title": progression.level_title(profile.get("level", 1) + 1),
             "badges": profile.get("badges", {}),
             "missions_completed": missions_completed,
             "missions_completed_count": len(missions_completed),
@@ -2980,6 +2981,7 @@ async def get_gear(user_id: str):
         "total": len(items),
         "sigil": json.loads(row[1]) if row and row[1] else None,
         "has_avatar": bool(row and row[2]),
+        "next_unlock": gear_catalog.pick_next_unlock(items),
     }
 
 

@@ -189,3 +189,21 @@ def evaluate_gear(facts: dict) -> list:
             "unlocked": ok,
         })
     return out
+
+
+def pick_next_unlock(evaluated: list):
+    """Console-player feedback (BUILD_PLAN_2's "tier visibility" gap): a
+    season-pass track always shows the next reward before you earn it --
+    e.g. "Next unlock: Cistern Core at Level 3". Picks one locked,
+    non-secret item to feature: prefer the lowest level threshold (the
+    clearest, most motivating "get there by doing X" framing), falling back
+    to catalog order for items with no level requirement. Secret items
+    (Alchemy Signal gear) are never featured -- their whole point is to stay
+    cryptic until found, not teased."""
+    candidates = [i for i in evaluated if not i["unlocked"] and not i["secret"]]
+    if not candidates:
+        return None
+    by_key = GEAR_BY_KEY
+    candidates.sort(key=lambda i: by_key[i["key"]]["needs"].get("level", 99))
+    chosen = candidates[0]
+    return {"key": chosen["key"], "name": chosen["name"], "icon": chosen["icon"], "rarity": chosen["rarity"], "hint": chosen["hint"]}

@@ -1471,12 +1471,33 @@ Evoke.screens.vault = async function vault(missionId) {
    quests appear only once Minecraft is linked. */
 Evoke.screens.campaignMap = async function campaignMap() {
   const { api, state, mount } = Evoke;
-  const [map, world] = await Promise.all([
+  const [map, world, gearRes] = await Promise.all([
     api.progressMap(state.userId),
     api.worldState().catch(() => null),
+    api.gear(state.userId).catch(() => null),
   ]);
   Evoke.kit?.visit("basin");
   const TIER_NAME = { 1: "common", 2: "epic", 3: "legendary" };
+
+  // Forward visibility (console-UX gap #3): a season pass always shows the
+  // next reward before you earn it. The rank half is deterministic (the XP
+  // curve is fixed); the gear half is gear.js's pick_next_unlock -- the
+  // lowest-level locked, non-secret item in the catalog.
+  const profile = state.profile;
+  const nextUnlock = gearRes && gearRes.next_unlock;
+  const nextRankLine = profile && profile.next_level_xp
+    ? `<p>🎖 Next Rank: <strong>${Evoke.escapeHtml(profile.next_rank_title)}</strong> at ${profile.next_level_xp} XP <span class="empty-state">(${profile.next_level_xp - profile.xp} to go)</span></p>`
+    : "";
+  const nextGearLine = nextUnlock
+    ? `<p>${nextUnlock.icon} Next Unlock: <strong>${Evoke.escapeHtml(nextUnlock.name)}</strong> <span class="empty-state">— ${Evoke.escapeHtml(nextUnlock.hint)}</span></p>`
+    : "";
+  const nextUnlockCard = (nextRankLine || nextGearLine) ? `
+    <div class="card" id="next-unlock-card">
+      <div class="card__eyebrow">Coming Up</div>
+      ${nextRankLine}
+      ${nextGearLine}
+    </div>
+  ` : "";
 
   mount(`
     <div class="stack">
@@ -1490,6 +1511,8 @@ Evoke.screens.campaignMap = async function campaignMap() {
         <p><strong>Submitted</strong> = the mission counts (<span class="award__tier" style="background:var(--tier-common);color:var(--color-text)">common</span>). <strong>AI-strengthened</strong> = <span class="award__tier" style="background:var(--tier-epic)">epic</span>. <strong>Teacher-honored</strong> = <span class="award__tier" style="background:var(--tier-legendary)">legendary</span>.</p>
         <p>A stage is <strong>DONE</strong> when its ring closes — 100% of its missions submitted. Its <strong>GRADE</strong> (★ to ★★★) is your weakest mission's tier: strengthen and resubmit any mission to raise it. Quests and Training sims never gate anything — they're how agents get sharper.</p>
       </div>
+
+      ${nextUnlockCard}
 
       <div class="pipeline">
         ${map.stages.map((s, i) => `
