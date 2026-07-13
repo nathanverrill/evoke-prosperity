@@ -26,6 +26,9 @@ services:
       BRIGHTSPACE_SIM_URL: http://brightspace-sim:8001
       OPENWEBUI_URL: http://open-webui:8080
       AI_ENABLED: "true"
+      MINECRAFT_PUBLIC_HOST: ${MINECRAFT_PUBLIC_HOST:-localhost}
+      MINECRAFT_PUBLIC_PORT_JAVA: ${PORT_MINECRAFT:-25565}
+      MINECRAFT_PUBLIC_PORT_BEDROCK: ${PORT_MINECRAFT_BEDROCK:-19132}
     healthcheck:
       test: ["CMD-SHELL", "python3 -c \"import urllib.request; urllib.request.urlopen('http://localhost:8000/health')\" || exit 1"]
       interval: 10s

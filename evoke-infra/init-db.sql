@@ -85,6 +85,12 @@ CREATE TABLE missions (
     mission_brief_md TEXT,
     evidence_requirements_md TEXT,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    -- NULL = not yet released to learners. Gating is manual admin release,
+    -- not automatic order-of-completion -- see GAPS.md's now-resolved
+    -- "mission ordering" item. Deliberately excluded from the LMS sync's
+    -- ON CONFLICT UPDATE SET (main.py) so re-syncing the catalog never
+    -- resets a mission an admin already released.
+    released_at TIMESTAMP,
     -- The LMS (brightspace-sim, or real Brightspace later) is the system of
     -- record for the mission catalog; this table is a synced cache keyed by
     -- (campaign_id, lms_assignment_ref) so the startup sync can upsert
@@ -202,6 +208,7 @@ CREATE TABLE submissions (
     submitted_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     file_path VARCHAR(500),
     status VARCHAR(50) DEFAULT 'submitted',
+    reflection TEXT,
     grade INTEGER,
     feedback TEXT,
     graded_at TIMESTAMP,

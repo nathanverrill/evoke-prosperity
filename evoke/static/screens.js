@@ -1,18 +1,20 @@
 /* screens.js — one render function per route in UI_SPEC.md's information
    architecture. Each function fetches what it needs and calls Evoke.mount().
-   Honesty note: a few UI_SPEC affordances (mission lock/gating state,
-   evidence-submission reflection text, "my team" lookup) don't have a
+   Honesty note: a few UI_SPEC affordances ("my team" lookup) don't have a
    backend behind them yet -- those are called out inline rather than faked,
    per CONCEPTS.md's "don't assume UI features exist server-side" warning. */
 
 const ARC_ORDER = ["Explore", "Imagine", "Act", "Communicate"];
 
 function missionState(mission, profile) {
+  // Gating is manual admin release (GAPS.md's resolved "mission ordering"
+  // item), not order-of-completion -- mission.released comes from the
+  // missions.released_at column via GET /api/missions. Locked = visible
+  // but silhouetted, same convention as the novel's chapter rail, never
+  // hidden outright.
+  if (!mission.released) return "locked";
   const completed = (profile && profile.missions_completed) || [];
   return completed.includes(mission.id) ? "complete" : "available";
-  // No arc/sequence gating exists server-side yet (every mission is
-  // "available" until completed) -- this reflects that honestly rather
-  // than fabricating a lock mechanic the backend doesn't enforce.
 }
 
 function timeAgo(isoTimestamp) {
@@ -23,18 +25,40 @@ function timeAgo(isoTimestamp) {
   return `${Math.floor(seconds / 86400)}d ago`;
 }
 
+Evoke.screens.welcome = async function welcome() {
+  const { state, mount } = Evoke;
+  mount(`
+    <div class="stack celebration-screen">
+      <div class="card celebration-card">
+        <div class="card__eyebrow">Case File — Basin Region</div>
+        <h1>Welcome to Keel</h1>
+        <p>The water's scarce here. The power's unstable. But the people get by on something the mountain above them ran out of a long time ago: each other.</p>
+        <p>You're the newest Agent assigned to this case, ${Evoke.escapeHtml(state.displayName || "Agent")}. B1llbot's expecting you — he's the one in the corner who won't stop talking about pipes.</p>
+        <button class="btn btn-primary" id="welcome-continue">Review the Records →</button>
+      </div>
+    </div>
+  `);
+  document.getElementById("welcome-continue").addEventListener("click", () => {
+    localStorage.setItem(`evoke_onboarded_${state.userId}`, "1");
+    location.hash = "#/";
+  });
+};
+
 Evoke.screens.hub = async function hub() {
   const { api, state, mount } = Evoke;
-  const [missionsRes, notifRes, activityRes, checkinRes] = await Promise.all([
+  const [missionsRes, notifRes, activityRes, checkinRes, mcLink, mcConnect] = await Promise.all([
     api.missions(state.userId),
     api.notifications(state.userId).catch(() => ({ notifications: [] })),
     api.activity(20).catch(() => ({ activity: [] })),
     api.checkin(state.userId).catch(() => null),
+    api.minecraftLink(state.userId).catch(() => ({ linked: false })),
+    api.minecraftConnectInfo().catch(() => null),
   ]);
   const missions = missionsRes.missions || [];
   const profile = state.profile;
   const completedCount = (profile && profile.missions_completed_count) || 0;
   const nextMission = missions.find(m => missionState(m, profile) === "available");
+  const allDone = missions.length > 0 && missions.every(m => missionState(m, profile) === "complete");
   const pendingAwards = (notifRes.notifications || []).filter(n => !n.read);
   const activity = activityRes.activity || [];
 
@@ -48,16 +72,32 @@ Evoke.screens.hub = async function hub() {
         : "✓ Already checked in today")
     : "";
 
+  // Second onboarding artifact from the mockup comparison (GAPS.md: "No
+  // onboarding") -- a one-time orientation banner, separate from #/welcome:
+  // that's a one-shot narrative beat, this is a standing "what am I looking
+  // at" reference dismissed independently.
+  const guideKey = `evoke_hub_guide_dismissed_${state.userId}`;
+  const showGuide = !localStorage.getItem(guideKey);
+
   mount(`
     <div class="hub-layout">
       <div class="stack">
+        ${showGuide ? `
+          <section class="card" id="hub-guide">
+            <div class="card__eyebrow">Orientation</div>
+            <p><strong>Now</strong> — your next open mission. <strong>Mission Board</strong> — everything in this campaign; locked cards open when your instructor releases them. <strong>Feed</strong> — what the rest of your cohort is up to. <strong>Basin Simulation</strong> — the optional Minecraft world, in the sidebar.</p>
+            <button class="btn" id="hub-guide-dismiss">Got it</button>
+          </section>
+        ` : ""}
         <section class="card">
           <div class="card__eyebrow">Now</div>
           ${nextMission
             ? `<h2 class="card__title">${Evoke.escapeHtml(nextMission.title)}</h2>
                <p>Week ${nextMission.week} · ${nextMission.arc}</p>
                <a class="btn btn-primary" href="#/mission/${nextMission.id}">Open Mission Brief →</a>`
-            : `<p class="empty-state">All missions complete. New chapters coming soon.</p>`}
+            : allDone
+              ? `<p class="empty-state">All released missions complete. New chapters coming soon.</p>`
+              : `<p class="empty-state">Waiting on your instructor to release the next mission.</p>`}
           <p style="margin-top:var(--space-3)">${completedCount}/12 missions complete · ${pendingAwards.length} pending award${pendingAwards.length === 1 ? "" : "s"}</p>
           ${checkinLine ? `<p class="empty-state" style="margin-top:var(--space-2)">${checkinLine}</p>` : ""}
         </section>
@@ -68,13 +108,18 @@ Evoke.screens.hub = async function hub() {
             ${ARC_ORDER.map(arc => `
               <div class="arc-column">
                 <div class="arc-column__title">${arc}</div>
-                ${byArc[arc].map(m => `
-                  <a class="mission-card" data-state="${missionState(m, profile)}" href="#/mission/${m.id}">
+                ${byArc[arc].map(m => {
+                  const st = missionState(m, profile);
+                  const locked = st === "locked";
+                  const dest = st === "complete" ? `#/mission/${m.id}/vault` : `#/mission/${m.id}`;
+                  return `
+                  <a class="mission-card" data-state="${st}" ${locked ? "" : `href="${dest}"`}>
                     <span class="mission-card__arc" data-arc="${m.arc}">${m.arc}</span>
-                    <div class="mission-card__title">${Evoke.escapeHtml(m.title)}</div>
-                    <div class="mission-card__meta">Week ${m.week} · ${missionState(m, profile)}</div>
+                    <div class="mission-card__title">${locked ? "🔒 " : ""}${Evoke.escapeHtml(m.title)}</div>
+                    <div class="mission-card__meta">Week ${m.week} · ${locked ? "not yet released" : st}</div>
                   </a>
-                `).join("") || `<p class="empty-state">—</p>`}
+                `;
+                }).join("") || `<p class="empty-state">—</p>`}
               </div>
             `).join("")}
           </div>
@@ -105,9 +150,37 @@ Evoke.screens.hub = async function hub() {
           <div class="card__eyebrow">Team</div>
           <p class="empty-state">No "my team" lookup exists yet — open a team profile directly at #/team/&lt;id&gt;.</p>
         </div>
+        <div class="card" id="mc-connect-card">
+          <div class="card__eyebrow">Basin Simulation — optional</div>
+          ${mcLink && mcLink.linked
+            ? `<p>Linked as <strong>${Evoke.escapeHtml(mcLink.username)}</strong></p>`
+            : `<p class="empty-state">Not linked yet — you can still connect and explore.</p>`}
+          ${mcConnect ? `
+            <p style="margin-top:var(--space-2)">Java: <code id="mc-java-addr">${Evoke.escapeHtml(mcConnect.java_address)}</code>
+              <button class="btn" data-copy="${Evoke.escapeHtml(mcConnect.java_address)}" style="margin-left:var(--space-2)">Copy</button></p>
+            <p>Bedrock: <code id="mc-bedrock-addr">${Evoke.escapeHtml(mcConnect.bedrock_address)}</code>
+              <button class="btn" data-copy="${Evoke.escapeHtml(mcConnect.bedrock_address)}" style="margin-left:var(--space-2)">Copy</button></p>
+            <p class="empty-state" style="margin-top:var(--space-2)">Add as a server (Java) or a Bedrock friend server, using the address above.</p>
+          ` : `<p class="empty-state">Server address unavailable right now.</p>`}
+        </div>
       </aside>
     </div>
   `);
+
+  document.querySelectorAll("#mc-connect-card [data-copy]").forEach(btn => {
+    btn.addEventListener("click", () => {
+      navigator.clipboard.writeText(btn.dataset.copy).then(() => {
+        const original = btn.textContent;
+        btn.textContent = "Copied!";
+        setTimeout(() => { btn.textContent = original; }, 1500);
+      }).catch(() => { alert(btn.dataset.copy); });
+    });
+  });
+
+  document.getElementById("hub-guide-dismiss")?.addEventListener("click", () => {
+    localStorage.setItem(guideKey, "1");
+    document.getElementById("hub-guide").remove();
+  });
 };
 
 Evoke.screens.novel = async function novel() {
@@ -190,6 +263,22 @@ Evoke.screens.missionBrief = async function missionBrief(missionId) {
   const mission = (missionsRes.missions || []).find(m => m.id === missionId);
   if (!mission) { mount(`<div class="card"><p>Mission not found.</p></div>`); return; }
 
+  if (!mission.released) {
+    mount(`
+      <div class="stack">
+        <div>
+          <span class="mission-card__arc" data-arc="${mission.arc}">${mission.arc} · Week ${mission.week}</span>
+          <h1>🔒 ${Evoke.escapeHtml(mission.title)}</h1>
+        </div>
+        <div class="card">
+          <p class="empty-state">This mission hasn't been released yet. Check back once your instructor opens it.</p>
+        </div>
+        <a class="btn" href="#/">← Back to Operations Hub</a>
+      </div>
+    `);
+    return;
+  }
+
   mount(`
     <div class="stack">
       <div>
@@ -228,6 +317,8 @@ Evoke.screens.missionBrief = async function missionBrief(missionId) {
         <div class="card__eyebrow">Submit Evidence</div>
         <form class="evidence-form" id="evidence-form">
           <input type="file" name="file" required>
+          <label for="evidence-reflection">Field Note ${mission.superpower ? `— what did this mission teach you about being a ${Evoke.escapeHtml(mission.superpower)}?` : ""}</label>
+          <textarea id="evidence-reflection" name="reflection" rows="3" placeholder="Optional — B1llbot reads these."></textarea>
           <button type="submit" class="btn btn-primary">Submit Mission Evidence</button>
         </form>
         <p id="evidence-status"></p>
@@ -239,16 +330,18 @@ Evoke.screens.missionBrief = async function missionBrief(missionId) {
     e.preventDefault();
     const statusEl = document.getElementById("evidence-status");
     const fileInput = e.target.querySelector("input[type=file]");
+    const reflectionInput = document.getElementById("evidence-reflection");
     if (!fileInput.files[0]) return;
     const formData = new FormData();
     formData.append("user_id", state.userId);
     formData.append("mission_id", missionId);
     formData.append("file", fileInput.files[0]);
+    if (reflectionInput.value.trim()) formData.append("reflection", reflectionInput.value.trim());
     statusEl.textContent = "Submitting...";
     try {
       await api.submitEvidence(formData);
-      statusEl.textContent = "Submitted! Redirecting to your debrief...";
-      setTimeout(() => { location.hash = `#/mission/${missionId}/debrief`; }, 1200);
+      statusEl.textContent = "Submitted!";
+      setTimeout(() => { location.hash = `#/mission/${missionId}/debrief?fresh=1`; }, 800);
     } catch (err) {
       statusEl.textContent = "Submission failed: " + err.message;
     }
@@ -268,6 +361,34 @@ Evoke.screens.missionDebrief = async function missionDebrief(missionId, targetUs
   ]);
   const mission = (missionsRes.missions || []).find(m => m.id === missionId);
   const missionAwards = (awardsRes.awards || []).filter(a => a.mission_id === missionId);
+
+  // Full-screen celebration moment (GAPS.md: "No celebration moments" --
+  // found missing by comparing against ui/Final Prosperity Showcase.html,
+  // which designed a full-screen reward reveal the real app never built).
+  // missionBrief's submit handler routes here with ?fresh=1 right after a
+  // successful submission; "Continue" clears the flag via history.replaceState
+  // (not a hash change, so it doesn't re-trigger the router) and re-renders
+  // the normal debrief in place.
+  const isFresh = location.hash.includes("fresh=1");
+  const freshAward = missionAwards.find(a => !a.collected_at);
+  if (isOwn && isFresh && mission) {
+    mount(`
+      <div class="stack celebration-screen">
+        <div class="card celebration-card" data-tier="${freshAward ? freshAward.tier : "common"}">
+          <div class="card__eyebrow">Mission Complete</div>
+          <h1>${Evoke.escapeHtml(mission.title)}</h1>
+          <p>Logged. Every drop counts — even the small ones.</p>
+          ${freshAward ? `<p class="celebration-tier">Award: <span class="award" data-tier="${freshAward.tier}" style="display:inline-flex"><span class="award__tier">${freshAward.tier}</span></span></p>` : ""}
+          <button class="btn btn-primary" id="celebration-continue">See Full Debrief →</button>
+        </div>
+      </div>
+    `);
+    document.getElementById("celebration-continue").addEventListener("click", () => {
+      history.replaceState(null, "", location.pathname + `#/mission/${missionId}/debrief`);
+      Evoke.screens.missionDebrief(missionId, targetUserIdParam);
+    });
+    return;
+  }
 
   mount(`
     <div class="stack">
@@ -306,7 +427,10 @@ Evoke.screens.missionDebrief = async function missionDebrief(missionId, targetUs
         `).join("") : `<p class="empty-state">No awards yet for this mission.</p>`}
       </div>
 
-      <a class="btn" href="${isOwn ? "#/" : "#/gallery"}">← Back to ${isOwn ? "Operations Hub" : "Gallery"}</a>
+      <div class="row">
+        <a class="btn" href="${isOwn ? "#/" : "#/gallery"}">← Back to ${isOwn ? "Operations Hub" : "Gallery"}</a>
+        ${isOwn ? `<a class="btn" href="#/mission/${missionId}/vault">Open in the Vault</a>` : ""}
+      </div>
     </div>
   `);
 
@@ -484,6 +608,162 @@ Evoke.screens.teamProfile = async function teamProfile(teamId) {
         <div class="card__eyebrow">Venture Points / Venture Spectrum</div>
         <p class="empty-state">Unlocks in the Act arc (weeks 4–6).</p>
       </section>
+    </div>
+  `);
+};
+
+// Deliberately not linked from the learner-facing top nav (app.js's
+// renderTopbar) -- reachable at #/admin directly, same pattern as
+// brightspace-sim's /teacher-review. No role check exists yet (see
+// GAPS.md's "Auth is dev-grade" gap) so this is a direct-URL utility
+// today, not a promoted destination.
+Evoke.screens.admin = async function admin() {
+  const { api, mount } = Evoke;
+  const missionsRes = await api.adminMissions(Evoke.state.userId).catch(() => ({ missions: [] }));
+  const missions = missionsRes.missions || [];
+
+  mount(`
+    <div class="stack">
+      <h1>Mission Release — Admin</h1>
+      <p class="empty-state">Missions are gated by manual release, not automatic order. Week 1's first mission releases on its own; everything else waits here.</p>
+      <div class="stack-sm">
+        ${missions.map(m => `
+          <div class="card" data-mission-row="${m.id}">
+            <div class="card__eyebrow">Week ${m.week} · ${m.arc}</div>
+            <strong>${Evoke.escapeHtml(m.title)}</strong>
+            <p class="empty-state">${m.released ? `Released ${new Date(m.released_at).toLocaleString()}` : "Not released"}</p>
+            <button class="btn ${m.released ? "" : "btn-primary"}" data-action="${m.released ? "unrelease" : "release"}" data-mission-id="${m.id}">
+              ${m.released ? "Unrelease" : "Release"}
+            </button>
+          </div>
+        `).join("") || `<p class="empty-state">No missions synced yet.</p>`}
+      </div>
+    </div>
+  `);
+
+  document.querySelectorAll("[data-action]").forEach(btn => {
+    btn.addEventListener("click", async () => {
+      const missionId = btn.dataset.missionId;
+      btn.disabled = true;
+      try {
+        if (btn.dataset.action === "release") await api.adminRelease(missionId);
+        else await api.adminUnrelease(missionId);
+        await Evoke.screens.admin();
+      } catch (err) {
+        btn.disabled = false;
+        alert("Failed: " + err.message);
+      }
+    });
+  });
+};
+
+// Full-screen B1llbot chat mode (GAPS.md gap surfaced by comparing against
+// ui/Final Prosperity Showcase.html, which designed an immersive
+// full-screen "holo-comms" chat screen -- the real app previously only had
+// the persistent bottom drawer, which stays minimized/small by design).
+// Independent message log from the drawer's -- this is a different,
+// more deliberate conversation mode, not a resize of the same widget.
+Evoke.screens.billbot = async function billbot() {
+  const { api, state, mount } = Evoke;
+  mount(`
+    <div class="billbot-fullscreen">
+      <div class="card__eyebrow">Live Transmission</div>
+      <h1>B1llbot</h1>
+      <div class="billbot-fullscreen__log" id="billbot-fs-log">
+        <div class="billbot-msg" data-from="billbot">You made it. What's on your mind?</div>
+      </div>
+      <form id="billbot-fs-form" class="row">
+        <input type="text" id="billbot-fs-input" placeholder="Ask B1llbot..." style="flex:1" autocomplete="off">
+        <button type="submit" class="btn btn-primary">Send</button>
+      </form>
+    </div>
+  `);
+
+  document.getElementById("billbot-fs-form").addEventListener("submit", async (e) => {
+    e.preventDefault();
+    const input = document.getElementById("billbot-fs-input");
+    const msg = input.value.trim();
+    if (!msg) return;
+    const log = document.getElementById("billbot-fs-log");
+    log.insertAdjacentHTML("beforeend", `<div class="billbot-msg" data-from="user">${Evoke.escapeHtml(msg)}</div>`);
+    input.value = "";
+    log.scrollTop = log.scrollHeight;
+    try {
+      const reply = await api.billbotChat(state.userId, msg);
+      log.insertAdjacentHTML("beforeend", `<div class="billbot-msg" data-from="billbot">${Evoke.escapeHtml(reply.reply)}</div>`);
+    } catch (err) {
+      log.insertAdjacentHTML("beforeend", `<div class="billbot-msg" data-from="billbot">Having trouble hearing you right now.</div>`);
+    }
+    log.scrollTop = log.scrollHeight;
+  });
+};
+
+// Mission Vault -- a revisit-anytime retrospective, distinct from the
+// debrief (which is the live/right-after-submission view). Gap surfaced by
+// comparing against ui/Final Prosperity Showcase.html, which designed a
+// per-mission retrospective ("The Mission" / "What You Explored" / etc.)
+// the real app had no equivalent of. Own missions only -- a retrospective
+// on someone else's private reflection text isn't the Gallery's peer-view
+// model, it's just not built.
+Evoke.screens.vault = async function vault(missionId) {
+  const { api, state, mount } = Evoke;
+  const [missionsRes, timeline, submission, awardsRes] = await Promise.all([
+    api.missions(state.userId),
+    api.timeline(state.userId, missionId).catch(() => ({ insights: [] })),
+    api.submission(state.userId, missionId).catch(() => ({ submitted: false })),
+    api.awards(state.userId).catch(() => ({ awards: [] })),
+  ]);
+  const mission = (missionsRes.missions || []).find(m => m.id === missionId);
+  if (!mission) { mount(`<div class="card"><p>Mission not found.</p></div>`); return; }
+
+  const missionAwards = (awardsRes.awards || []).filter(a => a.mission_id === missionId);
+
+  if (!submission.submitted) {
+    mount(`
+      <div class="stack">
+        <h1>${Evoke.escapeHtml(mission.title)} — Vault</h1>
+        <div class="card"><p class="empty-state">Nothing here yet — this fills in once you've submitted evidence for this mission.</p></div>
+        <a class="btn" href="#/mission/${missionId}">← Back to Mission Brief</a>
+      </div>
+    `);
+    return;
+  }
+
+  mount(`
+    <div class="stack">
+      <div>
+        <span class="mission-card__arc" data-arc="${mission.arc}">${mission.arc} · Week ${mission.week}</span>
+        <h1>${Evoke.escapeHtml(mission.title)} — Vault</h1>
+      </div>
+
+      <div class="card">
+        <div class="card__eyebrow">The Mission</div>
+        <p>${Evoke.escapeHtml(mission.brief || "No brief text yet.").replace(/\n/g, "<br>")}</p>
+      </div>
+
+      <div class="card">
+        <div class="card__eyebrow">What You Explored</div>
+        ${submission.reflection
+          ? `<p>${Evoke.escapeHtml(submission.reflection)}</p>`
+          : `<p class="empty-state">No field note recorded for this one.</p>`}
+        <p class="empty-state" style="margin-top:var(--space-2)">Submitted ${new Date(submission.submitted_at).toLocaleDateString()}</p>
+      </div>
+
+      <div class="card">
+        <div class="card__eyebrow">What Came Back</div>
+        ${(timeline.insights || []).length
+          ? timeline.insights.map(i => `<p><strong>${Evoke.escapeHtml(i.category || "Insight")} from ${Evoke.escapeHtml(i.source)}:</strong> ${Evoke.escapeHtml(i.text)}</p>`).join("")
+          : `<p class="empty-state">No insights recorded.</p>`}
+      </div>
+
+      <div class="card">
+        <div class="card__eyebrow">What You Earned</div>
+        ${missionAwards.length
+          ? missionAwards.map(a => `<span class="award" data-tier="${a.tier}" style="display:inline-flex"><span class="award__tier">${a.tier}</span></span>`).join(" ")
+          : `<p class="empty-state">No awards yet for this mission.</p>`}
+      </div>
+
+      <a class="btn" href="#/">← Back to Operations Hub</a>
     </div>
   `);
 };

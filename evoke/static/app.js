@@ -54,6 +54,12 @@ const Evoke = (() => {
       formData.append("text", text);
       return fetch(`/api/timeline/${targetUserId}/${missionId}/peer-insight?from_user_id=${fromUserId}`, { method: "POST", body: formData }).then(r => r.json());
     },
+    submission: (userId, missionId) => apiGet(`/api/submissions/${userId}/${missionId}`),
+    minecraftConnectInfo: () => apiGet(`/api/minecraft/connect-info`),
+    minecraftLink: (userId) => apiGet(`/api/minecraft/link/${userId}`),
+    adminMissions: (userId) => apiGet(`/api/admin/missions?user_id=${userId}`),
+    adminRelease: (missionId) => fetch(`/api/admin/missions/${missionId}/release`, { method: "POST" }).then(r => r.json()),
+    adminUnrelease: (missionId) => fetch(`/api/admin/missions/${missionId}/unrelease`, { method: "POST" }).then(r => r.json()),
   };
 
   // ---------- Auth (dev-login only; see CONCEPTS.md's known gaps) ----------
@@ -94,6 +100,7 @@ const Evoke = (() => {
           ${navLink("#/novel", "Novel")}
           ${navLink("#/gallery", "Gallery")}
           ${navLink("#/profile", "Profile")}
+          ${navLink("#/billbot", "B1llbot")}
         </nav>
       </div>
       <div class="topbar__right">
@@ -150,15 +157,19 @@ const Evoke = (() => {
 
   // ---------- Router ----------
   const routes = [
+    { pattern: /^#\/welcome$/, screen: "welcome" },
     { pattern: /^#\/$/, screen: "hub" },
     { pattern: /^#\/novel$/, screen: "novel" },
     { pattern: /^#\/gallery$/, screen: "gallery" },
+    { pattern: /^#\/billbot$/, screen: "billbot" },
     { pattern: /^#\/mission\/([^/]+)$/, screen: "missionBrief" },
-    { pattern: /^#\/mission\/([^/]+)\/debrief$/, screen: "missionDebrief" },
+    { pattern: /^#\/mission\/([^/]+)\/debrief(?:\?.*)?$/, screen: "missionDebrief" },
+    { pattern: /^#\/mission\/([^/]+)\/vault$/, screen: "vault" },
     { pattern: /^#\/mission\/([^/]+)\/debrief\/([^/]+)$/, screen: "missionDebrief" },
     { pattern: /^#\/profile$/, screen: "playerProfile" },
     { pattern: /^#\/profile\/([^/]+)$/, screen: "playerProfile" },
     { pattern: /^#\/team\/([^/]+)$/, screen: "teamProfile" },
+    { pattern: /^#\/admin$/, screen: "admin" },
   ];
 
   async function router() {
@@ -194,6 +205,15 @@ const Evoke = (() => {
     renderBillbotDrawer();
     await renderTopbar();
     window.addEventListener("hashchange", router);
+    // First-run onboarding (GAPS.md: "No onboarding" -- found missing by
+    // comparing against ui/Final Prosperity Showcase.html, which designed a
+    // welcome screen the real app never built). Only hijacks a bare/root
+    // landing, never a deep link -- someone arriving via a mission/gallery
+    // link should land exactly there, not get detoured.
+    const onboardKey = `evoke_onboarded_${state.userId}`;
+    if (!localStorage.getItem(onboardKey) && (location.hash === "" || location.hash === "#/")) {
+      location.hash = "#/welcome";
+    }
     await router();
   }
 

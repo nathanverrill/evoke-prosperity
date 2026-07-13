@@ -28,6 +28,15 @@ DATABASE_URL = os.getenv("DATABASE_URL", "postgresql://evoke:devsecret123@localh
 BRIGHTSPACE_SIM_URL = os.getenv("BRIGHTSPACE_SIM_URL", "http://brightspace-sim:8001")
 OPENWEBUI_URL = os.getenv("OPENWEBUI_URL", "http://open-webui:8080")
 AI_ENABLED = os.getenv("AI_ENABLED", "false").lower() == "true"
+# The internal container hostname (MINECRAFT_HOST) is for the app/bridge's
+# own RCON traffic -- not reachable from a learner's actual Minecraft
+# client. This is the address a real player types into their client,
+# separately configurable since it has to be a real public host once this
+# runs on a cohort instance (see HOSTING_COST_MODEL.md's domain scheme:
+# {cohort-slug}.mc.<root-domain>). Defaults assume same-machine local dev.
+MINECRAFT_PUBLIC_HOST = os.getenv("MINECRAFT_PUBLIC_HOST", "localhost")
+MINECRAFT_PUBLIC_PORT_JAVA = os.getenv("MINECRAFT_PUBLIC_PORT_JAVA", "25565")
+MINECRAFT_PUBLIC_PORT_BEDROCK = os.getenv("MINECRAFT_PUBLIC_PORT_BEDROCK", "19132")
 
 # Brightspace integration (adapter or simulator)
 BRIGHTSPACE_SIMULATOR_MODE = os.getenv("BRIGHTSPACE_SIMULATOR_MODE", "true").lower() == "true"
@@ -108,6 +117,18 @@ async def sync_missions_from_lms():
             )
         )
         synced += 1
+
+    # Per GAME_DESIGN.md §6.1 ("Mission 1: the entire Basin is open") and
+    # the now-resolved mission-ordering gap in GAPS.md, week 1/sequence 1 is
+    # the only mission released by default -- every other mission needs an
+    # admin to manually release it (POST /api/admin/missions/{id}/release).
+    # Only touches missions that have never been released, so re-running
+    # this sync never re-locks something an admin already opened.
+    db_execute(
+        """UPDATE missions SET released_at = CURRENT_TIMESTAMP
+           WHERE campaign_id = %s::uuid AND week = 1 AND sequence = 1 AND released_at IS NULL""",
+        (campaign_id,)
+    )
 
     logger.info(f"Mission sync complete: {synced} assignments synced from LMS")
 
@@ -847,14 +868,14 @@ async def list_missions(user_id: str):
 
         # Fetch all missions for this campaign
         missions_data = db_fetch_all(
-            """SELECT id, title, week, arc, superpower, mission_brief_md
+            """SELECT id, title, week, arc, superpower, mission_brief_md, released_at
                FROM missions WHERE campaign_id = %s::uuid ORDER BY week, sequence""",
             (campaign_id,)
         )
 
         missions = []
         for mission in missions_data:
-            mission_id, title, week, arc, superpower, brief = mission
+            mission_id, title, week, arc, superpower, brief, released_at = mission
 
             # Get any linked quest
             quest = db_fetch_one(
@@ -869,6 +890,7 @@ async def list_missions(user_id: str):
                 "arc": arc,
                 "superpower": superpower,
                 "brief": brief,
+                "released": released_at is not None,
                 "quest": {
                     "id": str(quest[0]),
                     "title": quest[1],
@@ -880,15 +902,88 @@ async def list_missions(user_id: str):
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))
 
+# ========== Admin: mission release gating ==========
+# No role/permission check yet -- these routes are unprotected by construction,
+# same as the rest of this dev-grade build (see GAPS.md's "Auth is dev-grade
+# outside LTI" gap). Not a new gap introduced here, just inheriting the
+# existing one; real deployment needs an instructor-role check before this
+# ships to a real classroom.
+@app.get("/api/admin/missions")
+async def admin_list_missions(user_id: str):
+    """All missions for the caller's campaign, including release state --
+    the admin-facing counterpart to GET /api/missions, which only shows
+    the learner-relevant fields."""
+    try:
+        org_result = db_fetch_one(
+            "SELECT o.active_campaign_id FROM organizations o JOIN users u ON u.org_id = o.id WHERE u.id = %s::uuid",
+            (user_id,)
+        )
+        if not org_result:
+            raise HTTPException(status_code=404, detail="Organization not found")
+
+        missions_data = db_fetch_all(
+            """SELECT id, title, week, sequence, arc, released_at
+               FROM missions WHERE campaign_id = %s::uuid ORDER BY week, sequence""",
+            (org_result[0],)
+        )
+        return {"missions": [{
+            "id": str(m[0]), "title": m[1], "week": m[2], "sequence": m[3], "arc": m[4],
+            "released": m[5] is not None,
+            "released_at": m[5].isoformat() if m[5] else None,
+        } for m in missions_data]}
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@app.post("/api/admin/missions/{mission_id}/release")
+async def admin_release_mission(mission_id: str):
+    try:
+        db_execute(
+            "UPDATE missions SET released_at = CURRENT_TIMESTAMP WHERE id = %s::uuid AND released_at IS NULL",
+            (mission_id,)
+        )
+        return {"status": "released"}
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@app.post("/api/admin/missions/{mission_id}/unrelease")
+async def admin_unrelease_mission(mission_id: str):
+    """Puts a mission back behind the gate. Deliberately doesn't touch
+    submissions/awards already granted while it was open -- unreleasing is
+    about stopping new submissions, not undoing a learner's completed work."""
+    try:
+        db_execute(
+            "UPDATE missions SET released_at = NULL WHERE id = %s::uuid",
+            (mission_id,)
+        )
+        return {"status": "unreleased"}
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
 # ========== Evidence Submission ==========
 @app.post("/api/submit-evidence")
 async def submit_evidence(
     user_id: str = Form(...),
     mission_id: str = Form(...),
-    file: UploadFile = File(...)
+    file: UploadFile = File(...),
+    reflection: Optional[str] = Form(None)
 ):
     """Submit evidence for a mission"""
     try:
+        mission_release = db_fetch_one(
+            "SELECT released_at FROM missions WHERE id = %s::uuid", (mission_id,)
+        )
+        if not mission_release or mission_release[0] is None:
+            # Real gating, not just a UI hint -- a locked mission's evidence
+            # form is hidden client-side too (screens.js), but this is the
+            # enforcement that actually matters. See GAPS.md's resolved
+            # "mission ordering" item: admin-release, not order-of-completion.
+            raise HTTPException(status_code=403, detail="This mission hasn't been released yet")
+
         submission_id = str(uuid.uuid4())
 
         # Store file in MinIO
@@ -903,9 +998,9 @@ async def submit_evidence(
 
         # Create submission record
         db_execute(
-            """INSERT INTO submissions (id, user_id, mission_id, file_path, status)
-               VALUES (%s::uuid, %s::uuid, %s::uuid, %s, 'submitted')""",
-            (submission_id, user_id, mission_id, object_key)
+            """INSERT INTO submissions (id, user_id, mission_id, file_path, status, reflection)
+               VALUES (%s::uuid, %s::uuid, %s::uuid, %s, 'submitted', %s)""",
+            (submission_id, user_id, mission_id, object_key, reflection or None)
         )
 
         # Sync to Brightspace if adapter available
@@ -1104,6 +1199,8 @@ async def submit_evidence(
             "submission_id": submission_id,
             "award_id": str(award_id_from_db)
         }
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"Submit evidence error: {e}")
         raise HTTPException(status_code=400, detail=str(e))
@@ -1503,6 +1600,29 @@ async def get_activity(limit: int = 30):
         return {"activity": []}
 
 
+# ========== Submissions ==========
+@app.get("/api/submissions/{user_id}/{mission_id}")
+async def get_submission(user_id: str, mission_id: str):
+    """The learner's own submitted evidence for one mission -- reflection
+    text, when it was submitted. Feeds the Vault retrospective screen,
+    which needed a way to show what the learner actually wrote, not just
+    the timeline's system-generated insights."""
+    row = db_fetch_one(
+        """SELECT reflection, submitted_at, status FROM submissions
+           WHERE user_id = %s::uuid AND mission_id = %s::uuid
+           ORDER BY submitted_at DESC LIMIT 1""",
+        (user_id, mission_id)
+    )
+    if not row:
+        return {"submitted": False}
+    return {
+        "submitted": True,
+        "reflection": row[0],
+        "submitted_at": row[1].isoformat() if row[1] else None,
+        "status": row[2],
+    }
+
+
 # ========== Timeline ==========
 @app.get("/api/timeline/{user_id}/{mission_id}")
 async def get_timeline(user_id: str, mission_id: str):
@@ -1632,6 +1752,21 @@ async def get_gallery(mission_id: Optional[str] = None, limit: int = 30):
 
 
 # ========== Minecraft ==========
+@app.get("/api/minecraft/connect-info")
+async def minecraft_connect_info():
+    """Server address for a learner's actual Minecraft client -- previously
+    nowhere in the app (GAPS.md: "No Minecraft connect flow in the web
+    app", found by comparing against ui/Final Prosperity Showcase.html,
+    which designed this and the real app never built it)."""
+    return {
+        "host": MINECRAFT_PUBLIC_HOST,
+        "java_port": MINECRAFT_PUBLIC_PORT_JAVA,
+        "bedrock_port": MINECRAFT_PUBLIC_PORT_BEDROCK,
+        "java_address": f"{MINECRAFT_PUBLIC_HOST}:{MINECRAFT_PUBLIC_PORT_JAVA}",
+        "bedrock_address": f"{MINECRAFT_PUBLIC_HOST}:{MINECRAFT_PUBLIC_PORT_BEDROCK}",
+    }
+
+
 @app.post("/api/minecraft/link")
 async def link_minecraft(user_id: str, minecraft_username: str):
     """Link a user to a Minecraft account"""
