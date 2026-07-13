@@ -57,7 +57,7 @@ Evoke.screens.welcome = async function welcome() {
 
 Evoke.screens.hub = async function hub() {
   const { api, state, mount } = Evoke;
-  const [missionsRes, notifRes, activityRes, checkinRes, mcLink, mcConnect, world, mcStatus, companion, reflections, progressMap] = await Promise.all([
+  const [missionsRes, notifRes, activityRes, checkinRes, mcLink, mcConnect, world, mcStatus, companion, reflections, progressMap, dailyObjectives] = await Promise.all([
     api.missions(state.userId),
     api.notifications(state.userId).catch(() => ({ notifications: [] })),
     api.activity(20).catch(() => ({ activity: [] })),
@@ -69,6 +69,7 @@ Evoke.screens.hub = async function hub() {
     api.companionInfo().catch(() => null),
     api.reflections(state.userId).catch(() => ({ filed_today: false, journal: [] })),
     api.progressMap(state.userId).catch(() => null),
+    api.dailyObjectives(state.userId).catch(() => ({ objectives: [] })),
   ]);
   Evoke.kit?.visit("intake");
   const missions = missionsRes.missions || [];
@@ -133,6 +134,30 @@ Evoke.screens.hub = async function hub() {
     </a>
   ` : "";
 
+  // Today's Objectives -- console-player feedback: live games always greet
+  // you with a short rotating checklist ("what do I do in the next 10
+  // minutes"), which is also the classroom's 45-minute-period question.
+  // Every mechanic behind these three already existed (Field Report,
+  // Training Sims, peer feedback); this just surfaces the daily state as a
+  // checklist instead of leaving each one buried on its own screen.
+  const objectives = dailyObjectives.objectives || [];
+  const objectivesCard = objectives.length ? `
+    <section class="card" id="daily-objectives">
+      <div class="card__eyebrow">Today's Objectives</div>
+      <ul class="objectives-list">
+        ${objectives.map(o => `
+          <li class="objectives-list__item ${o.done ? "is-done" : ""}">
+            <span class="objectives-list__check">${o.done ? "✓" : "○"}</span>
+            ${o.done
+              ? `<span class="objectives-list__label">${Evoke.escapeHtml(o.label)}</span>`
+              : `<a class="objectives-list__label" data-objective-key="${o.key}" href="${o.href}">${Evoke.escapeHtml(o.label)}</a>`}
+            <span class="objectives-list__xp">${Evoke.escapeHtml(o.xp_label)}</span>
+          </li>
+        `).join("")}
+      </ul>
+    </section>
+  ` : "";
+
   const presenceCard = (() => {
     const online = mcStatus && mcStatus.server_online;
     const players = (mcStatus && mcStatus.online_players) || [];
@@ -191,6 +216,7 @@ Evoke.screens.hub = async function hub() {
           </div>
         </section>
 
+        ${objectivesCard}
         ${fieldReportCard}
         ${myMapStrip}
 
@@ -293,6 +319,15 @@ Evoke.screens.hub = async function hub() {
   document.getElementById("hub-guide-dismiss")?.addEventListener("click", () => {
     localStorage.setItem(guideKey, "1");
     document.getElementById("hub-guide").remove();
+  });
+
+  // The Field Report objective is already on this same page -- scroll to
+  // it instead of a real navigation (its href is "#/" as a harmless
+  // fallback for no-JS, but following it as a hash change would re-run the
+  // router and clobber the page mid-scroll).
+  document.querySelector('[data-objective-key="field_report"]')?.addEventListener("click", (e) => {
+    e.preventDefault();
+    document.getElementById("field-report")?.scrollIntoView({ behavior: "smooth", block: "center" });
   });
 
   // Live refresh: the Hub is an ops center, so it re-renders itself when

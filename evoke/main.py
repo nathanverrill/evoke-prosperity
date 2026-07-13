@@ -2663,6 +2663,39 @@ async def get_reflections(user_id: str, limit: int = 60):
     }
 
 
+@app.get("/api/daily-objectives/{user_id}")
+async def get_daily_objectives(user_id: str):
+    """Today's rotating checklist (console-player feedback: live games always
+    greet you with a short list of "what do I do in the next 10 minutes" --
+    we already have every mechanic behind these three, just never presented
+    them as a checklist). Not a new subsystem: each row is a plain
+    CURRENT_DATE check against a table that already exists for its own
+    reason (daily_reflections for the Field Report, minigame_scores for
+    Training Sims, peer_insights_given for peer feedback)."""
+    try:
+        field_report = db_fetch_one(
+            "SELECT 1 FROM daily_reflections WHERE user_id = %s::uuid AND reflection_date = CURRENT_DATE",
+            (user_id,)
+        )
+        training_sim = db_fetch_one(
+            "SELECT 1 FROM minigame_scores WHERE user_id = %s::uuid AND created_at::date = CURRENT_DATE LIMIT 1",
+            (user_id,)
+        )
+        peer_feedback = db_fetch_one(
+            "SELECT 1 FROM peer_insights_given WHERE from_user_id = %s::uuid AND created_at::date = CURRENT_DATE LIMIT 1",
+            (user_id,)
+        )
+        return {
+            "objectives": [
+                {"key": "field_report", "label": "File a Field Report", "xp_label": "10 XP", "done": bool(field_report), "href": "#/"},
+                {"key": "training_sim", "label": "Run a Training Sim", "xp_label": "25 XP", "done": bool(training_sim), "href": "#/arcade"},
+                {"key": "peer_feedback", "label": "Leave peer feedback", "xp_label": "Generosity of Spirit", "done": bool(peer_feedback), "href": "#/gallery"},
+            ]
+        }
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
 # ========== Phone pairing (BUILD_PLAN_2 §7) ==========
 @app.post("/api/companion/pair")
 async def companion_pair(token: str = Form(...)):

@@ -77,6 +77,7 @@ const Evoke = (() => {
       return apiPostForm(`/api/reflection?user_id=${userId}`, fd);
     },
     reflections: (userId) => apiGet(`/api/reflections/${userId}`),
+    dailyObjectives: (userId) => apiGet(`/api/daily-objectives/${userId}`),
     linkCode: (userId) => fetch(`/api/minecraft/link-code?user_id=${userId}`, { method: "POST" }).then(r => r.json()),
     linkRequest: (userId) => apiGet(`/api/minecraft/link-request/${userId}`),
     linkConfirm: (userId, accept) => {

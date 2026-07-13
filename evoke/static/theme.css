@@ -273,6 +273,35 @@ input:focus, textarea:focus, select:focus {
   .hub-hero__ghost { opacity: 0.10; }
 }
 
+/* Today's Objectives (console-UX gap #4: daily/weekly challenges) */
+.objectives-list { list-style: none; margin: var(--space-2) 0 0; padding: 0; display: flex; flex-direction: column; gap: var(--space-2); }
+.objectives-list__item {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-2) 0;
+  border-bottom: var(--border-width) solid var(--color-border);
+}
+.objectives-list__item:last-child { border-bottom: none; }
+.objectives-list__check {
+  flex: none;
+  width: 20px;
+  text-align: center;
+  color: var(--color-locked-text);
+  font-family: var(--font-mono);
+}
+.objectives-list__item.is-done .objectives-list__check { color: var(--green-400); text-shadow: var(--glow-green); }
+.objectives-list__label { flex: 1; color: var(--color-text); text-decoration: none; }
+.objectives-list__item.is-done .objectives-list__label { color: var(--color-text-muted); text-decoration: line-through; }
+a.objectives-list__label:hover { color: var(--cyan-300); }
+.objectives-list__xp {
+  flex: none;
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  color: var(--orange-500);
+  letter-spacing: 0.04em;
+}
+
 /* Mono status chip (showcase's "System Online" language) */
 .chip {
   display: inline-flex;
