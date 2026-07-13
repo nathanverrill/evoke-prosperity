@@ -65,6 +65,31 @@ const Evoke = (() => {
     companionInfo: () => apiGet("/api/companion/info"),
     teamWheel: (teamId) => apiGet(`/api/team/${teamId}/wheel`),
     adminCohort: (userId) => apiGet(`/api/admin/cohort?user_id=${userId}`),
+    progressMap: (userId) => apiGet(`/api/progress-map/${userId}`),
+    setStage: (missionId, stage) => {
+      const fd = new FormData();
+      fd.append("stage", String(stage));
+      return apiPostForm(`/api/admin/missions/${missionId}/stage`, fd);
+    },
+    postReflection: (userId, text) => {
+      const fd = new FormData();
+      fd.append("text", text);
+      return apiPostForm(`/api/reflection?user_id=${userId}`, fd);
+    },
+    reflections: (userId) => apiGet(`/api/reflections/${userId}`),
+    linkCode: (userId) => fetch(`/api/minecraft/link-code?user_id=${userId}`, { method: "POST" }).then(r => r.json()),
+    linkRequest: (userId) => apiGet(`/api/minecraft/link-request/${userId}`),
+    linkConfirm: (userId, accept) => {
+      const fd = new FormData();
+      fd.append("accept", accept ? "true" : "false");
+      return apiPostForm(`/api/minecraft/link-confirm?user_id=${userId}`, fd);
+    },
+    kitPiece: (userId, piece) => {
+      const fd = new FormData();
+      fd.append("piece", piece);
+      return apiPostForm(`/api/minigames/kit/piece?user_id=${userId}`, fd);
+    },
+    kitProgress: (userId) => apiGet(`/api/minigames/kit/${userId}`),
     gear: (userId) => apiGet(`/api/gear/${userId}`),
     equipGear: (userId, keys) => {
       const fd = new FormData();
@@ -214,12 +239,12 @@ const Evoke = (() => {
           <span class="word--sub">Prosperity</span>
         </a>
         <nav class="topbar__nav">
-          ${navLink("#/", "Operations Hub")}
-          ${navLink("#/novel", "Novel")}
-          ${navLink("#/gallery", "Gallery")}
-          ${navLink("#/arcade", "Training")}
+          ${navLink("#/", "Now")}
+          ${navLink("#/map", "Campaign Map")}
+          ${navLink("#/novel", "Story")}
+          ${navLink("#/gallery", "Cohort")}
+          ${navLink("#/arcade", "Field Ops")}
           ${navLink("#/profile", "Dossier")}
-          ${navLink("#/billbot", "B1llbot")}
         </nav>
       </div>
       <div class="topbar__right">
@@ -313,6 +338,8 @@ const Evoke = (() => {
     { pattern: /^#\/profile\/([^/]+)$/, screen: "playerProfile" },
     { pattern: /^#\/team\/([^/]+)$/, screen: "teamProfile" },
     { pattern: /^#\/admin$/, screen: "admin" },
+    { pattern: /^#\/map$/, screen: "campaignMap" },
+    { pattern: /^#\/faq$/, screen: "faq" },
     { pattern: /^#\/arcade$/, screen: "arcade" },
     { pattern: /^#\/game\/flow$/, screen: "gameFlow" },
     { pattern: /^#\/game\/decrypt$/, screen: "gameDecrypt" },

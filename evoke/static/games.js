@@ -84,6 +84,25 @@
   };
   Evoke.signal = signal;
 
+  // ---------- Aqueduct Kit (BUILD_PLAN_2 §5) ----------
+  // 10 water-filter components, one per major surface, auto-collected by
+  // visiting -- a collectible that teaches the navigation. Server-tracked
+  // (kit:<piece> rows); toast only when a piece is genuinely new.
+  const kit = {
+    async visit(piece) {
+      try {
+        const res = await Evoke.api.kitPiece(state.userId, piece);
+        if (res.new) {
+          Evoke.toast(`⚙ AQUEDUCT COMPONENT — <strong>${Evoke.escapeHtml(res.piece_name)}</strong> recovered (${res.found.length}/${res.total})`);
+        }
+        if (res.completed_now) {
+          Evoke.toast(`<strong>⚙ AQUEDUCT ASSEMBLED.</strong> All ${res.total} components. See it on your <a href="#/profile">Dossier</a> — and check the Basin if you're linked.`, { kind: "world", ttl: 12000 });
+        }
+      } catch (e) { /* collectibles never error loudly */ }
+    },
+  };
+  Evoke.kit = kit;
+
   // Konami code -> fragment. Global, once per page load.
   const KONAMI = ["ArrowUp","ArrowUp","ArrowDown","ArrowDown","ArrowLeft","ArrowRight","ArrowLeft","ArrowRight","b","a"];
   let konamiIdx = 0;
@@ -97,6 +116,7 @@
 
   // ---------- Arcade ----------
   Evoke.screens.arcade = async function arcade() {
+    Evoke.kit?.visit("membrane");
     const [flowLb, decryptLb, sig] = await Promise.all([
       leaderboardHtml("flow-control"),
       leaderboardHtml("signal-decrypt"),

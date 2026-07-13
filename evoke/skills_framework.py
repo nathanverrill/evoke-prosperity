@@ -56,8 +56,13 @@ POWER_ALIASES = {
 BEHAVIORAL_POWERS = {
     "Generosity of Spirit": {"threshold": 3, "metric": "peer_insights_given"},
     "Curiosity": {"threshold": 10, "metric": "billbot_messages_sent"},
-    # Transformation and Analysis are deferred until the team-shoutout
-    # (§7.2) and team-reflection (§7.3) mechanics they depend on are built.
+    # Transformation via the daily Field Report (reflection) habit --
+    # "has a growth mindset... to create positive and sustainable change":
+    # sustained reflection over time is the observable behavior. Approved
+    # by Nathan (July 13) as part of the Words of Wisdom mechanic.
+    "Transformation": {"threshold": 10, "metric": "daily_reflections"},
+    # Analysis remains deferred until the team-reflection mechanic (§7.3)
+    # it depends on is built.
 }
 
 

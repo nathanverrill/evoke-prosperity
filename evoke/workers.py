@@ -499,6 +499,27 @@ def _process_event(event: dict, producer):
             print(f"[TEAM WHEEL] evaluation failed: {e}")
 
     # -------------------------------------------------------------
+    # 5c. STAGE / LINK ANNOUNCEMENTS
+    # -------------------------------------------------------------
+    if event_type in ("StageCompleted", "MinecraftLinked"):
+        user_id = event['data']['user_id']
+        now_str = datetime.datetime.now().isoformat()
+        name_row = _db_fetch_one("SELECT display_name FROM users WHERE id = %s::uuid", (user_id,))
+        display_name = name_row[0] if name_row else "An agent"
+        if event_type == "StageCompleted":
+            message = f"◍ {display_name} completed Stage {event['data']['stage']} — 100%, every mission in"
+            kind = "stage_completed"
+        else:
+            message = f"⛏ {display_name} linked their Minecraft account — the Basin gains an agent"
+            kind = "minecraft_linked"
+        doc = {
+            "timestamp": now_str, "user_id": user_id, "display_name": display_name,
+            "kind": kind, "tier": None, "message": message,
+        }
+        os_client.index(index="activity-feed", body=doc)
+        live_hub.broadcast({"type": "ActivityPosted", "data": doc})
+
+    # -------------------------------------------------------------
     # 6. PRESENCE WORKER — who's in the Basin right now
     # -------------------------------------------------------------
     # The bridge's presence loop publishes MinecraftPresence snapshots;

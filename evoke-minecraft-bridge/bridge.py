@@ -865,6 +865,86 @@ def _linked_players_info(conn, online_players: list) -> dict:
         cur.close()
 
 
+# ---------------------------------------------------------------------------
+# Two-channel Minecraft linking (BUILD_PLAN_2 §8)
+# ---------------------------------------------------------------------------
+# The web mints a 4-digit code; the player types `/trigger evoke_link set
+# <code>` in-game (vanilla, player-executable, works on Bedrock via
+# Geyser); this loop matches it and the learner's phone confirms. The
+# trigger objective is (re-)created and (re-)enabled for online players
+# every pass -- `/trigger` only works while enabled, and using it
+# disables it again.
+
+LINK_TRIGGER_INTERVAL = 10
+LINK_OBJECTIVE = "evoke_link"
+LINK_CODE_TTL_S = 600
+
+
+async def link_code_loop():
+    objective_ready = False
+    while True:
+        try:
+            await asyncio.sleep(LINK_TRIGGER_INTERVAL)
+            conn = get_db_connection()
+            try:
+                cur = conn.cursor()
+                cur.execute(
+                    "SELECT code, user_id FROM mc_link_codes WHERE status = 'waiting' AND created_at > NOW() - INTERVAL '10 minutes'"
+                )
+                waiting = {code: str(uid) for code, uid in cur.fetchall()}
+            finally:
+                return_db_connection(conn)
+
+            rcon = _rcon()
+            if not rcon:
+                continue
+            try:
+                if not objective_ready:
+                    rcon.execute_command(f"scoreboard objectives add {LINK_OBJECTIVE} trigger")
+                    objective_ready = True
+                players = rcon.get_online_players()
+                if not players:
+                    continue
+                rcon.execute_command(f"scoreboard players enable @a {LINK_OBJECTIVE}")
+                if not waiting:
+                    continue
+                for player in players:
+                    score = _score_for(rcon, player, LINK_OBJECTIVE)
+                    if not score:
+                        continue
+                    rcon.execute_command(f"scoreboard players reset {player} {LINK_OBJECTIVE}")
+                    rcon.execute_command(f"scoreboard players enable {player} {LINK_OBJECTIVE}")
+                    if score not in waiting:
+                        send_tellraw(rcon, player, "That code didn't match anything. Check your Field Kit and try again.")
+                        continue
+                    user_id = waiting.pop(score)
+                    conn = get_db_connection()
+                    try:
+                        cur = conn.cursor()
+                        cur.execute(
+                            "UPDATE mc_link_codes SET status = 'matched', minecraft_username = %s WHERE code = %s",
+                            (player, score)
+                        )
+                        conn.commit()
+                    finally:
+                        return_db_connection(conn)
+                    payload = json.dumps([
+                        {"text": "✔ ", "color": "green"},
+                        {"text": "Code accepted. Confirm the link on your Field Kit to finish.", "color": "yellow"},
+                    ])
+                    rcon.execute_command(f"tellraw {player} {payload}")
+                    # The phone hears this over the live channel and pops
+                    # the confirm; the REST poll is its fallback.
+                    publish_event("MinecraftLinkRequested", {
+                        "user_id": user_id, "minecraft_username": player, "code": score,
+                    })
+                    print(f"✓ Link code {score} matched by {player}; awaiting phone confirm")
+            finally:
+                rcon.close()
+        except Exception as e:
+            print(f"Link code loop error: {e}")
+
+
 async def presence_loop():
     """Publishes MinecraftPresence snapshots for the web's live "who's in
     the Basin" card. Change-triggered plus a keepalive every
@@ -976,7 +1056,8 @@ async def main():
         offline_delivery_loop(),
         heartbeat_loop(),
         presence_loop(),
-        quest_trigger_loop()
+        quest_trigger_loop(),
+        link_code_loop()
     )
 
 if __name__ == "__main__":

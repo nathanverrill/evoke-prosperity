@@ -14,6 +14,35 @@
 <body>
   <div class="companion-page stack" id="companion-root">
     <h1 class="card__title">EVOKE Field Kit</h1>
+    <p class="empty-state" id="agent-line"></p>
+
+    <section class="card" id="pair-confirm" hidden>
+      <div class="card__eyebrow">Pairing</div>
+      <p>Registering this phone as <strong id="pair-name"></strong> — that's you?</p>
+      <div class="row">
+        <button class="btn btn-primary" id="pair-yes">Yes, that's me</button>
+        <button class="btn" id="pair-no">No</button>
+      </div>
+    </section>
+
+    <section class="card" id="link-confirm-card" hidden>
+      <div class="card__eyebrow">⛏ Minecraft link request</div>
+      <p>Player <strong id="link-mc-name"></strong> entered your code in the Basin. Link it to your account?</p>
+      <div class="row">
+        <button class="btn btn-primary" id="link-yes">Confirm Link</button>
+        <button class="btn" id="link-no">Deny</button>
+      </div>
+    </section>
+
+    <section class="card" id="reflect-card">
+      <div class="card__eyebrow">Daily Field Report</div>
+      <div id="reflect-body">Loading...</div>
+    </section>
+
+    <section class="card" id="connect-card">
+      <div class="card__eyebrow">Basin Simulation</div>
+      <div id="connect-body">Loading...</div>
+    </section>
 
     <section class="card world-meter">
       <div class="card__eyebrow">Keel Restoration</div>
@@ -35,7 +64,7 @@
       <div id="awards" class="stack-sm"></div>
     </section>
 
-    <section class="card">
+    <section class="card" id="quest-card" hidden>
       <div class="card__eyebrow">Report Quest Complete</div>
       <form id="quest-form" class="stack-sm">
         <select id="quest-select"></select>
@@ -64,15 +93,149 @@
       return div.innerHTML;
     }
 
+    let displayName = null;
+
     async function init() {
       if ("serviceWorker" in navigator) {
         navigator.serviceWorker.register("sw.js").catch(() => {});
       }
-      const res = await fetch("/api/dev-login", { method: "POST" }).then(r => r.json());
-      userId = res.user_id;
+      // Pairing (BUILD_PLAN_2 §7): a ?pair= token from the Hub QR registers
+      // this phone as the scanning user — no login. Falls back to a stored
+      // pairing, then dev-login.
+      const pairToken = new URLSearchParams(location.search).get("pair");
+      if (pairToken) {
+        try {
+          const fd = new FormData();
+          fd.append("token", pairToken);
+          const who = await fetch("/api/companion/pair", { method: "POST", body: fd }).then(r => {
+            if (!r.ok) throw new Error("pair failed");
+            return r.json();
+          });
+          // Confirm before committing — the projector-QR threat model.
+          document.getElementById("pair-name").textContent = who.display_name;
+          document.getElementById("pair-confirm").hidden = false;
+          await new Promise(resolve => {
+            document.getElementById("pair-yes").addEventListener("click", () => {
+              localStorage.setItem("fieldkit_user_id", who.user_id);
+              localStorage.setItem("fieldkit_display_name", who.display_name);
+              document.getElementById("pair-confirm").hidden = true;
+              history.replaceState(null, "", location.pathname);
+              resolve();
+            });
+            document.getElementById("pair-no").addEventListener("click", () => {
+              document.getElementById("pair-confirm").hidden = true;
+              history.replaceState(null, "", location.pathname);
+              resolve();
+            });
+          });
+        } catch (e) { /* expired/used token -- fall through */ }
+      }
+      userId = localStorage.getItem("fieldkit_user_id");
+      displayName = localStorage.getItem("fieldkit_display_name");
+      if (!userId) {
+        const res = await fetch("/api/dev-login", { method: "POST" }).then(r => r.json());
+        userId = res.user_id;
+        displayName = res.display_name;
+      }
+      document.getElementById("agent-line").textContent = `Agent: ${displayName || "…"}`;
+      fetch(`/api/minigames/kit/piece?user_id=${userId}`, { method: "POST", body: (() => { const f = new FormData(); f.append("piece", "cap"); return f; })() }).catch(() => {});
       connectLive();
       await loadData();
+      loadReflect();
+      loadConnect();
       setInterval(loadData, 10000);
+      setInterval(pollLinkRequest, 8000);
+    }
+
+    // ---- Daily Field Report ----
+    async function loadReflect() {
+      const body = document.getElementById("reflect-body");
+      try {
+        const r = await fetch(`/api/reflections/${userId}`).then(r => r.json());
+        if (r.filed_today) {
+          const latest = (r.journal || [])[0];
+          body.innerHTML = `<p>Filed today ✓</p>${latest && latest.wisdom ? `<p class="empty-state">"${escapeHtml(latest.wisdom)}" — B1llbot</p>` : ""}`;
+          return;
+        }
+      } catch (e) {}
+      body.innerHTML = `
+        <form id="reflect-form" class="stack-sm">
+          <textarea id="reflect-text" rows="2" maxlength="600" placeholder="What did you do today? What are you thinking about?"></textarea>
+          <button type="submit" class="btn btn-primary">File Report</button>
+        </form>
+        <p id="reflect-status" class="empty-state"></p>`;
+      document.getElementById("reflect-form").addEventListener("submit", async (e) => {
+        e.preventDefault();
+        const text = document.getElementById("reflect-text").value.trim();
+        if (!text) return;
+        document.getElementById("reflect-status").textContent = "Filing… B1llbot is thinking (~20s).";
+        try {
+          const fd = new FormData();
+          fd.append("text", text);
+          const res = await fetch(`/api/reflection?user_id=${userId}`, { method: "POST", body: fd }).then(r => r.json());
+          body.innerHTML = `<p>Filed ✓</p><p class="empty-state">"${escapeHtml(res.wisdom)}" — B1llbot</p>`;
+        } catch (err) {
+          document.getElementById("reflect-status").textContent = "Couldn't file that — try again.";
+        }
+      });
+    }
+
+    // ---- Connect to Basin Simulation (inline instructions, §8) ----
+    async function loadConnect() {
+      const body = document.getElementById("connect-body");
+      try {
+        const [link, info] = await Promise.all([
+          fetch(`/api/minecraft/link/${userId}`).then(r => r.json()),
+          fetch("/api/minecraft/connect-info").then(r => r.json()),
+        ]);
+        if (link.linked) {
+          body.innerHTML = `<p>Linked as <strong>${escapeHtml(link.username)}</strong> ✓</p><p class="empty-state">Rewards, quests, and XP flow between the Basin and your account.</p>`;
+          return;
+        }
+        body.innerHTML = `
+          <p class="empty-state">Optional — never graded. Play the same world in Minecraft.</p>
+          <button class="btn btn-primary" id="connect-start">Connect to Basin Simulation</button>
+          <div id="connect-steps" hidden style="margin-top:8px">
+            <p><strong>1.</strong> In Minecraft, add a multiplayer server:<br>
+               Java: <code>${escapeHtml(info.java_address)}</code><br>
+               Bedrock: <code>${escapeHtml(info.bedrock_address)}</code></p>
+            <p><strong>2.</strong> Join the world, then type in chat:</p>
+            <p><code id="connect-cmd" style="font-size:1.05em"></code></p>
+            <p><strong>3.</strong> Come back here — you'll get a confirmation to tap.</p>
+            <p class="empty-state">Code expires in 10 minutes. <a href="/#/faq" target="_blank">Full FAQ →</a></p>
+          </div>`;
+        document.getElementById("connect-start").addEventListener("click", async () => {
+          const res = await fetch(`/api/minecraft/link-code?user_id=${userId}`, { method: "POST" }).then(r => r.json());
+          document.getElementById("connect-cmd").textContent = res.command;
+          document.getElementById("connect-steps").hidden = false;
+          document.getElementById("connect-start").hidden = true;
+        });
+      } catch (e) {
+        body.innerHTML = `<p class="empty-state">Basin status unavailable right now.</p>`;
+      }
+    }
+
+    // ---- Two-channel link confirm (push + poll fallback) ----
+    async function pollLinkRequest() {
+      try {
+        const r = await fetch(`/api/minecraft/link-request/${userId}`).then(r => r.json());
+        if (r.pending) showLinkConfirm(r.minecraft_username);
+      } catch (e) {}
+    }
+    function showLinkConfirm(mcName) {
+      const card = document.getElementById("link-confirm-card");
+      if (!card.hidden) return;
+      document.getElementById("link-mc-name").textContent = mcName;
+      card.hidden = false;
+      const respond = async (accept) => {
+        const fd = new FormData();
+        fd.append("accept", accept ? "true" : "false");
+        await fetch(`/api/minecraft/link-confirm?user_id=${userId}`, { method: "POST", body: fd }).catch(() => {});
+        card.hidden = true;
+        loadConnect();
+      };
+      document.getElementById("link-yes").addEventListener("click", () => respond(true), { once: true });
+      document.getElementById("link-no").addEventListener("click", () => respond(false), { once: true });
     }
 
     // Live push channel -- same /ws feed the Hub uses. The 10s poll below
@@ -87,6 +250,10 @@
         ws.onmessage = (e) => {
           let msg;
           try { msg = JSON.parse(e.data); } catch { return; }
+          if (msg.type === "MinecraftLinkRequested" && msg.data && msg.data.user_id === userId) {
+            showLinkConfirm(msg.data.minecraft_username);
+            return;
+          }
           if (["MinecraftPresence", "WorldStateAdvanced", "AwardGranted", "MissionCompleted"].includes(msg.type)) loadData();
         };
         ws.onclose = () => { setTimeout(open, retryMs); retryMs = Math.min(retryMs * 2, 15000); };
@@ -121,6 +288,12 @@
     async function loadData() {
       if (!userId) return;
       loadWorldAndPresence();
+      // Quests are Basin content: revealed only once Minecraft is linked
+      // (BUILD_PLAN_2 §4).
+      try {
+        const link = await fetch(`/api/minecraft/link/${userId}`).then(r => r.json());
+        document.getElementById("quest-card").hidden = !link.linked;
+      } catch (e) {}
       try {
         const missions = await fetch(`/api/missions?user_id=${userId}`).then(r => r.json());
         const m = (missions.missions || [])[0];

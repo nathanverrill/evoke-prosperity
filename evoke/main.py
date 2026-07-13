@@ -2,6 +2,7 @@ import os
 import json
 import datetime
 import asyncio
+import random
 import uuid
 from typing import Optional, List
 from fastapi import FastAPI, HTTPException, File, UploadFile, Form, Depends, Response, Request, WebSocket, WebSocketDisconnect
@@ -221,6 +222,47 @@ async def startup():
                    SELECT id, %s, %s FROM mc_quests WHERE title = %s
                    ON CONFLICT (quest_id, objective) DO NOTHING""",
                 (objective, threshold, quest_title)
+            )
+
+        # Wave 3 (BUILD_PLAN_2.md): admin-configurable stages, daily
+        # reflections (Words of Wisdom), phone pairing tokens, and the
+        # two-channel Minecraft link codes.
+        # Stage is instructor pedagogy config, not LMS data -- lives on
+        # EVOKE's side of the sync and defaults to the mission's week so a
+        # fresh install has a sensible grouping without any admin work.
+        db_execute("ALTER TABLE missions ADD COLUMN IF NOT EXISTS stage INTEGER")
+        db_execute("UPDATE missions SET stage = week WHERE stage IS NULL")
+        db_execute("""CREATE TABLE IF NOT EXISTS daily_reflections (
+            id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+            user_id UUID NOT NULL REFERENCES users(id),
+            reflection_date DATE NOT NULL DEFAULT CURRENT_DATE,
+            text TEXT NOT NULL,
+            wisdom TEXT,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            UNIQUE(user_id, reflection_date)
+        )""")
+        db_execute("""CREATE TABLE IF NOT EXISTS pairing_tokens (
+            token UUID PRIMARY KEY,
+            user_id UUID NOT NULL REFERENCES users(id),
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            used_at TIMESTAMP
+        )""")
+        db_execute("""CREATE TABLE IF NOT EXISTS mc_link_codes (
+            code INTEGER PRIMARY KEY,
+            user_id UUID NOT NULL REFERENCES users(id),
+            minecraft_username VARCHAR(255),
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            resolved_at TIMESTAMP,
+            status VARCHAR(16) NOT NULL DEFAULT 'waiting'
+        )""")
+
+        # Completing the Aqueduct Kit delivers a real in-world trophy for
+        # linked players (a conduit — the most water-alive block in the
+        # game) through the same tier-keyed reward pipeline as everything.
+        if not db_fetch_one("SELECT 1 FROM mc_reward_catalog WHERE tier = 'kit'"):
+            db_execute(
+                """INSERT INTO mc_reward_catalog (campaign_id, tier, reward_type, reward, reward_amount, persistent)
+                   SELECT id, 'kit', 'item', 'minecraft:conduit', 1, false FROM campaigns WHERE key = 'evoke-prosperity'"""
             )
 
     except Exception as e:
@@ -989,7 +1031,7 @@ async def admin_list_missions(user_id: str):
             raise HTTPException(status_code=404, detail="Organization not found")
 
         missions_data = db_fetch_all(
-            """SELECT id, title, week, sequence, arc, released_at
+            """SELECT id, title, week, sequence, arc, released_at, stage
                FROM missions WHERE campaign_id = %s::uuid ORDER BY week, sequence""",
             (org_result[0],)
         )
@@ -997,6 +1039,7 @@ async def admin_list_missions(user_id: str):
             "id": str(m[0]), "title": m[1], "week": m[2], "sequence": m[3], "arc": m[4],
             "released": m[5] is not None,
             "released_at": m[5].isoformat() if m[5] else None,
+            "stage": m[6],
         } for m in missions_data]}
     except HTTPException:
         raise
@@ -1249,6 +1292,25 @@ async def submit_evidence(
         # disagree in real cases (e.g. mission-09's primary tag, Courage, is
         # a Creative Visionary Power despite that mission being headlined
         # "Empathetic Changemaker").
+        # Stage completion (BUILD_PLAN_2 §3): if this first submission just
+        # closed out its stage's ring, say so everywhere — the chapter-level
+        # celebration GAPS.md flags as missing.
+        stage_row = db_fetch_one("SELECT stage, week FROM missions WHERE id = %s::uuid", (mission_id,))
+        if stage_row:
+            the_stage = stage_row[0] or stage_row[1] or 1
+            remaining = db_fetch_one(
+                """SELECT COUNT(*) FROM missions m
+                   WHERE COALESCE(m.stage, m.week, 1) = %s
+                     AND m.campaign_id = (SELECT campaign_id FROM missions WHERE id = %s::uuid)
+                     AND NOT EXISTS (SELECT 1 FROM submissions s
+                                     WHERE s.user_id = %s::uuid AND s.mission_id = m.id)""",
+                (the_stage, mission_id, user_id)
+            )
+            if remaining and remaining[0] == 0:
+                await publish_event("StageCompleted", {
+                    "user_id": user_id, "stage": the_stage,
+                })
+
         mission_tags = db_fetch_one(
             "SELECT primary_skill, secondary_skill FROM missions WHERE id = %s::uuid", (mission_id,)
         )
@@ -2143,11 +2205,25 @@ async def companion_info(request: Request):
 
 
 @app.get("/api/companion/qr.svg")
-async def companion_qr(request: Request):
+async def companion_qr(request: Request, user_id: Optional[str] = None):
     import io
     import qrcode
     import qrcode.image.svg
-    img = qrcode.make(_companion_url(request), image_factory=qrcode.image.svg.SvgPathImage, box_size=12)
+    url = _companion_url(request)
+    if user_id:
+        # Pairing token (BUILD_PLAN_2 §7): the QR registers the phone as
+        # the logged-in web user, no login. Single-use, 10-min expiry,
+        # a fresh token per render.
+        token = str(uuid.uuid4())
+        try:
+            db_execute(
+                "INSERT INTO pairing_tokens (token, user_id) VALUES (%s::uuid, %s::uuid)",
+                (token, user_id)
+            )
+            url += f"?pair={token}"
+        except Exception as e:
+            logger.warning(f"Pairing token mint failed (QR stays unpaired): {e}")
+    img = qrcode.make(url, image_factory=qrcode.image.svg.SvgPathImage, box_size=12)
     buf = io.BytesIO()
     img.save(buf)
     return Response(content=buf.getvalue(), media_type="image/svg+xml")
@@ -2392,6 +2468,353 @@ async def admin_cohort(user_id: str):
         raise
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))
+
+
+# ========== Stages & the Campaign Map (BUILD_PLAN_2 §2-3) ==========
+TIER_RANK = {"common": 1, "epic": 2, "legendary": 3}
+STAGE_STARS = {1: "★", 2: "★★", 3: "★★★"}
+
+
+@app.post("/api/admin/missions/{mission_id}/stage")
+async def admin_set_stage(mission_id: str, stage: int = Form(...)):
+    """Stages are instructor pedagogy config (Nathan's decision: cadence
+    must flex with classes/workshops), decoupled from the LMS week the
+    stage column defaults to. Same unprotected-dev status as /api/admin."""
+    if stage < 1 or stage > 24:
+        raise HTTPException(status_code=400, detail="Stage must be 1-24")
+    db_execute("UPDATE missions SET stage = %s WHERE id = %s::uuid", (stage, mission_id))
+    return {"status": "ok", "stage": stage}
+
+
+@app.get("/api/progress-map/{user_id}")
+async def progress_map(user_id: str):
+    """The 'what done means' infographic's data: missions grouped by
+    admin-configured stage; per stage a completion ring (submitted/total)
+    and a quality grade (MIN best-tier across submitted missions -- a
+    stage is as strong as its weakest evidence, which is what makes
+    resubmission legible). Quests attach per-mission only when the learner
+    is Minecraft-linked (BUILD_PLAN_2 §4)."""
+    try:
+        org_row = db_fetch_one(
+            "SELECT o.active_campaign_id FROM organizations o JOIN users u ON u.org_id = o.id WHERE u.id = %s::uuid",
+            (user_id,)
+        )
+        if not org_row:
+            raise HTTPException(status_code=404, detail="Organization not found")
+
+        linked = bool(db_fetch_one(
+            "SELECT 1 FROM minecraft_links WHERE user_id = %s::uuid", (user_id,)
+        ))
+
+        rows = db_fetch_all(
+            """SELECT m.id, m.title, m.week, m.stage, m.released_at IS NOT NULL AS released,
+                      (SELECT MAX(CASE a.tier WHEN 'legendary' THEN 3 WHEN 'epic' THEN 2 ELSE 1 END)
+                         FROM awards a WHERE a.user_id = %s::uuid AND a.mission_id = m.id) AS best_rank,
+                      EXISTS(SELECT 1 FROM submissions s WHERE s.user_id = %s::uuid AND s.mission_id = m.id) AS submitted
+               FROM missions m WHERE m.campaign_id = %s::uuid
+               ORDER BY m.stage NULLS LAST, m.week, m.sequence""",
+            (user_id, user_id, org_row[0])
+        )
+
+        quest_rows = {}
+        if linked:
+            for qid, mission_id_q, title, done in db_fetch_all(
+                """SELECT q.id, q.mission_id, q.title,
+                          EXISTS(SELECT 1 FROM mc_quest_completions c WHERE c.quest_id = q.id AND c.user_id = %s::uuid)
+                   FROM mc_quests q WHERE q.mission_id IS NOT NULL""",
+                (user_id,)
+            ):
+                quest_rows[str(mission_id_q)] = {"quest_id": str(qid), "title": title, "done": done}
+
+        stages = {}
+        for mid, title, week, stage, released, best_rank, submitted in rows:
+            stage = stage or week or 1
+            s = stages.setdefault(stage, {"stage": stage, "missions": []})
+            s["missions"].append({
+                "id": str(mid), "title": title, "week": week,
+                "released": released, "submitted": bool(submitted),
+                "best_tier_rank": best_rank,
+                "quest": quest_rows.get(str(mid)),
+            })
+
+        out = []
+        for stage in sorted(stages):
+            s = stages[stage]
+            total = len(s["missions"])
+            done = sum(1 for m in s["missions"] if m["submitted"])
+            submitted_ranks = [m["best_tier_rank"] for m in s["missions"] if m["submitted"] and m["best_tier_rank"]]
+            grade_rank = min(submitted_ranks) if submitted_ranks else 0
+            out.append({
+                **s,
+                "total": total,
+                "completed": done,
+                "pct": round(done * 100 / total) if total else 0,
+                "complete": total > 0 and done == total,
+                "grade": STAGE_STARS.get(grade_rank),
+                "grade_rank": grade_rank,
+            })
+        return {
+            "user_id": user_id,
+            "minecraft_linked": linked,
+            "stages": out,
+            "stages_complete": sum(1 for s in out if s["complete"]),
+            "stages_total": len(out),
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+# ========== Field Report / Words of Wisdom (BUILD_PLAN_2 §6) ==========
+WISDOM_FALLBACKS = [
+    "Every drop counts. Even the small ones.",
+    "The mountain doesn't move for anyone. Water finds a way around it anyway.",
+    "Budget today's water so tomorrow still exists.",
+    "Assets create value long after they're built. So does showing up.",
+]
+
+
+@app.post("/api/reflection")
+async def post_reflection(user_id: str, text: str = Form(...)):
+    """The daily Field Report: one reflection a day, answered with a Word
+    of Wisdom in B1llbot's voice. Doubles as the daily check-in (grants
+    that XP if today's hasn't happened) and, at 10 lifetime reflections,
+    unlocks the Transformation Power (skills_framework.BEHAVIORAL_POWERS,
+    approved trigger)."""
+    text = text.strip()
+    if not text:
+        raise HTTPException(status_code=400, detail="Say something — even one line")
+    already = db_fetch_one(
+        "SELECT wisdom FROM daily_reflections WHERE user_id = %s::uuid AND reflection_date = CURRENT_DATE",
+        (user_id,)
+    )
+    if already:
+        return {"status": "already_filed", "wisdom": already[0]}
+
+    wisdom = None
+    try:
+        async with httpx.AsyncClient() as client:
+            response = await client.post(
+                f"{OPENWEBUI_URL}/api/chat/completions",
+                headers={"Authorization": f"Bearer {OPENWEBUI_API_KEY}"} if OPENWEBUI_API_KEY else {},
+                json={"model": "billbot", "messages": [{
+                    "role": "user",
+                    "content": ("An Agent files their daily field report with you. It says: "
+                                f"\"{text[:600]}\" — Reply with ONE short word of wisdom in your own voice, "
+                                "1-2 sentences, no preamble, that honors what they said."),
+                }]},
+                timeout=90,
+            )
+            if response.status_code == 200:
+                wisdom = response.json().get("choices", [{}])[0].get("message", {}).get("content") or None
+    except Exception as e:
+        logger.warning(f"Wisdom generation failed: {e}")
+    if not wisdom:
+        wisdom = random.choice(WISDOM_FALLBACKS)
+
+    db_execute(
+        "INSERT INTO daily_reflections (user_id, text, wisdom) VALUES (%s::uuid, %s, %s) ON CONFLICT DO NOTHING",
+        (user_id, text, wisdom)
+    )
+
+    # Doubles as the daily check-in (same XP, never double-granted).
+    checked = db_fetch_one(
+        "SELECT 1 FROM checkins WHERE user_id = %s::uuid AND checkin_date = CURRENT_DATE", (user_id,)
+    )
+    if not checked:
+        db_execute(
+            "INSERT INTO checkins (user_id, checkin_date) VALUES (%s::uuid, CURRENT_DATE) ON CONFLICT DO NOTHING",
+            (user_id,)
+        )
+        await publish_event("XPGranted", {"user_id": user_id, "amount": 10, "reason": "field_report"})
+
+    count = db_fetch_one(
+        "SELECT COUNT(*) FROM daily_reflections WHERE user_id = %s::uuid", (user_id,)
+    )[0]
+    threshold = skills_framework.BEHAVIORAL_POWERS["Transformation"]["threshold"]
+    if count == threshold:
+        await publish_event("BadgeAwarded", {
+            "user_id": user_id,
+            "badge_key": skills_framework.POWER_TO_QUALITY["Transformation"],
+            "power_key": "Transformation",
+            "tag_type": "behavioral",
+            "mission_id": None,
+        })
+
+    return {"status": "filed", "wisdom": wisdom, "reflections_total": count}
+
+
+@app.get("/api/reflections/{user_id}")
+async def get_reflections(user_id: str, limit: int = 60):
+    rows = db_fetch_all(
+        """SELECT reflection_date, text, wisdom FROM daily_reflections
+           WHERE user_id = %s::uuid ORDER BY reflection_date DESC LIMIT %s""",
+        (user_id, limit)
+    )
+    today = db_fetch_one(
+        "SELECT 1 FROM daily_reflections WHERE user_id = %s::uuid AND reflection_date = CURRENT_DATE",
+        (user_id,)
+    )
+    return {
+        "filed_today": bool(today),
+        "total": len(rows),
+        "journal": [{"date": r[0].isoformat(), "text": r[1], "wisdom": r[2]} for r in rows],
+    }
+
+
+# ========== Phone pairing (BUILD_PLAN_2 §7) ==========
+@app.post("/api/companion/pair")
+async def companion_pair(token: str = Form(...)):
+    """Exchange a one-time QR pairing token (minted by the QR endpoint for
+    the logged-in web user) for that user's identity — the phone is
+    registered without a login. Single-use, 10-minute expiry."""
+    row = db_fetch_one(
+        """SELECT p.user_id, u.display_name, u.email, p.used_at, p.created_at
+           FROM pairing_tokens p JOIN users u ON u.id = p.user_id WHERE p.token = %s::uuid""",
+        (token,)
+    )
+    if not row:
+        raise HTTPException(status_code=404, detail="Unknown pairing code — rescan from the Hub")
+    user_id, display_name, email, used_at, created_at = row
+    if used_at is not None:
+        raise HTTPException(status_code=410, detail="That QR was already used — rescan a fresh one from the Hub")
+    if (datetime.datetime.now() - created_at).total_seconds() > 600:
+        raise HTTPException(status_code=410, detail="That QR expired — rescan a fresh one from the Hub")
+    db_execute("UPDATE pairing_tokens SET used_at = CURRENT_TIMESTAMP WHERE token = %s::uuid", (token,))
+    return {"user_id": str(user_id), "display_name": display_name, "email": email}
+
+
+# ========== Two-channel Minecraft linking (BUILD_PLAN_2 §8) ==========
+@app.post("/api/minecraft/link-code")
+async def create_link_code(user_id: str):
+    """Mint a short numeric code the learner types in-game as
+    `/trigger evoke_link set <code>`. The bridge watches the trigger
+    scoreboard, matches the code, and the phone confirms — two-channel
+    possession proof (web session + in-game presence)."""
+    db_execute(
+        "DELETE FROM mc_link_codes WHERE user_id = %s::uuid AND status = 'waiting'", (user_id,)
+    )
+    for _ in range(20):
+        code = random.randint(1000, 9999)
+        try:
+            db_execute(
+                "INSERT INTO mc_link_codes (code, user_id) VALUES (%s, %s::uuid)",
+                (code, user_id)
+            )
+            return {"code": code, "command": f"/trigger evoke_link set {code}", "expires_in_s": 600}
+        except Exception:
+            continue  # code collision — try another
+    raise HTTPException(status_code=500, detail="Couldn't mint a code, try again")
+
+
+@app.get("/api/minecraft/link-request/{user_id}")
+async def get_link_request(user_id: str):
+    """The pending in-game match (bridge saw the code typed) awaiting the
+    phone's confirm — polled by the Field Kit alongside the live push."""
+    row = db_fetch_one(
+        """SELECT code, minecraft_username FROM mc_link_codes
+           WHERE user_id = %s::uuid AND status = 'matched' ORDER BY created_at DESC LIMIT 1""",
+        (user_id,)
+    )
+    if not row:
+        return {"pending": False}
+    return {"pending": True, "code": row[0], "minecraft_username": row[1]}
+
+
+@app.post("/api/minecraft/link-confirm")
+async def confirm_link(user_id: str, accept: bool = Form(...)):
+    row = db_fetch_one(
+        """SELECT code, minecraft_username FROM mc_link_codes
+           WHERE user_id = %s::uuid AND status = 'matched' ORDER BY created_at DESC LIMIT 1""",
+        (user_id,)
+    )
+    if not row:
+        raise HTTPException(status_code=404, detail="No pending link request")
+    code, mc_username = row
+    if not accept:
+        db_execute("UPDATE mc_link_codes SET status = 'denied', resolved_at = CURRENT_TIMESTAMP WHERE code = %s", (code,))
+        return {"status": "denied"}
+    db_execute(
+        """INSERT INTO minecraft_links (user_id, server_id, minecraft_username)
+           VALUES (%s::uuid, 'default', %s)
+           ON CONFLICT (user_id, server_id) DO UPDATE SET minecraft_username = EXCLUDED.minecraft_username""",
+        (user_id, mc_username)
+    )
+    db_execute("UPDATE mc_link_codes SET status = 'confirmed', resolved_at = CURRENT_TIMESTAMP WHERE code = %s", (code,))
+    await publish_event("MinecraftLinked", {"user_id": user_id, "minecraft_username": mc_username})
+    return {"status": "linked", "minecraft_username": mc_username}
+
+
+# ========== Aqueduct Kit (BUILD_PLAN_2 §5) ==========
+# 10 components, one per major surface, auto-collected by visiting. The
+# collection mechanic doubles as navigation training: it rewards seeing
+# every screen once.
+KIT_PIECES = {
+    "intake": "Intake Screen", "basin": "Settling Basin", "sand": "Sand Bed",
+    "charcoal": "Charcoal Layer", "membrane": "Membrane", "valve": "Valve",
+    "gauge": "Pressure Gauge", "pipes": "Pipe Run", "spout": "Spout", "cap": "Reservoir Cap",
+}
+KIT_COMPLETE_XP = 100
+
+
+@app.post("/api/minigames/kit/piece")
+async def collect_kit_piece(user_id: str, piece: str = Form(...)):
+    if piece not in KIT_PIECES:
+        raise HTTPException(status_code=404, detail="No such component")
+    game_key = f"kit:{piece}"
+    already = db_fetch_one(
+        "SELECT 1 FROM minigame_scores WHERE user_id = %s::uuid AND game_key = %s LIMIT 1",
+        (user_id, game_key)
+    )
+    newly = not already
+    if newly:
+        db_execute(
+            "INSERT INTO minigame_scores (user_id, game_key, score) VALUES (%s::uuid, %s, 1)",
+            (user_id, game_key)
+        )
+    rows = db_fetch_all(
+        "SELECT DISTINCT game_key FROM minigame_scores WHERE user_id = %s::uuid AND game_key LIKE 'kit:%%'",
+        (user_id,)
+    )
+    found = sorted(r[0].split(":", 1)[1] for r in rows if r[0] != "kit:complete")
+    completed_now = False
+    if len(found) == len(KIT_PIECES):
+        done_row = db_fetch_one(
+            "SELECT 1 FROM minigame_scores WHERE user_id = %s::uuid AND game_key = 'kit:complete' LIMIT 1",
+            (user_id,)
+        )
+        if not done_row:
+            db_execute(
+                "INSERT INTO minigame_scores (user_id, game_key, score) VALUES (%s::uuid, 'kit:complete', 1)",
+                (user_id,)
+            )
+            await publish_event("XPGranted", {"user_id": user_id, "amount": KIT_COMPLETE_XP, "reason": "aqueduct_kit"})
+            if db_fetch_one("SELECT 1 FROM minecraft_links WHERE user_id = %s::uuid", (user_id,)):
+                await publish_event("RewardCollected", {
+                    "award_id": str(uuid.uuid4()), "user_id": user_id,
+                    "mission_id": None, "tier": "kit",
+                })
+            completed_now = True
+    return {
+        "new": newly, "piece": piece, "piece_name": KIT_PIECES[piece],
+        "found": found, "total": len(KIT_PIECES), "completed_now": completed_now,
+        "complete": len(found) == len(KIT_PIECES),
+    }
+
+
+@app.get("/api/minigames/kit/{user_id}")
+async def kit_progress(user_id: str):
+    rows = db_fetch_all(
+        "SELECT DISTINCT game_key FROM minigame_scores WHERE user_id = %s::uuid AND game_key LIKE 'kit:%%'",
+        (user_id,)
+    )
+    keys = {r[0].split(":", 1)[1] for r in rows}
+    found = sorted(k for k in keys if k != "complete")
+    return {
+        "found": found, "total": len(KIT_PIECES),
+        "pieces": KIT_PIECES, "complete": len(found) == len(KIT_PIECES),
+    }
 
 
 # ========== Identity: avatars & Agent Sigils ==========

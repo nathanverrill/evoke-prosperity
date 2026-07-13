@@ -57,7 +57,7 @@ Evoke.screens.welcome = async function welcome() {
 
 Evoke.screens.hub = async function hub() {
   const { api, state, mount } = Evoke;
-  const [missionsRes, notifRes, activityRes, checkinRes, mcLink, mcConnect, world, mcStatus, companion] = await Promise.all([
+  const [missionsRes, notifRes, activityRes, checkinRes, mcLink, mcConnect, world, mcStatus, companion, reflections, progressMap] = await Promise.all([
     api.missions(state.userId),
     api.notifications(state.userId).catch(() => ({ notifications: [] })),
     api.activity(20).catch(() => ({ activity: [] })),
@@ -67,7 +67,10 @@ Evoke.screens.hub = async function hub() {
     api.worldState().catch(() => null),
     api.minecraftStatus().catch(() => null),
     api.companionInfo().catch(() => null),
+    api.reflections(state.userId).catch(() => ({ filed_today: false, journal: [] })),
+    api.progressMap(state.userId).catch(() => null),
   ]);
+  Evoke.kit?.visit("intake");
   const missions = missionsRes.missions || [];
   const profile = state.profile;
   const completedCount = (profile && profile.missions_completed_count) || 0;
@@ -93,36 +96,42 @@ Evoke.screens.hub = async function hub() {
   const guideKey = `evoke_hub_guide_dismissed_${state.userId}`;
   const showGuide = !localStorage.getItem(guideKey);
 
-  // Keel Restoration meter -- the collective world-state (the class's
-  // combined effort, not personal progress). Segment per stage; the fill
-  // animates via CSS width transition on live updates.
-  const worldSection = world ? (() => {
-    const pct = Math.round((world.stage / world.total_stages) * 100);
-    const remaining = world.next_stage_at !== null ? world.next_stage_at - world.completions : null;
-    return `
-      <section class="card world-meter" id="world-meter">
-        <div class="card__eyebrow">Keel Restoration — the whole cohort's work</div>
-        <div class="row-between">
-          <h2 class="card__title">Stage ${world.stage}: ${Evoke.escapeHtml(world.current.title)}</h2>
-          <span class="empty-state">${world.completions} mission log${world.completions === 1 ? "" : "s"} banked</span>
-        </div>
-        <p class="world-meter__narrative">${Evoke.escapeHtml(world.current.narrative)}</p>
-        <div class="world-meter__track">
-          <div class="world-meter__fill" style="width:${pct}%"></div>
-          ${world.stages.slice(1).map((s, i) => `
-            <span class="world-meter__tick ${world.stage > i ? "is-reached" : ""}"
-                  style="left:${((i + 1) / world.total_stages) * 100}%"
-                  title="Stage ${i + 1}: ${Evoke.escapeHtml(s.title)}"></span>
-          `).join("")}
-        </div>
-        <p class="empty-state" style="margin-top:var(--space-2)">
-          ${world.stage >= world.total_stages
-            ? "The water has risen. Keel prospers — and every mission log helped."
-            : `${remaining} more mission log${remaining === 1 ? "" : "s"} from the cohort until Stage ${world.stage + 1}: ${Evoke.escapeHtml(world.stages[world.stage + 1].title)} — it changes the Basin Simulation world too.`}
-        </p>
-      </section>
-    `;
-  })() : "";
+  // Order of importance (BUILD_PLAN_2 §1): the learner's own next action
+  // leads; the cohort world-state compresses to a one-line strip linking
+  // to the Campaign Map, where the full pipeline lives now.
+  const worldStrip = world ? `
+    <a class="world-strip" href="#/map" title="Open the Campaign Map">
+      <span class="card__eyebrow">Keel Restoration</span>
+      <span class="world-strip__stage">Stage ${world.stage}: ${Evoke.escapeHtml(world.current.title)}</span>
+      <span class="world-meter__track world-strip__track"><span class="world-meter__fill" style="width:${Math.round((world.stage / world.total_stages) * 100)}%"></span></span>
+      <span class="empty-state">Campaign Map →</span>
+    </a>
+  ` : "";
+
+  // Daily Field Report (Words of Wisdom) -- the check-in as a reflection.
+  const fieldReportCard = reflections.filed_today
+    ? `<section class="card" id="field-report">
+         <div class="card__eyebrow">Field Report — filed today ✓</div>
+         ${reflections.journal[0] && reflections.journal[0].wisdom ? `<p class="wisdom-line">“${Evoke.escapeHtml(reflections.journal[0].wisdom)}” <span class="empty-state">— B1llbot</span></p>` : `<p class="empty-state">See your Wisdom Journal on the Dossier.</p>`}
+       </section>`
+    : `<section class="card" id="field-report">
+         <div class="card__eyebrow">Daily Field Report — what did you do today?</div>
+         <form id="reflection-form" class="row">
+           <input type="text" id="reflection-text" placeholder="One line. What you did, or what you're thinking about." style="flex:1" maxlength="600">
+           <button type="submit" class="btn btn-primary">File It</button>
+         </form>
+         <p id="reflection-status" class="empty-state" style="margin-top:var(--space-2)">B1llbot answers every report with a word of wisdom — they collect in your journal.</p>
+       </section>`;
+
+  // Compact personal progress strip: my stages at a glance -> Campaign Map.
+  const myMapStrip = progressMap ? `
+    <a class="map-strip" href="#/map">
+      ${progressMap.stages.map(s => `
+        <span class="map-strip__node ${s.complete ? "is-complete" : (s.completed ? "is-partial" : "")}" title="Stage ${s.stage}: ${s.completed}/${s.total}${s.grade ? " · " + s.grade : ""}">${s.stage}</span>
+      `).join("")}
+      <span class="empty-state">My campaign: ${progressMap.stages_complete}/${progressMap.stages_total} stages done — what does done mean? →</span>
+    </a>
+  ` : "";
 
   const presenceCard = (() => {
     const online = mcStatus && mcStatus.server_online;
@@ -146,21 +155,22 @@ Evoke.screens.hub = async function hub() {
   const fieldKitCard = companion ? `
     <div class="card" id="fieldkit-card">
       <div class="card__eyebrow">Field Kit — your phone</div>
-      <div class="fieldkit-qr"><img src="/api/companion/qr.svg" alt="QR code to the Companion Field Kit"></div>
+      <div class="fieldkit-qr"><img src="/api/companion/qr.svg?user_id=${state.userId}" alt="QR code to the Companion Field Kit"></div>
       <p class="empty-state">${companion.scannable
-        ? "Scan to open the Companion on your phone — quests, awards, and B1llbot from the field."
+        ? "Scan to open your Field Kit — it registers your phone as you automatically (no login). Daily field reports, Basin linking, quests, and B1llbot from the field."
         : "Open this site from your machine's LAN IP (not localhost) and this QR becomes scannable from your phone."}</p>
     </div>
   ` : "";
 
   mount(`
+    <div class="stack">
+    ${worldStrip}
     <div class="hub-layout">
       <div class="stack">
-        ${worldSection}
         ${showGuide ? `
           <section class="card" id="hub-guide">
             <div class="card__eyebrow">Orientation</div>
-            <p><strong>Now</strong> — your next open mission. <strong>Mission Board</strong> — everything in this campaign; locked cards open when your instructor releases them. <strong>Feed</strong> — what the rest of your cohort is up to. <strong>Basin Simulation</strong> — the optional Minecraft world, in the sidebar.</p>
+            <p><strong>Now</strong> — your next action, always first. <strong>Campaign Map</strong> — the whole experience and what done means. <strong>Story</strong> — the graphic novel. <strong>Cohort</strong> — everyone's work and the live feed. <strong>Field Ops</strong> — the optional Basin Simulation (Minecraft) and Training sims. <strong>Dossier</strong> — who you are.</p>
             <button class="btn" id="hub-guide-dismiss">Got it</button>
           </section>
         ` : ""}
@@ -176,6 +186,9 @@ Evoke.screens.hub = async function hub() {
           <p style="margin-top:var(--space-3)">${completedCount}/12 missions complete · ${pendingAwards.length} pending award${pendingAwards.length === 1 ? "" : "s"}</p>
           ${checkinLine ? `<p class="empty-state" style="margin-top:var(--space-2)">${checkinLine}</p>` : ""}
         </section>
+
+        ${fieldReportCard}
+        ${myMapStrip}
 
         <section>
           <h2 class="section-title">Mission Board</h2>
@@ -242,7 +255,26 @@ Evoke.screens.hub = async function hub() {
         </div>
       </aside>
     </div>
+    </div>
   `);
+
+  document.getElementById("reflection-form")?.addEventListener("submit", async (e) => {
+    e.preventDefault();
+    const textEl = document.getElementById("reflection-text");
+    const statusEl = document.getElementById("reflection-status");
+    const text = textEl.value.trim();
+    if (!text) return;
+    statusEl.textContent = "Filing… B1llbot is thinking (can take ~20s).";
+    try {
+      const res = await api.postReflection(state.userId, text);
+      document.getElementById("field-report").innerHTML = `
+        <div class="card__eyebrow">Field Report — filed ✓</div>
+        <p class="wisdom-line">“${Evoke.escapeHtml(res.wisdom)}” <span class="empty-state">— B1llbot</span></p>
+      `;
+    } catch (err) {
+      statusEl.textContent = "Couldn't file that just now — try again in a moment.";
+    }
+  });
 
   document.querySelectorAll("#mc-connect-card [data-copy]").forEach(btn => {
     btn.addEventListener("click", () => {
@@ -277,6 +309,7 @@ Evoke.screens.hub = async function hub() {
 
 Evoke.screens.novel = async function novel() {
   const { mount, state, api } = Evoke;
+  Evoke.kit?.visit("sand");
   let manifest;
   try {
     manifest = await fetch("content/chapters.json").then(r => r.json());
@@ -349,9 +382,10 @@ Evoke.screens.novel = async function novel() {
 
 Evoke.screens.missionBrief = async function missionBrief(missionId) {
   const { api, state, mount } = Evoke;
-  const [missionsRes, timeline] = await Promise.all([
+  const [missionsRes, timeline, mcLink] = await Promise.all([
     api.missions(state.userId),
     api.timeline(state.userId, missionId).catch(() => null),
+    api.minecraftLink(state.userId).catch(() => ({ linked: false })),
   ]);
   const mission = (missionsRes.missions || []).find(m => m.id === missionId);
   if (!mission) { mount(`<div class="card"><p>Mission not found.</p></div>`); return; }
@@ -398,13 +432,18 @@ Evoke.screens.missionBrief = async function missionBrief(missionId) {
         <p>${Evoke.escapeHtml(mission.brief || "No brief text yet.").replace(/\n/g, "<br>")}</p>
       </div>
 
-      ${mission.quest ? `
+      ${mission.quest && mcLink.linked ? `
         <div class="quest-card">
           <div class="quest-card__eyebrow">Optional — Basin Simulation</div>
           <strong>${Evoke.escapeHtml(mission.quest.title)}</strong>
           <p>${Evoke.escapeHtml(mission.quest.description || "")}</p>
         </div>
-      ` : ""}
+      ` : (mission.quest ? `
+        <div class="quest-card">
+          <div class="quest-card__eyebrow">Basin telemetry offline</div>
+          <p class="empty-state">This mission has an optional Basin Simulation quest — connect Minecraft from your Field Kit to reveal it. <a href="#/faq">How? →</a></p>
+        </div>
+      ` : "")}
 
       ${(() => {
         // Revise-and-resubmit is a visible, welcomed path (GAPS.md #3), not
@@ -458,6 +497,7 @@ Evoke.screens.missionBrief = async function missionBrief(missionId) {
 
 Evoke.screens.missionDebrief = async function missionDebrief(missionId, targetUserIdParam) {
   const { api, state, mount } = Evoke;
+  Evoke.kit?.visit("pipes");
   const targetUserId = targetUserIdParam || state.userId;
   const isOwn = targetUserId === state.userId;
 
@@ -576,6 +616,7 @@ Evoke.screens.missionDebrief = async function missionDebrief(missionId, targetUs
 
 Evoke.screens.gallery = async function gallery() {
   const { api, mount } = Evoke;
+  Evoke.kit?.visit("charcoal");
   // "Peers seeing each other's work" -- GAPS.md's #2 flagged social-layer
   // gap, the other half beyond the activity feed: the feed says something
   // happened, the gallery is where you can actually go look and react.
@@ -608,14 +649,17 @@ Evoke.screens.gallery = async function gallery() {
 Evoke.screens.playerProfile = async function playerProfile(userId) {
   const { api, state, mount } = Evoke;
   const id = userId || state.userId;
-  const [profile, achievementsRes, missionsRes, questsRes, mcStatus, gearRes] = await Promise.all([
+  const [profile, achievementsRes, missionsRes, questsRes, mcStatus, gearRes, kitRes, reflectionsRes] = await Promise.all([
     api.playerProfile(id),
     api.achievements(id).catch(() => ({ qualities: {}, powers: {} })),
     api.missions(id).catch(() => ({ missions: [] })),
     api.mcQuests().catch(() => ({ quests: [] })),
     api.minecraftStatus().catch(() => null),
     api.gear(id).catch(() => ({ gear: [], equipped: [], sigil: null, has_avatar: false })),
+    api.kitProgress(id).catch(() => ({ found: [], total: 10, complete: false, pieces: {} })),
+    api.reflections(id).catch(() => ({ journal: [], total: 0 })),
   ]);
+  Evoke.kit?.visit("valve");
   const badgeKeys = ["Empathetic Changemaker", "Systems Thinker", "Creative Visionary", "Deep Collaborator"];
   const powers = achievementsRes.powers || {};
 
@@ -811,8 +855,47 @@ Evoke.screens.playerProfile = async function playerProfile(userId) {
       </section>
 
       <section>
+        <h2 class="section-title">The Aqueduct</h2>
+        ${kitRes.complete ? `
+          <div class="card aqueduct is-assembled">
+            <div class="card__eyebrow">Assembled — all ${kitRes.total} components</div>
+            <div class="aqueduct__art" aria-hidden="true">
+              <span class="aqueduct__pipe"></span><span class="aqueduct__flow"></span>
+              <span class="aqueduct__glyphs">⚙ ▤ ≋ ▥ ◫ ◉ ⌸ ═ ⌵ ◍</span>
+            </div>
+            <p class="empty-state">Water moves because somebody built the thing that moves it. You found every component in the field.</p>
+          </div>
+        ` : `
+          <div class="card">
+            <div class="card__eyebrow">Aqueduct Kit — ${kitRes.found.length}/${kitRes.total} components</div>
+            <div class="row">
+              ${Object.entries(kitRes.pieces || {}).map(([k, name]) => `
+                <span class="kit-piece ${kitRes.found.includes(k) ? "is-found" : ""}" title="${Evoke.escapeHtml(name)}">${kitRes.found.includes(k) ? "⚙" : "·"}</span>
+              `).join("")}
+            </div>
+            <p class="empty-state" style="margin-top:var(--space-2)">Components are scattered across every screen of this app — recovered just by showing up. Keep exploring.</p>
+          </div>
+        `}
+      </section>
+
+      <section>
+        <h2 class="section-title">Wisdom Journal</h2>
+        <p class="empty-state">${reflectionsRes.total || 0} field report${(reflectionsRes.total || 0) === 1 ? "" : "s"} filed — ten unlocks the Transformation Power. Your daily reflections and B1llbot's answers.</p>
+        <div class="stack-sm">
+          ${(reflectionsRes.journal || []).slice(0, 14).map(j => `
+            <div class="card journal-entry">
+              <div class="card__eyebrow">${j.date}</div>
+              <p>${Evoke.escapeHtml(j.text)}</p>
+              ${j.wisdom ? `<p class="wisdom-line">"${Evoke.escapeHtml(j.wisdom)}" <span class="empty-state">— B1llbot</span></p>` : ""}
+            </div>
+          `).join("") || `<p class="empty-state">No reports yet — file your first from Now or your Field Kit.</p>`}
+        </div>
+      </section>
+
+      ${profile.minecraft_username ? `
+      <section>
         <h2 class="section-title">Field Ops Log — Basin Simulation</h2>
-        <p class="empty-state">${profile.quests_completed_count} of ${allQuests.length} logged. Self-reported, never graded, never required.</p>
+        <p class="empty-state">${profile.quests_completed_count} of ${allQuests.length} logged. Self-reported or world-observed, never graded, never required.</p>
         <div class="badge-wall">
           ${allQuests.length ? allQuests.map(q => {
             const completedAt = questCompletions[q.id];
@@ -825,6 +908,12 @@ Evoke.screens.playerProfile = async function playerProfile(userId) {
           }).join("") : `<p class="empty-state">No quests configured for this campaign yet.</p>`}
         </div>
       </section>
+      ` : `
+      <section class="card">
+        <div class="card__eyebrow">Basin telemetry offline</div>
+        <p class="empty-state">Connect your Minecraft account from your Field Kit to reveal the Field Ops Log. <a href="#/faq">How? →</a></p>
+      </section>
+      `}
     </div>
   `);
 
@@ -890,6 +979,7 @@ Evoke.screens.playerProfile = async function playerProfile(userId) {
 
 Evoke.screens.teamProfile = async function teamProfile(teamId) {
   const { api, mount } = Evoke;
+  Evoke.kit?.visit("spout");
   const [team, wheelRes] = await Promise.all([
     api.teamProfile(teamId),
     api.teamWheel(teamId).catch(() => ({ wheels: [], roster_size: 0 })),
@@ -1006,14 +1096,30 @@ Evoke.screens.admin = async function admin() {
             <div class="card__eyebrow">Week ${m.week} · ${m.arc}</div>
             <strong>${Evoke.escapeHtml(m.title)}</strong>
             <p class="empty-state">${m.released ? `Released ${new Date(m.released_at).toLocaleString()}` : "Not released"}</p>
-            <button class="btn ${m.released ? "" : "btn-primary"}" data-action="${m.released ? "unrelease" : "release"}" data-mission-id="${m.id}">
-              ${m.released ? "Unrelease" : "Release"}
-            </button>
+            <div class="row">
+              <button class="btn ${m.released ? "" : "btn-primary"}" data-action="${m.released ? "unrelease" : "release"}" data-mission-id="${m.id}">
+                ${m.released ? "Unrelease" : "Release"}
+              </button>
+              <label class="empty-state">Stage
+                <select data-stage-for="${m.id}">
+                  ${Array.from({length: 8}, (_, i) => i + 1).map(n => `<option value="${n}" ${((m.stage || m.week) === n) ? "selected" : ""}>${n}</option>`).join("")}
+                </select>
+              </label>
+            </div>
           </div>
         `).join("") || `<p class="empty-state">No missions synced yet.</p>`}
       </div>
     </div>
   `);
+
+  document.querySelectorAll("[data-stage-for]").forEach(sel => {
+    sel.addEventListener("change", async () => {
+      try {
+        await api.setStage(sel.dataset.stageFor, Number(sel.value));
+        Evoke.toast(`Stage updated — the Campaign Map regroups instantly.`);
+      } catch (e) { alert("Couldn't set stage: " + e.message); }
+    });
+  });
 
   document.querySelectorAll("[data-action]").forEach(btn => {
     btn.addEventListener("click", async () => {
@@ -1087,6 +1193,7 @@ Evoke.screens.billbot = async function billbot() {
 // model, it's just not built.
 Evoke.screens.vault = async function vault(missionId) {
   const { api, state, mount } = Evoke;
+  Evoke.kit?.visit("gauge");
   const [missionsRes, timeline, submission, awardsRes] = await Promise.all([
     api.missions(state.userId),
     api.timeline(state.userId, missionId).catch(() => ({ insights: [] })),
@@ -1150,4 +1257,130 @@ Evoke.screens.vault = async function vault(missionId) {
     </div>
   `);
   Evoke.signal?.bindNodes();
+};
+
+/* The Campaign Map — the concise "what done means" infographic
+   (BUILD_PLAN_2 §2-3): the whole experience as the Basin's pipeline. One
+   node per instructor-configured stage: a completion ring (100% = every
+   mission in the stage submitted) + a quality grade (★ submitted /
+   ★★ AI-strengthened / ★★★ teacher-honored — the MIN across the stage,
+   so upgrading your weakest mission visibly raises the grade). Basin
+   quests appear only once Minecraft is linked. */
+Evoke.screens.campaignMap = async function campaignMap() {
+  const { api, state, mount } = Evoke;
+  const [map, world] = await Promise.all([
+    api.progressMap(state.userId),
+    api.worldState().catch(() => null),
+  ]);
+  Evoke.kit?.visit("basin");
+  const TIER_NAME = { 1: "common", 2: "epic", 3: "legendary" };
+
+  mount(`
+    <div class="stack">
+      <div class="row-between">
+        <h1>Campaign Map</h1>
+        <span class="chip">${map.stages_complete}/${map.stages_total} STAGES DONE</span>
+      </div>
+
+      <div class="card">
+        <div class="card__eyebrow">What done means</div>
+        <p><strong>Submitted</strong> = the mission counts (<span class="award__tier" style="background:var(--tier-common);color:var(--color-text)">common</span>). <strong>AI-strengthened</strong> = <span class="award__tier" style="background:var(--tier-epic)">epic</span>. <strong>Teacher-honored</strong> = <span class="award__tier" style="background:var(--tier-legendary)">legendary</span>.</p>
+        <p>A stage is <strong>DONE</strong> when its ring closes — 100% of its missions submitted. Its <strong>GRADE</strong> (★ to ★★★) is your weakest mission's tier: strengthen and resubmit any mission to raise it. Quests and Training sims never gate anything — they're how agents get sharper.</p>
+      </div>
+
+      <div class="pipeline">
+        ${map.stages.map((s, i) => `
+          <div class="pipeline__segment ${s.complete ? "is-complete" : ""}">
+            <div class="stage-node ${s.complete ? "is-complete" : (s.completed ? "is-partial" : "")}">
+              <svg viewBox="0 0 44 44" class="stage-ring" aria-hidden="true">
+                <circle cx="22" cy="22" r="19" class="stage-ring__bg"/>
+                <circle cx="22" cy="22" r="19" class="stage-ring__fill"
+                        stroke-dasharray="${(s.pct / 100) * 119.4} 119.4" transform="rotate(-90 22 22)"/>
+              </svg>
+              <span class="stage-node__num">${s.stage}</span>
+            </div>
+            <div class="stage-node__label">
+              <strong>Stage ${s.stage}</strong> · ${s.completed}/${s.total}
+              ${s.grade ? `<span class="stage-grade">${s.grade}</span>` : ""}
+            </div>
+            <div class="stage-node__missions">
+              ${s.missions.map(m => `
+                <a class="stage-mission ${m.submitted ? "is-done" : (m.released ? "" : "is-locked")}"
+                   ${m.released || m.submitted ? `href="#/mission/${m.id}${m.submitted ? "/vault" : ""}"` : ""}
+                   title="${Evoke.escapeHtml(m.title)}${m.best_tier_rank ? " · best: " + TIER_NAME[m.best_tier_rank] : ""}">
+                  ${m.released || m.submitted ? "" : "🔒 "}${Evoke.escapeHtml(m.title)}
+                  ${m.best_tier_rank ? `<span class="award__tier" data-t="${TIER_NAME[m.best_tier_rank]}" style="background:var(--tier-${TIER_NAME[m.best_tier_rank]})${m.best_tier_rank === 1 ? ";color:var(--color-text)" : ""}">${TIER_NAME[m.best_tier_rank]}</span>` : ""}
+                  ${m.quest ? `<span class="stage-quest ${m.quest.done ? "is-done" : ""}" title="Basin quest: ${Evoke.escapeHtml(m.quest.title)}">⛏️${m.quest.done ? " ✔" : ""}</span>` : ""}
+                </a>
+              `).join("")}
+            </div>
+          </div>
+        `).join("")}
+      </div>
+
+      ${!map.minecraft_linked ? `
+        <div class="card">
+          <div class="card__eyebrow">Basin telemetry offline</div>
+          <p class="empty-state">Each stage also has an optional Basin Simulation quest — connect your Minecraft account from your Field Kit (scan the QR on Now) to reveal them here. <a href="#/faq">How do I connect? →</a></p>
+        </div>
+      ` : ""}
+
+      ${world ? `
+        <section class="card world-meter">
+          <div class="card__eyebrow">And the whole cohort together — Keel Restoration</div>
+          <div class="row-between">
+            <h2 class="card__title">Stage ${world.stage}: ${Evoke.escapeHtml(world.current.title)}</h2>
+            <span class="empty-state">${world.completions} mission logs banked</span>
+          </div>
+          <p class="world-meter__narrative">${Evoke.escapeHtml(world.current.narrative)}</p>
+          <div class="world-meter__track">
+            <div class="world-meter__fill" style="width:${Math.round((world.stage / world.total_stages) * 100)}%"></div>
+            ${world.stages.slice(1).map((s, i) => `
+              <span class="world-meter__tick ${world.stage > i ? "is-reached" : ""}"
+                    style="left:${((i + 1) / world.total_stages) * 100}%"
+                    title="Stage ${i + 1}: ${Evoke.escapeHtml(s.title)}"></span>
+            `).join("")}
+          </div>
+        </section>
+      ` : ""}
+    </div>
+  `);
+};
+
+/* FAQ — the connect-to-Basin instructions live inline in the Field Kit
+   flow AND here, per Nathan's spec. */
+Evoke.screens.faq = async function faq() {
+  const { api, mount } = Evoke;
+  const info = await api.minecraftConnectInfo().catch(() => null);
+  mount(`
+    <div class="stack">
+      <h1>FAQ</h1>
+
+      <div class="card">
+        <div class="card__eyebrow">How do I connect to the Basin Simulation (Minecraft)?</div>
+        <ol class="faq-steps">
+          <li><strong>Open your Field Kit</strong> on your phone — scan the QR code on the Now page. It registers you automatically.</li>
+          <li>Tap <strong>Connect to Basin Simulation</strong>. You'll get the server address and a 4-digit link code.</li>
+          <li>In Minecraft (Java or Bedrock), add a multiplayer server:${info ? `<br>Java: <code>${Evoke.escapeHtml(info.java_address)}</code> · Bedrock: <code>${Evoke.escapeHtml(info.bedrock_address)}</code>` : ""}</li>
+          <li>Join the world, then type in chat: <code>/trigger evoke_link set YOUR-CODE</code></li>
+          <li>Your Field Kit pops a confirmation — tap <strong>Confirm</strong>. Done: rewards, quests, and XP now flow between the Basin and your account.</li>
+        </ol>
+      </div>
+
+      <div class="card">
+        <div class="card__eyebrow">Do I have to play Minecraft?</div>
+        <p>No. The Basin Simulation is optional and never graded — every mission is completable entirely on the web. The Basin is extra ways to explore the same world.</p>
+      </div>
+
+      <div class="card">
+        <div class="card__eyebrow">What does "done" mean?</div>
+        <p>See the <a href="#/map">Campaign Map</a> — a stage is done at 100% of its missions submitted; its grade (★–★★★) reflects your award tiers, and you can always strengthen and resubmit.</p>
+      </div>
+
+      <div class="card">
+        <div class="card__eyebrow">What's a Field Report?</div>
+        <p>Once a day, tell B1llbot what you did or what you're thinking — one line is enough. He answers with a word of wisdom; both collect in the Wisdom Journal on your Dossier. Ten reports unlocks the Transformation Power.</p>
+      </div>
+    </div>
+  `);
 };
