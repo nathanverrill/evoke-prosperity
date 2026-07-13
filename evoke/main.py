@@ -1942,7 +1942,14 @@ async def billbot_chat(user_id: str, message: str):
 
             if response.status_code == 200:
                 data = response.json()
-                reply = data.get("choices", [{}])[0].get("message", {}).get("content", "I'm not sure how to help with that.")
+                # `.get("content", default)` only falls back when the KEY is
+                # missing, not when it's present but "" -- and an empty
+                # string genuinely happens: the base model's hidden
+                # reasoning trace (see openwebui-bootstrap.py's MAX_TOKENS
+                # comment) can consume the entire token budget before any
+                # visible answer is generated, returning content: "". `or`
+                # catches both cases instead of just the missing-key one.
+                reply = data.get("choices", [{}])[0].get("message", {}).get("content") or "Hmm, lost my train of thought there. Ask me again?"
                 return {"reply": reply}
             logger.warning(f"B1llbot chat failed: HTTP {response.status_code} {response.text[:300]}")
 

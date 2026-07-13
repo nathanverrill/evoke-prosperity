@@ -211,6 +211,28 @@ def upsert_knowledge(headers):
     return knowledge_id
 
 
+# Caps worst-case generation length/latency. NOT a substitute for actually
+# disabling Qwen3's reasoning mode -- tested both the "/no_think" system
+# prompt prefix and Ollama's native "think": false request field against
+# this exact OpenWebUI 0.6.36 + qwen3:8b pairing, through the
+# /api/chat/completions proxy path this app actually uses, and neither
+# suppressed the hidden reasoning trace (still present in
+# message.reasoning_content on every test). This makes a LOW cap actively
+# dangerous, not just unhelpful: the hidden reasoning trace's length varies
+# unpredictably per-query and can consume the entire budget on its own --
+# measured 150 tokens, 500 tokens, even ~500 tokens of reasoning alone for
+# a trivial "who are you?" prompt -- cutting generation off before any
+# visible answer text exists and returning an EMPTY reply, worse than a
+# slow one. No cap tested fully eliminates this risk, so main.py has its
+# own fallback for an empty completion (see billbot_chat()) -- treat that
+# as the real safety net, this cap as latency/cost bounding only. 1000 was
+# verified across several real questions (Keel, the Brokers, a plain
+# "who are you") to reliably leave room for both reasoning and a real
+# answer, vs. the original fully-uncapped worst case (969 tokens for a
+# throwaway 5-word request).
+MAX_TOKENS = 1000
+
+
 def upsert_billbot_model(headers, knowledge_id):
     r = requests.get(f"{OPENWEBUI_URL}/api/v1/models", headers=headers)
     r.raise_for_status()
@@ -220,7 +242,7 @@ def upsert_billbot_model(headers, knowledge_id):
         "id": "billbot",
         "name": "B1llbot",
         "base_model_id": BASE_MODEL,
-        "params": {"system": SYSTEM_PROMPT},
+        "params": {"system": SYSTEM_PROMPT, "max_tokens": MAX_TOKENS},
         "meta": {
             "description": "EVOKE Prosperity's field-guide mentor -- see GAME_DESIGN.md §3.3/§10",
             "knowledge": [{"id": knowledge_id, "name": KNOWLEDGE_NAME, "type": "collection"}],

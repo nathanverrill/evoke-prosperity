@@ -147,18 +147,61 @@ services:
       timeout: 5s
       retries: 5
 
+  # Containerized so B1llbot works out of the box on a fresh clone -- no
+  # native Ollama install required. If you already run Ollama natively
+  # (common on Mac, where Docker Desktop can't pass Metal/GPU through to a
+  # container, so a containerized Ollama is CPU-only and slower), override
+  # OLLAMA_BASE_URL in your .env to point at it instead
+  # (http://host.docker.internal:11434) and this service is simply unused
+  # -- still safe to leave running, or comment it out.
+  ollama:
+    image: ollama/ollama:latest
+    networks:
+      - evoke-infra-network
+    volumes:
+      - ollama-data:/root/.ollama
+    healthcheck:
+      # No curl/wget in this image -- use the ollama binary itself as its
+      # own client, which fails cleanly until the server is actually
+      # accepting connections.
+      test: ["CMD", "ollama", "list"]
+      interval: 10s
+      timeout: 10s
+      retries: 10
+      start_period: 20s
+
+  # One-shot: pulls the default model into the ollama volume, then exits
+  # (expected to show "Exited (0)" in `docker ps` -- that's success, not a
+  # crash). Re-running `docker compose up` after the model is already
+  # pulled just re-checks and exits immediately; Ollama itself skips
+  # re-downloading a model it already has.
+  ollama-pull:
+    image: ollama/ollama:latest
+    networks:
+      - evoke-infra-network
+    environment:
+      OLLAMA_HOST: ollama:11434
+    entrypoint: ["ollama"]
+    command: ["pull", "${OLLAMA_MODEL:-qwen3:8b}"]
+    depends_on:
+      ollama:
+        condition: service_healthy
+    restart: "no"
+
   open-webui:
     image: ghcr.io/open-webui/open-webui:main
     networks:
       - evoke-infra-network
     environment:
-      OLLAMA_BASE_URL: http://host.docker.internal:11434
+      OLLAMA_BASE_URL: ${OLLAMA_BASE_URL:-http://ollama:11434}
     ports:
       - "${PORT_OPENWEBUI:-3000}:8080"
     volumes:
       - openwebui-data:/app/backend/data
     depends_on:
       postgres:
+        condition: service_healthy
+      ollama:
         condition: service_healthy
 
   minecraft:
@@ -203,3 +246,4 @@ volumes:
   postgres-data:
   openwebui-data:
   minecraft-data:
+  ollama-data:
