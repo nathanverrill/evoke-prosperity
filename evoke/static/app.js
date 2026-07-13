@@ -9,6 +9,72 @@ const Evoke = (() => {
     profile: null,
   };
 
+  // ---------- Sound layer (console-UX gap #9) ----------
+  // Consoles are never silent -- hover blips, an XP tick, a level-up sting
+  // are a disproportionately large "this is a game, not a website" signal.
+  // Synthesized tones via Web Audio (oscillator + short gain envelope), not
+  // sample files -- no asset pipeline to build, and a clean sine/square
+  // blip reads as HUD/sci-fi, which fits this app's register better than a
+  // sampled arcade sound would. The AudioContext is created lazily on the
+  // first real user gesture (autoplay policies block it otherwise), and
+  // every sound is gated on the mute flag, persisted per-browser.
+  const soundMutedKey = "evoke_sound_muted";
+  let audioCtx = null;
+  function isMuted() { return localStorage.getItem(soundMutedKey) === "1"; }
+  function setMuted(m) { localStorage.setItem(soundMutedKey, m ? "1" : "0"); }
+  function ensureAudioCtx() {
+    if (!audioCtx) {
+      const Ctor = window.AudioContext || window.webkitAudioContext;
+      if (!Ctor) return null;
+      audioCtx = new Ctor();
+    }
+    if (audioCtx.state === "suspended") audioCtx.resume();
+    return audioCtx;
+  }
+  document.addEventListener("pointerdown", ensureAudioCtx, { once: true });
+  document.addEventListener("keydown", ensureAudioCtx, { once: true });
+
+  function playTone(freq, startDelay, duration, type, peak) {
+    if (isMuted()) return;
+    const ctx = ensureAudioCtx();
+    if (!ctx) return;
+    const osc = ctx.createOscillator();
+    const gain = ctx.createGain();
+    osc.type = type || "sine";
+    osc.frequency.value = freq;
+    const t0 = ctx.currentTime + (startDelay || 0);
+    gain.gain.setValueAtTime(0, t0);
+    gain.gain.linearRampToValueAtTime(peak != null ? peak : 0.12, t0 + 0.008);
+    gain.gain.exponentialRampToValueAtTime(0.0001, t0 + duration);
+    osc.connect(gain).connect(ctx.destination);
+    osc.start(t0);
+    osc.stop(t0 + duration + 0.02);
+  }
+
+  const sfx = {
+    hover: () => playTone(660, 0, 0.05, "sine", 0.045),
+    select: () => playTone(880, 0, 0.08, "square", 0.06),
+    xpTick: () => playTone(920, 0, 0.09, "sine", 0.09),
+    award: () => { playTone(700, 0, 0.10, "sine", 0.09); playTone(1050, 0.06, 0.12, "sine", 0.08); },
+    levelUp: () => { playTone(660, 0, 0.14, "square", 0.08); playTone(880, 0.10, 0.14, "square", 0.08); playTone(1320, 0.20, 0.26, "square", 0.09); },
+  };
+
+  // Delegated hover/select blips -- one pair of listeners for every link
+  // and button, rather than wiring each screen's markup individually.
+  let lastHovered = null;
+  document.addEventListener("mouseover", (e) => {
+    const el = e.target.closest("a, button");
+    if (!el || el === lastHovered) return;
+    lastHovered = el;
+    sfx.hover();
+  });
+  document.addEventListener("mouseout", (e) => {
+    if (e.target.closest("a, button") === lastHovered && !e.relatedTarget?.closest?.("a, button")) lastHovered = null;
+  });
+  document.addEventListener("click", (e) => {
+    if (e.target.closest("a, button")) sfx.select();
+  });
+
   // ---------- API ----------
   async function apiGet(path) {
     const res = await fetch(path);
@@ -195,7 +261,9 @@ const Evoke = (() => {
         // renderMissionAAR) shows its own inline level-up beat when a
         // mission submission crosses a threshold -- this global overlay
         // would otherwise stack a second "you leveled up" moment on top
-        // of it for the exact same event.
+        // of it for the exact same event. The sting still plays either
+        // way -- only the visual overlay is suppressed.
+        sfx.levelUp();
         if (!state.suppressLevelUpOverlay) showLevelUpOverlay(d);
         renderTopbar();
       } else {
@@ -211,8 +279,10 @@ const Evoke = (() => {
       // not for my own actions (those already celebrate full-screen).
       if (d.user_id !== state.userId) toast(escapeHtml(d.message || ""));
     } else if (msg.type === "XPGranted" && d.user_id === state.userId) {
+      sfx.xpTick();
       renderTopbar();
     } else if (msg.type === "AwardGranted" && d.user_id === state.userId) {
+      sfx.award();
       renderTopbar();
     }
   }
@@ -292,11 +362,16 @@ const Evoke = (() => {
       <div class="topbar__right">
         <span class="xp-meter">${state.displayName || "Agent"} · Lv ${level}${rank ? ` ${rank}` : ""} · ${xp} XP</span>
         <span class="streak-pill" title="Streak tracking not built yet">🔥 —</span>
+        <button type="button" id="sound-toggle-btn" class="notif-bell" title="${isMuted() ? "Unmute" : "Mute"} sound" aria-pressed="${isMuted()}">${isMuted() ? "🔇" : "🔊"}</button>
         <button type="button" id="notif-bell-btn" class="notif-bell ${unreadCount ? "has-unread" : ""}">🔔 ${unreadCount}</button>
       </div>
     `;
     renderRail();
     document.getElementById("notif-bell-btn")?.addEventListener("click", toggleGuideOverlay);
+    document.getElementById("sound-toggle-btn")?.addEventListener("click", () => {
+      setMuted(!isMuted());
+      renderTopbar();
+    });
   }
 
   // ---------- Guide overlay (console-UX gap #6) ----------
@@ -558,5 +633,5 @@ const Evoke = (() => {
     await router();
   }
 
-  return { state, api, mount, boot, escapeHtml, toast, screens: {} };
+  return { state, api, mount, boot, escapeHtml, toast, sfx, screens: {} };
 })();
