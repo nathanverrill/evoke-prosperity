@@ -27,6 +27,12 @@ logger = logging.getLogger(__name__)
 DATABASE_URL = os.getenv("DATABASE_URL", "postgresql://evoke:devsecret123@localhost:5432/evoke")
 BRIGHTSPACE_SIM_URL = os.getenv("BRIGHTSPACE_SIM_URL", "http://brightspace-sim:8001")
 OPENWEBUI_URL = os.getenv("OPENWEBUI_URL", "http://open-webui:8080")
+# OpenWebUI requires auth on every API call (this wasn't true when
+# billbot_chat() below was first written, which is why it originally sent
+# none -- it silently 401'd until evoke-infra/openwebui-bootstrap.py's
+# smoke test surfaced it). A per-instance service API key, not a user
+# session JWT (which expires) -- generate one via that bootstrap script.
+OPENWEBUI_API_KEY = os.getenv("OPENWEBUI_API_KEY", "")
 AI_ENABLED = os.getenv("AI_ENABLED", "false").lower() == "true"
 # The internal container hostname (MINECRAFT_HOST) is for the app/bridge's
 # own RCON traffic -- not reachable from a learner's actual Minecraft
@@ -1920,22 +1926,29 @@ async def billbot_chat(user_id: str, message: str):
         async with httpx.AsyncClient() as client:
             response = await client.post(
                 f"{OPENWEBUI_URL}/api/chat/completions",
+                headers={"Authorization": f"Bearer {OPENWEBUI_API_KEY}"} if OPENWEBUI_API_KEY else {},
                 json={
                     "model": "billbot",
                     "messages": [
                         {"role": "user", "content": message}
                     ]
                 },
-                timeout=30
+                # A cold model load on the local Ollama backend (host.docker.internal)
+                # measured up to ~60s end-to-end in testing; a warm one is ~10-20s.
+                # Generous margin above the observed worst case rather than cutting
+                # it close.
+                timeout=90
             )
 
             if response.status_code == 200:
                 data = response.json()
                 reply = data.get("choices", [{}])[0].get("message", {}).get("content", "I'm not sure how to help with that.")
                 return {"reply": reply}
+            logger.warning(f"B1llbot chat failed: HTTP {response.status_code} {response.text[:300]}")
 
         return {"reply": "I'm having trouble responding right now."}
     except Exception as e:
+        logger.warning(f"B1llbot chat error: {e}")
         return {"reply": f"Error: {str(e)}"}
 
 # ========== Static Files ==========

@@ -25,6 +25,7 @@ services:
       MINIO_SECRET_KEY: devsecret123
       BRIGHTSPACE_SIM_URL: http://brightspace-sim:8001
       OPENWEBUI_URL: http://open-webui:8080
+      OPENWEBUI_API_KEY: ${OPENWEBUI_API_KEY:-}
       AI_ENABLED: "true"
       MINECRAFT_PUBLIC_HOST: ${MINECRAFT_PUBLIC_HOST:-localhost}
       MINECRAFT_PUBLIC_PORT_JAVA: ${PORT_MINECRAFT:-25565}

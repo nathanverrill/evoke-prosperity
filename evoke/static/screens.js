@@ -722,11 +722,16 @@ Evoke.screens.billbot = async function billbot() {
     const log = document.getElementById("billbot-fs-log");
     log.insertAdjacentHTML("beforeend", `<div class="billbot-msg" data-from="user">${Evoke.escapeHtml(msg)}</div>`);
     input.value = "";
+    // A local model response takes 10-20s once warm, longer on a cold
+    // start -- without this, the screen looks hung for that whole stretch.
+    log.insertAdjacentHTML("beforeend", `<div class="billbot-msg" data-from="billbot" id="billbot-fs-thinking">…</div>`);
     log.scrollTop = log.scrollHeight;
     try {
       const reply = await api.billbotChat(state.userId, msg);
+      document.getElementById("billbot-fs-thinking")?.remove();
       log.insertAdjacentHTML("beforeend", `<div class="billbot-msg" data-from="billbot">${Evoke.escapeHtml(reply.reply)}</div>`);
     } catch (err) {
+      document.getElementById("billbot-fs-thinking")?.remove();
       log.insertAdjacentHTML("beforeend", `<div class="billbot-msg" data-from="billbot">Having trouble hearing you right now.</div>`);
     }
     log.scrollTop = log.scrollHeight;

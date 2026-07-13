@@ -36,7 +36,11 @@
 #     to patch around — re-add the mod once Yarn mappings for 26.2 exist
 #     (typically days to a couple weeks after a release) and the mod's source
 #     (~/evoke-prosperity-files/minecraft/billbot_simple_chat_plugins/billbot/)
-#     can actually be rebuilt against them.
+#     can actually be rebuilt against them. This only affects B1llbot's
+#     in-Minecraft chat presence -- the web app's B1llbot (Hub drawer,
+#     Companion Mode, #/billbot) is a completely separate integration
+#     (OpenWebUI + Ollama, see evoke-infra/openwebui-bootstrap.py) and is
+#     unaffected by this gap.
 # Upgrading any of these is a deliberate diff: bump the ARG, re-verify the
 # Modrinth game_versions list actually includes the target Minecraft version
 # (filtered to the fabric loader specifically) before changing

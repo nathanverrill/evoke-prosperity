@@ -138,11 +138,16 @@ const Evoke = (() => {
       const log = document.getElementById("billbot-log");
       log.insertAdjacentHTML("beforeend", `<div class="billbot-msg" data-from="user">${escapeHtml(msg)}</div>`);
       input.value = "";
+      // A local model response takes 10-20s once warm, longer on a cold
+      // start -- without this, the drawer looks hung for that whole stretch.
+      log.insertAdjacentHTML("beforeend", `<div class="billbot-msg" data-from="billbot" id="billbot-thinking">…</div>`);
       log.scrollTop = log.scrollHeight;
       try {
         const reply = await api.billbotChat(state.userId, msg);
+        document.getElementById("billbot-thinking")?.remove();
         log.insertAdjacentHTML("beforeend", `<div class="billbot-msg" data-from="billbot">${escapeHtml(reply.reply)}</div>`);
       } catch (err) {
+        document.getElementById("billbot-thinking")?.remove();
         log.insertAdjacentHTML("beforeend", `<div class="billbot-msg" data-from="billbot">Having trouble hearing you right now.</div>`);
       }
       log.scrollTop = log.scrollHeight;
