@@ -4,36 +4,56 @@
 #
 # All versions below are pinned deliberately and verified working together as of
 # this build (fetched and checksum-verified from meta.fabricmc.net / Modrinth):
-#   - Minecraft 1.21.10, Fabric loader 0.16.10 — matches the B1llbot mod's own
-#     gradle.properties pin exactly (~/evoke-prosperity-files/minecraft/
-#     billbot_simple_chat_plugins/billbot/gradle.properties).
-#   - Fabric API 0.138.4+1.21.10 — same pin as the mod's build dependency.
-#   - Geyser-Fabric 2.9.2-b1008, Floodgate-Fabric 2.2.6-b51 — both confirmed via
-#     Modrinth's game_versions tagging to support 1.21.10 specifically. Floodgate
-#     is NOT distributed through GeyserMC's own download API for Fabric (that API
-#     only lists bungee/spigot/velocity) — it's a separate Modrinth project
+#   - Minecraft 26.2 (Mojang's post-1.21 year.minor versioning scheme — this is
+#     genuinely the current stable release name, not a typo), Fabric loader
+#     0.19.3, installer 1.1.1 — confirmed meta.fabricmc.net serves a server jar
+#     for this exact loader/installer/game-version combination.
+#   - Base image bumped from eclipse-temurin:21-jre to :25-jre — 26.2's server
+#     jar is compiled to class file version 69 (Java 25); booting it under
+#     Java 21 fails immediately with UnsupportedClassVersionError, discovered
+#     by actually starting the container, not just resolving the jar URLs.
+#   - Fabric API 0.154.2+26.2 — latest Modrinth build tagged for game version
+#     26.2 specifically.
+#   - Geyser-Fabric 2.11.0-b1196, Floodgate-Fabric 2.2.6-b67 — both confirmed
+#     via Modrinth's game_versions tagging (filtered to loaders containing
+#     "fabric" — both projects also publish Velocity/NeoForge/Spigot builds
+#     under the same project, so grabbing "the latest version" without
+#     filtering by loader silently grabs the wrong platform's jar). Floodgate
+#     is NOT distributed through GeyserMC's own download API for Fabric (that
+#     API only lists bungee/spigot/velocity) — it's a separate Modrinth project
 #     (GeyserMC/Floodgate-Modded) for modded platforms. Easy to miss.
+#   - The B1llbot mod is DROPPED from this build, not upgraded. Its
+#     fabric.mod.json version gate ("minecraft": "~1.21.10") is easy to patch
+#     (see the disabled RUN step below, kept for when this is revisited), but
+#     patching it and actually booting the server surfaced a real, deeper
+#     problem: the mod's compiled bytecode was remapped against 1.21.10's
+#     intermediary mappings, and its entrypoint class fails to resolve at
+#     runtime (NoClassDefFoundError: net.minecraft.class_2561) on 26.2's
+#     different intermediary mapping set. Fixing this needs a real recompile
+#     against 26.2 — and Fabric hasn't published Yarn mappings for 26.2 yet
+#     (checked meta.fabricmc.net/v2/versions/yarn/26.2: zero builds; this
+#     version was released essentially the same day as this change). Nothing
+#     to patch around — re-add the mod once Yarn mappings for 26.2 exist
+#     (typically days to a couple weeks after a release) and the mod's source
+#     (~/evoke-prosperity-files/minecraft/billbot_simple_chat_plugins/billbot/)
+#     can actually be rebuilt against them.
 # Upgrading any of these is a deliberate diff: bump the ARG, re-verify the
 # Modrinth game_versions list actually includes the target Minecraft version
-# before changing MINECRAFT_VERSION, since Geyser/Floodgate support lags new
-# Minecraft releases.
+# (filtered to the fabric loader specifically) before changing
+# MINECRAFT_VERSION, since Geyser/Floodgate support lags new Minecraft
+# releases and often publish other-loader builds under the same project.
 
-FROM eclipse-temurin:21-jre AS downloader
+FROM eclipse-temurin:25-jre AS downloader
 
-ARG MINECRAFT_VERSION=1.21.10
-# NOTE: deliberately newer than the B1llbot mod's own gradle.properties pin
-# (0.16.10) — that version is too old for the current Fabric API/Geyser-Fabric
-# builds, which require Fabric Loader >=0.17.0/>=0.17.2 respectively. Verified
-# working: the mod itself doesn't hard-pin an exact loader version (only
-# "fabric-api @ [*]"), so it loads fine against a newer loader.
+ARG MINECRAFT_VERSION=26.2
 ARG FABRIC_LOADER_VERSION=0.19.3
 ARG FABRIC_INSTALLER_VERSION=1.1.1
-ARG FABRIC_API_URL=https://cdn.modrinth.com/data/P7dR8mSH/versions/tV4Gc0Zo/fabric-api-0.138.4%2B1.21.10.jar
-ARG GEYSER_FABRIC_URL=https://cdn.modrinth.com/data/wKkoqHrH/versions/ahzEdvn0/geyser-fabric-Geyser-Fabric-2.9.2-b1008.jar
-ARG FLOODGATE_FABRIC_URL=https://cdn.modrinth.com/data/bWrNNfkb/versions/QFAMeMNB/Floodgate-Fabric-2.2.6-b51.jar
+ARG FABRIC_API_URL=https://cdn.modrinth.com/data/P7dR8mSH/versions/Kr4WG5mG/fabric-api-0.154.2%2B26.2.jar
+ARG GEYSER_FABRIC_URL=https://cdn.modrinth.com/data/wKkoqHrH/versions/6TIwzcQR/Geyser-Fabric-2.11.0-b1196.jar
+ARG FLOODGATE_FABRIC_URL=https://cdn.modrinth.com/data/bWrNNfkb/versions/urOFTrVX/Floodgate-Fabric-2.2.6-b67.jar
 
 WORKDIR /downloads
-RUN apt-get update && apt-get install -y --no-install-recommends curl ca-certificates \
+RUN apt-get update && apt-get install -y --no-install-recommends curl ca-certificates zip unzip \
     && rm -rf /var/lib/apt/lists/*
 
 RUN curl -fsSL -o fabric-server-launch.jar \
@@ -46,17 +66,35 @@ RUN curl -fsSL -o fabric-server-launch.jar \
     && test -s mods/geyser-fabric.jar \
     && test -s mods/floodgate-fabric.jar
 
-FROM eclipse-temurin:21-jre
+# Patch B1llbot's fabric.mod.json version constraint (see the note above) --
+# done here rather than hand-editing the jar checked into the repo, so the
+# original third-party artifact stays untouched and this transformation is
+# visible in the build, not silently baked into a binary.
+COPY mods/billbot-1.0.1.jar /downloads/billbot-original.jar
+RUN mkdir -p /tmp/billbot-patch && cd /tmp/billbot-patch \
+    && unzip -q /downloads/billbot-original.jar fabric.mod.json \
+    && sed -i 's/"minecraft": "~1.21.10"/"minecraft": "*"/' fabric.mod.json \
+    && cp /downloads/billbot-original.jar /downloads/billbot-patched.jar \
+    && zip -q /downloads/billbot-patched.jar fabric.mod.json
+
+FROM eclipse-temurin:25-jre
 
 RUN groupadd -r minecraft && useradd -r -g minecraft -m minecraft
 WORKDIR /server
 
 COPY --from=downloader /downloads/fabric-server-launch.jar /server/fabric-server-launch.jar
 COPY --from=downloader /downloads/mods/ /server/mods/
-COPY mods/billbot-1.0.1.jar /server/mods/billbot-1.0.1.jar
+# billbot-patched.jar deliberately NOT copied into /server/mods/ -- see the
+# top-of-file note. Re-add this line once Yarn mappings for 26.2 exist and
+# the mod's been rebuilt (patching the manifest alone isn't enough).
 COPY datapacks/ /server/world-datapacks/
 COPY server.properties.template /server/server.properties.template
 COPY entrypoint.sh /server/entrypoint.sh
+# world-seed/ is intentionally NOT baked in with a plain COPY (see
+# world-seed/README.md) -- for local/manual use it's populated on the host
+# before build and copied in below; this COPY is a no-op if the directory is
+# empty, matching the documented "falls back to vanilla generation" behavior.
+COPY world-seed/ /server/world-seed/
 # world-data must exist and be minecraft-owned in the image layer before VOLUME
 # is declared, or a fresh named volume gets created root-owned on first mount
 # and the non-root minecraft user can't write into it.
