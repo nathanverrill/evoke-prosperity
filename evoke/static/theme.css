@@ -141,6 +141,10 @@ input, textarea, select {
 .award[data-tier="legendary"] .award__tier { background: var(--tier-legendary); }
 .award.is-pending { animation: pulse 1.6s ease-in-out infinite; }
 @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.55; } }
+/* An empty trophy-case slot -- distinct from .is-pending (earned, awaiting
+   collection, and animated to draw the eye): this is "not earned yet," a
+   quiet placeholder, never pulsing. */
+.award.is-empty { color: var(--color-text-muted); border-style: dashed; }
 
 /* Timeline */
 .timeline-step { border-top: 3px solid var(--color-border); }

@@ -494,12 +494,30 @@ Evoke.screens.gallery = async function gallery() {
 Evoke.screens.playerProfile = async function playerProfile(userId) {
   const { api, state, mount } = Evoke;
   const id = userId || state.userId;
-  const [profile, achievementsRes] = await Promise.all([
+  const [profile, achievementsRes, missionsRes, questsRes] = await Promise.all([
     api.playerProfile(id),
     api.achievements(id).catch(() => ({ qualities: {}, powers: {} })),
+    api.missions(id).catch(() => ({ missions: [] })),
+    api.mcQuests().catch(() => ({ quests: [] })),
   ]);
   const badgeKeys = ["Empathetic Changemaker", "Systems Thinker", "Creative Visionary", "Deep Collaborator"];
   const powers = achievementsRes.powers || {};
+
+  // Trophy case principle: show every mission/quest that exists, not just
+  // what's already earned -- a learner should be able to see the whole
+  // shelf, including the empty slots, so the not-yet-earned ones read as
+  // "still to do" rather than invisible.
+  const allMissions = missionsRes.missions || [];
+  const allQuests = questsRes.quests || [];
+  const questCompletions = {};
+  (profile.quests_completed || []).forEach(q => { questCompletions[q.quest_id] = q.completed_at; });
+
+  const TIER_RANK = { common: 1, epic: 2, legendary: 3 };
+  const bestAwardByMission = {};
+  (profile.awards || []).forEach(a => {
+    const current = bestAwardByMission[a.mission_id];
+    if (!current || TIER_RANK[a.tier] > TIER_RANK[current.tier]) bestAwardByMission[a.mission_id] = a;
+  });
 
   mount(`
     <div class="stack">
@@ -548,24 +566,41 @@ Evoke.screens.playerProfile = async function playerProfile(userId) {
         <p>${profile.missions_completed_count} / 12 complete</p>
       </section>
 
-      <section class="card">
-        <div class="card__eyebrow">Quests</div>
-        <p>${profile.quests_completed_count} completed</p>
-        ${(profile.quests_completed || []).length
-          ? `<ul>${profile.quests_completed.map(q => `<li>${Evoke.escapeHtml(q.quest_id)} — ${new Date(q.completed_at).toLocaleDateString()}</li>`).join("")}</ul>`
-          : `<p class="empty-state">No quests logged yet.</p>`}
+      <section>
+        <h2 class="section-title">Quests</h2>
+        <p class="empty-state">${profile.quests_completed_count} of ${allQuests.length} completed — every quest in the Basin Simulation, whether you've done it yet or not.</p>
+        <div class="badge-wall">
+          ${allQuests.length ? allQuests.map(q => {
+            const completedAt = questCompletions[q.id];
+            return `
+              <div class="badge-tile ${completedAt ? "is-earned" : "is-dimmed"}" title="${Evoke.escapeHtml(q.description || "")}">
+                <div class="badge-tile__name">${Evoke.escapeHtml(q.title)}</div>
+                <div class="badge-tile__progress">${completedAt ? `done ${new Date(completedAt).toLocaleDateString()}` : (q.kind === "side_quest" ? "side quest — not done" : "not done")}</div>
+              </div>
+            `;
+          }).join("") : `<p class="empty-state">No quests configured for this campaign yet.</p>`}
+        </div>
       </section>
 
       <section>
         <h2 class="section-title">Award Cabinet</h2>
+        <p class="empty-state">Every mission's trophy slot — your best tier so far, or empty until you submit.</p>
         <div class="stack-sm">
-          ${(profile.awards || []).length ? profile.awards.map(a => `
-            <div class="award" data-tier="${a.tier}">
-              <span class="award__tier">${a.tier}</span>
-              <span>${a.source.replace("_", " ")}</span>
-              <span class="empty-state">${a.collected_at ? "collected" : "pending"}</span>
-            </div>
-          `).join("") : `<p class="empty-state">No awards yet.</p>`}
+          ${allMissions.length ? allMissions.map(m => {
+            const best = bestAwardByMission[m.id];
+            return best ? `
+              <div class="award" data-tier="${best.tier}">
+                <span class="award__tier">${best.tier}</span>
+                <span>${Evoke.escapeHtml(m.title)}</span>
+                <span class="empty-state">${best.collected_at ? "collected" : "pending"}</span>
+              </div>
+            ` : `
+              <div class="award is-empty">
+                <span class="empty-state">Not yet submitted</span>
+                <span>${Evoke.escapeHtml(m.title)}</span>
+              </div>
+            `;
+          }).join("") : `<p class="empty-state">No missions synced yet.</p>`}
         </div>
       </section>
     </div>
