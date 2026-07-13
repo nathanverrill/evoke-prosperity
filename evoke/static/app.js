@@ -397,6 +397,40 @@ const Evoke = (() => {
     document.getElementById("screen").innerHTML = html;
   }
 
+  // ---------- Controller-grammar keyboard nav ----------
+  // Console-player feedback: A=select/B=back/bumpers-switch-tabs has a web
+  // translation this app never built -- Esc/Backspace for back, arrow-key
+  // roving focus in the nav rail, and visible focus rings (the last one
+  // doubles as the keyboard-accessibility gap GAPS.md already flags).
+  // Hash navigation already pushes a real browser history entry per route
+  // change, so "back" is just history.back() -- no custom nav stack needed
+  // (the showcase mocked one; the real app's router makes that redundant).
+  function isEditableTarget(el) {
+    if (!el) return false;
+    const tag = el.tagName;
+    return tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT" || el.isContentEditable;
+  }
+
+  function setupKeyboardNav() {
+    document.addEventListener("keydown", (e) => {
+      if (e.key === "Escape" || (e.key === "Backspace" && !isEditableTarget(document.activeElement))) {
+        e.preventDefault();
+        history.back();
+        return;
+      }
+      const rail = document.getElementById("nav-rail");
+      const active = document.activeElement;
+      if (!rail || !active || !rail.contains(active)) return;
+      if (e.key !== "ArrowDown" && e.key !== "ArrowUp") return;
+      const links = [...rail.querySelectorAll("a")];
+      const idx = links.indexOf(active);
+      if (idx === -1) return;
+      e.preventDefault();
+      const next = e.key === "ArrowDown" ? links[(idx + 1) % links.length] : links[(idx - 1 + links.length) % links.length];
+      next.focus();
+    });
+  }
+
   async function boot() {
     await ensureLoggedIn();
     // Fire-and-forget: the backend dedupes to one grant per calendar day, so
@@ -405,6 +439,7 @@ const Evoke = (() => {
     api.checkin(state.userId).then(r => { state.checkinResult = r; }).catch(() => {});
     renderBillbotDrawer();
     connectLive();
+    setupKeyboardNav();
     await renderTopbar();
     window.addEventListener("hashchange", router);
     // First-run onboarding (GAPS.md: "No onboarding" -- found missing by

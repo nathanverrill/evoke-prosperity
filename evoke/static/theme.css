@@ -104,6 +104,17 @@ input:focus, textarea:focus, select:focus {
   box-shadow: 0 0 0 2px rgba(0, 211, 243, 0.25);
 }
 
+/* Controller-grammar nav (console-UX gap #5): a visible focus ring on every
+   native interactive element, doubling as the keyboard-accessibility work
+   GAPS.md already flags -- previously only form fields had any focus
+   style at all, so keyboard/arrow-key navigation (app.js's setupKeyboardNav)
+   was invisible. :focus-visible (not :focus) so mouse clicks stay clean. */
+a:focus-visible, button:focus-visible, [tabindex]:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 3px rgba(0, 211, 243, 0.55), var(--glow-md);
+  border-radius: var(--radius);
+}
+
 /* ---- Top bar + EVOKE brand lockup ---- */
 .topbar {
   background: transparent;
@@ -1019,6 +1030,12 @@ a.objectives-list__label:hover { color: var(--cyan-300); }
   box-shadow: none;
   backdrop-filter: none;
   transition: background 0.2s var(--ease-out), color 0.2s var(--ease-out);
+}
+/* .rail .nav's own box-shadow:none above (stripping the generic button
+   shadow) outranks the generic a:focus-visible rule's specificity, which
+   silently ate the focus ring here -- needs its own equal-footing override. */
+.rail .nav:focus-visible {
+  box-shadow: 0 0 0 3px rgba(0, 211, 243, 0.55), var(--glow-md);
 }
 .rail .nav:hover { background: rgba(255, 255, 255, 0.04); color: var(--teal-100); filter: none; transform: none; }
 .rail .nav.on { color: var(--cyan-100); background: rgba(0, 211, 243, 0.10); }
