@@ -227,6 +227,8 @@ Today's prototype ([clients.py](evoke/clients.py), [workers.py](evoke/workers.py
 
 **Requirement, for the Evoke Prosperity campaign**: when a learner earns a badge in the LMS/Operations Hub, the corresponding item, potion effect, or in-game command is granted to their Minecraft character automatically — whether they're online at the time or not. This is a required integration for the Prosperity campaign, even though Minecraft itself is presented to learners as optional enrichment (per `docs/canon/thread5.md`, no grade ever depends on it).
 
+**Since this was written, the bridge grew a second job:** a heartbeat loop that auto-links the first real Minecraft player to a seeded "Player One" account and gives anyone online a small ongoing XP/item/AI-lore trickle — a zero-setup way to confirm the whole pipeline (events → projections → RCON → AI) actually works without completing a real mission first. See `GAPS.md` and `evoke-minecraft-bridge/bridge.py`'s `heartbeat_loop()`. The reward-delivery design below is unchanged by that addition.
+
 The team already has a working reference implementation of this exact mechanism at `evoke-cu-internship/badges/Badge-API` (Flask + SQLite + a hand-rolled RCON client, built to bridge Moodle to Minecraft). The design below reuses its proven parts, adapted to this project's stack (a small FastAPI-adjacent service, Postgres instead of SQLite, driven by Redpanda events instead of a webhook/manual frontend).
 
 ### Deployment target: same box as the app, per organization

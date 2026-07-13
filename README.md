@@ -12,7 +12,7 @@ A mission-based learning platform for teaching financial literacy and entreprene
 ./quick-start.sh
 ```
 
-Brings up both Docker Compose stacks (`evoke-infra` then `evoke`), seeds the database, and prints access points. Then open [http://localhost:8000](http://localhost:8000) — you're auto-signed-in as a demo learner, no login step needed.
+Brings up both Docker Compose stacks (`evoke-infra` then `evoke`), seeds the database, and prints access points. Then open [http://localhost:8000](http://localhost:8000) — you're auto-signed-in as **Player One**, one of two seeded default users (the other, **Admin**, is reachable at `/api/dev-login?email=admin@evoke.local` — no login UI for it yet).
 
 To reach it from another device on your network (a phone, to test Minecraft/Bedrock), use your machine's LAN IP instead of `localhost`.
 
@@ -20,7 +20,7 @@ AI feedback (the AI Coach on submissions, B1llbot chat) is on by default (`AI_EN
 
 **One more one-time step for B1llbot specifically:** run `python3 evoke-infra/openwebui-bootstrap.py` once the stack is up. It creates B1llbot's persona (system prompt + knowledge base) inside OpenWebUI — without it, OpenWebUI has a base model but no "billbot" character configured, and B1llbot chat will error.
 
-Minecraft (optional, Prosperity-specific) comes up as part of `evoke-infra`. See `evoke-infra/minecraft/world-seed/README.md` for loading the real Basin Simulation world instead of a fresh vanilla one.
+Minecraft (optional, Prosperity-specific) comes up as part of `evoke-infra`. See `evoke-infra/minecraft/world-seed/README.md` for loading the real Basin Simulation world instead of a fresh vanilla one. The first real player to connect gets auto-linked to Player One — no manual account-linking needed to see rewards, XP, and B1llbot lore messages actually arrive in-game.
 
 ---
 
@@ -30,7 +30,7 @@ Minecraft (optional, Prosperity-specific) comes up as part of `evoke-infra`. See
 evoke/          FastAPI backend + vanilla-JS SPA — see evoke/main.py, workers.py, clients.py, static/
 evoke-infra/    Shared infrastructure: Postgres, MinIO, Redpanda, OpenSearch, OpenWebUI, Ollama, Minecraft (docker-compose)
 brightspace-sim/ Brightspace LMS simulator (real Brightspace API shapes) -- system of record for the 12 missions in dev
-evoke-minecraft-bridge/ Consumes RewardCollected events, delivers Minecraft rewards via RCON
+evoke-minecraft-bridge/ Consumes RewardCollected events (delivers via RCON) + a heartbeat loop (auto-links the first player, online XP/items/AI lore)
 ui/             Older polished interactive UI mockup -- design reference for flow/feature set, not current code
 docs/           Narrative, curriculum, and planning source material -- see docs/README.md
 ```

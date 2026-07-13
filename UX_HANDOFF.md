@@ -79,7 +79,7 @@ You don't need to know how any of this works — just follow these steps. If any
    ./quick-start.sh
    ```
 3. Wait — it brings up several services (including a Minecraft server, which you can ignore) and seeds some demo data. Takes roughly 1–2 minutes. You'll see a checklist print out as things come online.
-4. Open your browser to **http://localhost:8000** — that's the Operations Hub. You're automatically signed in as a demo learner, no login step needed.
+4. Open your browser to **http://localhost:8000** — that's the Operations Hub. You're automatically signed in as **Player One**, one of two seeded default users.
 5. Also worth opening:
    - **http://localhost:8000/companion.html** — Companion Mode (the standalone B1llbot chat page)
    - **http://localhost:8001/teacher-review** — the instructor grading stand-in (useful context, not something you're redesigning — see the Instructor Dashboard note above for the screen that *is* yours)
