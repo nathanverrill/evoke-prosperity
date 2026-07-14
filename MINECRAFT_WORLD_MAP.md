@@ -73,13 +73,11 @@ the same chunk as the villager pen.
 All three are **live on the running server right now**. None are wired to
 the web app (flagged, not built — see `GAPS.md`). Originally all three were
 raw command blocks physically placed in the world save with no source file
-anywhere; as of the 2026-07-14 robustness pass, coinflip and the minecart
-ride have been extracted into portable, version-controlled datapacks (same
-pattern `mines_lift_precheck` already used for the mines entry check) —
-the physical command blocks that used to hold the logic are now inert stubs
-or a single trigger call, and the datapack file is the real source of truth.
-The mines room-randomizer itself is the one piece still raw-command-block-only
-(see below).
+anywhere; as of the 2026-07-14/15 robustness passes, all three are now
+extracted into portable, version-controlled datapacks (same pattern
+`mines_lift_precheck` already used for the mines entry check) — the
+physical command blocks that used to hold the logic are now inert stubs or
+a single trigger call, and the datapack file is the real source of truth.
 
 ### Coinflip gambling
 `r.-1.0.mca`, ~`(-137 to -140, 62, 149)`. **Extracted**:
@@ -90,18 +88,32 @@ real bug — the payout fired regardless of whether the player had actually
 paid, a free-gold exploit; fixed as part of the extraction, see `GAPS.md`.)
 
 ### The mines (4-room randomized dungeon)
-Entrance ~`(-140, 66, 168)`, "Enter the mines" sign. Gated by a real
-pickaxe check (`mines_lift_precheck` datapack — **already extracted and
-committed** at `evoke-infra/minecraft/datapacks/mines_lift_precheck/`, though
-that only covers the entry check, not the room-randomizer itself, which
-**remains raw command blocks in the world save**, no source file). Four
-pre-built room layouts (`mine00`/`mine01`/`mine10`/`mine11`, region
-`r.-1.-1.mca` ~chunks 787-825) swapped in via structure blocks, driven by a
-`room00`/`room01`/`room10`/`room11` "room assign sys" state machine. Infinite
-admin coal shop, auto-refilling unbreakable pickaxe. (A tick-order bug in
-the `room10`/`room11` occupancy check was found and fixed live via RCON in
-the 2026-07-14 pass — see `GAPS.md` — but the extraction itself is still
-open, flagged as the next candidate for this treatment.)
+Entrance ~`(-140, 66, 168)`, "Enter the mines" sign; a second, previously
+undocumented entrance/re-entry trigger also exists at `(503, 65, 266)`
+(`r.0.0.mca`). Gated by a real pickaxe check (`mines_lift_precheck`
+datapack, entry check only). The room-assignment + occupancy-detection
+state machine (`room00`/`room01`/`room10`/`room11`, region `r.-1.-1.mca`
+~chunks 787-825) is **extracted**: `evoke-infra/minecraft/datapacks/mines_room_randomizer/`,
+functions `mines:assign_room` (called from both entrances) and `mines:tick`
+(occupancy detection, on `#minecraft:tick`). Four pre-built room layouts
+swapped in via structure blocks. Infinite admin coal shop and
+auto-refilling unbreakable pickaxe (one instance per room) are separate,
+simple, working mechanisms left as raw command blocks — out of scope for
+this extraction, no bugs found in them.
+
+The original raw version had two real bugs, both fixed as part of the
+2026-07-15 extraction (the tick-order half was already patched live on
+2026-07-14, see `GAPS.md`): the two physical entrances ran fully duplicate
+13-block "watch for a global tag" processing chains instead of calling
+shared logic directly, so a single tagged player was liable to be
+double-processed by both; and 4 `gamemode adventure @s` commands meant to
+lock rooms against griefing were mostly non-functional (3 of 4 were bare
+commands with no `execute as` wrapper, so `@s` had no entity and they
+always silently failed) while the one that did work (room00) had no
+corresponding restore-to-survival anywhere in the entire world — it would
+have permanently stranded a player unable to break blocks, including the
+coal they're there to mine. Dropped entirely rather than "completed" for
+the other 3 rooms.
 
 ### Minecart/dropper ride
 `r.0.-1.mca`, ~`(304-306, 128-134, -142 to -144)`. **Extracted**:
@@ -251,21 +263,20 @@ removing if that key is real, independent of everything else in this doc.
 Already portable and committed at `evoke-infra/minecraft/datapacks/`:
 `custom_drops`, `halyard_rent_functions` (rent/late-fee half only),
 `inventory_save`, `mines_lift_precheck` (entry check only),
-`halyard_mob_arena` (see §10), and, new in the 2026-07-14 robustness pass,
-`coinflip` and `minecart_ride` (both §3) — extracted specifically because
-that pass found and fixed real bugs in both (a free-gold exploit in
-coinflip, a shared-counter bug in the minecart ride) and there was
-otherwise nowhere for the fix to live durably.
+`halyard_mob_arena` (see §10), `coinflip` and `minecart_ride` (2026-07-14),
+and `mines_room_randomizer` (2026-07-15, entry-assignment + occupancy
+detection — the coal shop and pickaxe auto-refill remain raw, see §3).
+Each of these five newest extractions found and fixed at least one real
+bug along the way, which is the whole reason they got pulled out — there
+was otherwise nowhere for the fix to live durably.
 
 **Still only raw command blocks in the world save**, not portable, not in
-git: the mines room-randomizer itself (entry check only is extracted; a
-tick-order bug in it was fixed live via RCON in the same pass but the
-extraction is still open — flagged as the next candidate), the full
-day-job stage machine, the hidden room + parkour shaft, the teleport hub,
-every badge-granting command block, and the B1llbot kiosk / factory
-dialogue. If any of these ever need to survive a world rebuild or be
-code-reviewed, they'd need the same extraction treatment
-`mines_lift_precheck`, `coinflip`, and `minecart_ride` already got.
+git: the full day-job stage machine, the hidden room + parkour shaft, the
+teleport hub, every badge-granting command block, the mines' coal shop /
+pickaxe auto-refill and exit-lobby triggers, and the B1llbot kiosk /
+factory dialogue. If any of these ever need to survive a world rebuild or
+be code-reviewed, they'd need the same extraction treatment the six
+datapacks above already got.
 
 ---
 
