@@ -130,6 +130,7 @@ const Evoke = (() => {
     worldState: () => apiGet("/api/world-state"),
     minecraftStatus: () => apiGet("/api/minecraft/status"),
     mcArena: (userId) => apiGet(`/api/mc-arena/${userId}`),
+    mcGauntlet: (userId) => apiGet(`/api/mc-gauntlet/${userId}`),
     companionInfo: () => apiGet("/api/companion/info"),
     teamWheel: (teamId) => apiGet(`/api/team/${teamId}/wheel`),
     adminCohort: (userId) => apiGet(`/api/admin/cohort?user_id=${userId}`),
@@ -299,7 +300,10 @@ const Evoke = (() => {
       // the generic ActivityPosted branch above (arena_wave isn't excluded
       // there), so this only needs to cover the achiever's own case.
       sfx.award();
-      toast(`⚔ Halyard Mob Arena — new best: <strong>Wave ${d.wave}</strong>`);
+      toast(`⚔ Claude's Halyard Mob Arena — new best: <strong>Wave ${d.wave}</strong>`);
+    } else if (msg.type === "GauntletWaveReached" && d.user_id === state.userId) {
+      sfx.award();
+      toast(`⚔ The Mob Gauntlet — new best: <strong>Wave ${d.wave}</strong>`);
     } else if (msg.type === "XPGranted" && d.user_id === state.userId) {
       sfx.xpTick();
       renderTopbar();

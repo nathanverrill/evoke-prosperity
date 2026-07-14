@@ -9,7 +9,7 @@ scoreboard players operation @s arenaLastDeaths = @s arenaDeaths
 # before this one starts.
 kill @e[tag=arena_mob]
 
-tellraw @s {"text":"HALYARD MOB ARENA","color":"dark_red","bold":true}
+tellraw @s {"text":"CLAUDE'S HALYARD MOB ARENA","color":"dark_red","bold":true}
 tellraw @s {"text":"Waves get harder. Spider eyes drop from every kill -- sell them outside for money. Die, and whatever you're carrying when you go down stays here.","color":"gray"}
 tp @s -30 71 96
 function halyard_arena:next_wave

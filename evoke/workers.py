@@ -545,7 +545,23 @@ def _process_event(event: dict, producer):
         doc = {
             "timestamp": now_str, "user_id": user_id, "display_name": display_name,
             "kind": "arena_wave", "tier": None,
-            "message": f"⚔ {display_name} reached wave {wave} in the Halyard Mob Arena",
+            "message": f"⚔ {display_name} reached wave {wave} in Claude's Halyard Mob Arena",
+        }
+        os_client.index(index="activity-feed", body=doc)
+        live_hub.broadcast({"type": "ActivityPosted", "data": doc})
+
+    # The Mob Gauntlet web wiring -- same shape as ArenaWaveReached above
+    # (see check_gauntlet_progress in bridge.py).
+    if event_type == "GauntletWaveReached":
+        user_id = event['data']['user_id']
+        wave = event['data']['wave']
+        now_str = datetime.datetime.now().isoformat()
+        name_row = _db_fetch_one("SELECT display_name FROM users WHERE id = %s::uuid", (user_id,))
+        display_name = name_row[0] if name_row else "An agent"
+        doc = {
+            "timestamp": now_str, "user_id": user_id, "display_name": display_name,
+            "kind": "gauntlet_wave", "tier": None,
+            "message": f"⚔ {display_name} reached wave {wave} in the Mob Gauntlet",
         }
         os_client.index(index="activity-feed", body=doc)
         live_hub.broadcast({"type": "ActivityPosted", "data": doc})

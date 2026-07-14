@@ -852,7 +852,7 @@ Evoke.screens.gallery = async function gallery() {
 Evoke.screens.playerProfile = async function playerProfile(userId) {
   const { api, state, mount } = Evoke;
   const id = userId || state.userId;
-  const [profile, achievementsRes, missionsRes, questsRes, mcStatus, gearRes, kitRes, reflectionsRes, arenaRes] = await Promise.all([
+  const [profile, achievementsRes, missionsRes, questsRes, mcStatus, gearRes, kitRes, reflectionsRes, arenaRes, gauntletRes] = await Promise.all([
     api.playerProfile(id),
     api.achievements(id).catch(() => ({ qualities: {}, powers: {} })),
     api.missions(id).catch(() => ({ missions: [] })),
@@ -862,6 +862,7 @@ Evoke.screens.playerProfile = async function playerProfile(userId) {
     api.kitProgress(id).catch(() => ({ found: [], total: 10, complete: false, pieces: {} })),
     api.reflections(id).catch(() => ({ journal: [], total: 0 })),
     api.mcArena(id).catch(() => ({ best_wave: 0 })),
+    api.mcGauntlet(id).catch(() => ({ best_wave: 0 })),
   ]);
   Evoke.kit?.visit("valve");
   const badgeKeys = ["Empathetic Changemaker", "Systems Thinker", "Creative Visionary", "Deep Collaborator"];
@@ -934,6 +935,7 @@ Evoke.screens.playerProfile = async function playerProfile(userId) {
     { icon: "inventory_2", n: `${gearRes.unlocked_count}/${gearRes.total}`, l: "Gear Recovered" },
     { icon: "workspace_premium", n: rarestGear ? rarestGear.icon : "—", l: rarestGear ? `Rarest: ${Evoke.escapeHtml(rarestGear.name)}` : "Rarest Gear" },
     { icon: "swords", n: arenaRes.best_wave > 0 ? `Wave ${arenaRes.best_wave}` : "—", l: "Arena Best" },
+    { icon: "swords", n: gauntletRes.best_wave > 0 ? `Wave ${gauntletRes.best_wave}` : "—", l: "Gauntlet Best" },
   ];
 
   mount(`

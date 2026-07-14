@@ -193,6 +193,9 @@ async def startup():
         # reads of the arenaBestWave scoreboard), created here too so the web
         # side can read it even before the bridge's first heartbeat tick.
         db_execute("CREATE TABLE IF NOT EXISTS mc_arena_best (user_id UUID PRIMARY KEY, best_wave INT NOT NULL DEFAULT 0)")
+        # Same split for the Mob Gauntlet (evoke-infra/minecraft/datapacks/mob_gauntlet) --
+        # bridge-owned table, mirrors mc_arena_best.
+        db_execute("CREATE TABLE IF NOT EXISTS mc_gauntlet_best (user_id UUID PRIMARY KEY, best_wave INT NOT NULL DEFAULT 0)")
         # Identity customization: uploaded avatar (MinIO object key), the
         # procedural Agent Sigil config (small JSON: glyph + hue), and the
         # equipped Field Gear (JSON list of gear keys, validated on write).
@@ -2256,9 +2259,17 @@ async def minecraft_status():
 
 @app.get("/api/mc-arena/{user_id}")
 async def get_arena_progress(user_id: str):
-    """Halyard Mob Arena best-wave reached -- bridge-owned table (see
-    check_arena_progress in bridge.py), read-only here."""
+    """Claude's Halyard Mob Arena best-wave reached -- bridge-owned table
+    (see check_arena_progress in bridge.py), read-only here."""
     row = db_fetch_one("SELECT best_wave FROM mc_arena_best WHERE user_id = %s::uuid", (user_id,))
+    return {"best_wave": row[0] if row else 0}
+
+
+@app.get("/api/mc-gauntlet/{user_id}")
+async def get_gauntlet_progress(user_id: str):
+    """The Mob Gauntlet best-wave reached -- bridge-owned table (see
+    check_gauntlet_progress in bridge.py), read-only here."""
+    row = db_fetch_one("SELECT best_wave FROM mc_gauntlet_best WHERE user_id = %s::uuid", (user_id,))
     return {"best_wave": row[0] if row else 0}
 
 

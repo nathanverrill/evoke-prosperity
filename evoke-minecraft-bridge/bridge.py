@@ -479,6 +479,7 @@ def get_online_linked_players(conn, online_players: list) -> dict:
         cur.close()
 
 ARENA_XP_PER_WAVE = 20
+GAUNTLET_XP_PER_WAVE = 30
 
 
 def _parse_scoreboard_value(response: str):
@@ -536,6 +537,50 @@ def check_arena_progress(conn, rcon: "RCONClient", linked: dict):
         })
         publish_event("ArenaWaveReached", {"user_id": user_id, "wave": wave})
         print(f"✓ Arena progress: {player_name} reached wave {wave} (was {known})")
+
+
+def check_gauntlet_progress(conn, rcon: "RCONClient", linked: dict):
+    """The Mob Gauntlet's web wiring -- identical shape to
+    check_arena_progress above, reading gauntletBestWave instead of
+    arenaBestWave. Separate table (mc_gauntlet_best) since the two arenas
+    are unrelated runs with independent progress, even though the ratchet/
+    dedupe logic is the same idiom."""
+    cur = conn.cursor()
+    try:
+        cur.execute("CREATE TABLE IF NOT EXISTS mc_gauntlet_best (user_id UUID PRIMARY KEY, best_wave INT NOT NULL DEFAULT 0)")
+        conn.commit()
+    finally:
+        cur.close()
+
+    for player_name, user_id in linked.items():
+        response = rcon.execute_command(f"scoreboard players get {player_name} gauntletBestWave")
+        wave = _parse_scoreboard_value(response)
+        if wave is None or wave <= 0:
+            continue
+
+        cur = conn.cursor()
+        try:
+            cur.execute("SELECT best_wave FROM mc_gauntlet_best WHERE user_id = %s::uuid", (user_id,))
+            row = cur.fetchone()
+            known = row[0] if row else 0
+            if wave <= known:
+                continue
+            cur.execute(
+                """INSERT INTO mc_gauntlet_best (user_id, best_wave) VALUES (%s::uuid, %s)
+                   ON CONFLICT (user_id) DO UPDATE SET best_wave = EXCLUDED.best_wave""",
+                (user_id, wave)
+            )
+            conn.commit()
+        finally:
+            cur.close()
+
+        publish_event("XPGranted", {
+            "user_id": user_id,
+            "amount": GAUNTLET_XP_PER_WAVE * (wave - known),
+            "reason": "gauntlet_wave",
+        })
+        publish_event("GauntletWaveReached", {"user_id": user_id, "wave": wave})
+        print(f"✓ Gauntlet progress: {player_name} reached wave {wave} (was {known})")
 
 
 def get_random_ambient_reward(conn) -> dict:
@@ -1073,6 +1118,7 @@ async def heartbeat_loop():
                     conn = get_db_connection()
                     try:
                         check_arena_progress(conn, arena_rcon, linked)
+                        check_gauntlet_progress(conn, arena_rcon, linked)
                     finally:
                         return_db_connection(conn)
                     arena_rcon.close()
