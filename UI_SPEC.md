@@ -26,8 +26,9 @@ Companion to [`BUILD_PLAN.md`](BUILD_PLAN.md). Defines the gamified web app this
 /game/flow, /game/decrypt  The two Training Sims themselves
 /alchemy                 Hidden -- unlocks via the 5-fragment Alchemy Signal scavenger hunt
 /faq                     Connect-to-Basin instructions, "what does done mean," Field Report explainer
-/admin                   Instructor Ops Deck: cohort table, mission release + stage assignment -- not in the
-                         learner nav, direct-URL only, no role check yet
+/admin                   Instructor Ops Deck: cohort table, mission release + stage assignment, and (new
+                         2026-07-16) a Teams section -- roster import from the LMS, team creation, member
+                         assignment -- not in the learner nav, direct-URL only, no role check yet
 /companion               The Field Kit (installable PWA) -- registered to a learner via the Hub QR's
                          one-time pairing token; daily Field Report, Basin linking, quests, B1llbot
 ```
@@ -44,7 +45,7 @@ Mirrors the four-beat loop in the showcase mockup:
 
 **1. Graphic novel (`/novel`)** — the story beat that frames the week's missions. Full-bleed panel pager (image + caption panels, keyboard/click advance). Chapter unlocks are driven by mission progress (`MissionCompleted` events); locked chapters show as silhouetted/disabled in a chapter rail. Last panel of a chapter ends on a call-to-action button: "Open Mission Brief →".
 
-**2. Mission brief (`/mission/{id}`)** — the mission as story assignment. Shows: arc + week chip, title, narrative brief (markdown from the mission record, which — per `BUILD_PLAN.md` — came from the Brightspace sim), the Superpower it builds toward, PFL domain, evidence requirements, and the paired Minecraft quest card (clearly marked *optional — Basin Simulation*). Primary action: evidence upload → `POST /api/submit-evidence`. **Spec-vs-code note:** this line used to describe a "file + optional reflection text" form; the shipped form (`screens.js`) is a bare file input with no reflection field at all — see `GAPS.md`'s "Evidence submission has no scaffolding" gap. Treat the reflection text as aspirational until it's actually built, not as something already there. On submit, the **timeline strip** for this mission animates live: Submitted → Processing → AI Analysis → Instructor Review → Complete (polls the existing `learner-timeline` projection; each step lights as its event lands). The common-tier award notification should visibly arrive within seconds of submitting — that immediacy is the hook.
+**2. Mission brief (`/mission/{id}`)** — the mission as story assignment. Shows: arc + week chip, title, the real student-facing narrative (Step 1/2/3 structure, transcribed from the 07.14.26 curriculum docx into `pbl_description`/`evidence_requirements_md` — see `CONCEPTS.md`'s Mission glossary entry), the Superpower it builds toward, PFL domain, an Evidence checklist, and the paired Minecraft quest card (clearly marked *optional — Basin Simulation*). **As of 2026-07-16 this is two separate action cards, not one form** (`screens.js`'s `missionBrief`): a **Team Evidence** card (file upload, any team member can submit or improve it, `POST /api/submit-evidence`, visible team-wide once submitted) and a **Your Reflection** card (personal text, always available regardless of who submitted the team's evidence, `POST /api/submit-reflection`). Completion is a real AND-gate — a learner's own award/XP fires only once *both* their team's evidence and their own reflection exist, whichever lands second (see `CONCEPTS.md`'s Evidence vs. Reflection entry; the old "bare file input, no reflection field" gap this section used to describe is closed). On submit, the **timeline strip** for this mission animates live: Submitted → Processing → AI Analysis → Instructor Review → Complete (polls the existing `learner-timeline` projection; each step lights as its event lands) — "Submitted" now reflects the team's evidence, not necessarily this viewer's own click. The common-tier award notification should visibly arrive within seconds of the AND-gate closing — that immediacy is the hook.
 
 **3. Mission debrief (`/mission/{id}/debrief`)** — completion payoff. Insights (AI + instructor feedback, additive, never overwritten), awards earned for this mission with **Collect** buttons (uncollected awards pulse), XP gained, badge progress delta, and the next-story hook ("Chapter 3 unlocked"). Collect calls `POST /api/awards/{award_id}/collect` — same endpoint as Companion Mode; copy should hint the reward lands in Minecraft ("Delivered to your agent in the Basin").
 
@@ -102,7 +103,7 @@ The whole app ships deliberately unskinned — structure, layout, and interactio
 |---|---|---|
 | Operations Hub | `/api/missions`, learner timeline projection, `/api/notifications/{user_id}`, `/api/profile/player/{id}` (mini card) | — |
 | Novel | `/api/missions` (chapter gating) + static chapter content | — |
-| Mission brief | `/api/missions`, `/api/mc-quests`, timeline projection | `/api/submit-evidence` |
+| Mission brief | `/api/missions`, `/api/mc-quests`, timeline projection | `/api/submit-evidence` (team), `/api/submit-reflection` (personal, gates own award/XP) |
 | Debrief | timeline projection (insights), `/api/awards/{user_id}` | `/api/awards/{award_id}/collect` |
 | Player profile | `/api/profile/player/{user_id}` | `/api/minecraft/link`, `/api/mc-quests/{quest_id}/submit` |
 | Team profile | `/api/profile/team/{team_id}` | — |
@@ -110,10 +111,10 @@ The whole app ships deliberately unskinned — structure, layout, and interactio
 | B1llbot drawer | — | `/api/billbot/chat` |
 | Campaign Map | `/api/progress-map/{user_id}`, `/api/world-state` | — |
 | Field Ops / Training | `/api/minigames/{key}/leaderboard`, `/api/minigames/signal/{user_id}` | `/api/minigames/{key}/score`, `/api/minigames/signal/fragment` |
-| Dossier extras | `/api/gear/{user_id}`, `/api/minigames/kit/{user_id}`, `/api/reflections/{user_id}`, `/api/achievements/{user_id}` | `/api/gear/{user_id}/equip`, `/api/avatar/{user_id}`, `/api/profile/{user_id}/sigil` |
-| Now (Field Report card) | `/api/reflections/{user_id}` | `/api/reflection` |
+| Dossier extras | `/api/gear/{user_id}`, `/api/minigames/kit/{user_id}`, `/api/reflections/{user_id}` (daily Field Report/Wisdom Journal — *not* the per-mission `mission_reflections` above, see `CONCEPTS.md`), `/api/achievements/{user_id}` | `/api/gear/{user_id}/equip`, `/api/avatar/{user_id}`, `/api/profile/{user_id}/sigil` |
+| Now (Field Report card) | `/api/reflections/{user_id}` (daily Field Report, unrelated to mission reflections) | `/api/reflection` |
 | Field Kit (pairing/linking) | `/api/minecraft/link-request/{user_id}`, `/api/minecraft/connect-info` | `/api/companion/pair`, `/api/minecraft/link-code`, `/api/minecraft/link-confirm` |
-| Instructor Ops Deck | `/api/admin/cohort`, `/api/admin/missions` | `/api/admin/missions/{id}/release`, `/api/admin/missions/{id}/stage` |
+| Instructor Ops Deck | `/api/admin/cohort`, `/api/admin/missions`, `/api/admin/roster`, `/api/admin/teams` | `/api/admin/missions/{id}/release`, `/api/admin/missions/{id}/stage`, `/api/admin/roster/{id}/import`, `/api/admin/teams`, `/api/admin/teams/{id}/members` |
 | Live layer (all screens) | `WS /ws` — pushed events (ActivityPosted, WorldStateAdvanced, LevelUpped, MinecraftPresence, MinecraftLinkRequested…) | — |
 
 ## Explicitly out of scope
