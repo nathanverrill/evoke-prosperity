@@ -3,6 +3,7 @@ import json
 import datetime
 import asyncio
 import random
+import re
 import uuid
 from typing import Optional, List
 from fastapi import FastAPI, HTTPException, File, UploadFile, Form, Depends, Response, Request, WebSocket, WebSocketDisconnect
@@ -2429,30 +2430,44 @@ async def get_gauntlet_progress(user_id: str):
 
 
 # ========== Companion (phone) ==========
-def _companion_url(request: Request) -> str:
+_PRIVATE_IPV4_RE = re.compile(
+    r"^(10\.\d{1,3}\.\d{1,3}\.\d{1,3}"
+    r"|172\.(1[6-9]|2\d|3[01])\.\d{1,3}\.\d{1,3}"
+    r"|192\.168\.\d{1,3}\.\d{1,3})$"
+)
+
+
+def _companion_url(request: Request, hint_host: Optional[str] = None) -> str:
     """Best-effort URL a *phone* can reach. Priority: explicit override
     (PUBLIC_WEB_URL) > the host the browser itself used (works when the
-    user opened the app via LAN IP) > localhost (QR still renders; the UI
-    explains it won't scan usefully until opened via LAN IP)."""
+    user opened the app via LAN IP) > a client-supplied hint_host (the
+    browser's own WebRTC-discovered local IP, app.js's detectLocalIP() --
+    the server can't determine the host machine's real LAN IP itself from
+    behind Docker's bridge network, but a browser that navigated here via
+    localhost still knows its own local network address) > localhost (QR
+    still renders; the UI explains it won't scan usefully as-is)."""
     override = os.getenv("PUBLIC_WEB_URL", "")
     if override:
         return override.rstrip("/") + "/companion.html"
     host = request.headers.get("host", "localhost:8000")
+    if hint_host and _PRIVATE_IPV4_RE.match(hint_host) and (host.startswith("localhost") or host.startswith("127.")):
+        port = host.split(":", 1)[1] if ":" in host else "80"
+        host = f"{hint_host}:{port}"
     return f"http://{host}/companion.html"
 
 
 @app.get("/api/companion/info")
-async def companion_info(request: Request):
-    url = _companion_url(request)
+async def companion_info(request: Request, hint_host: Optional[str] = None):
+    url = _companion_url(request, hint_host)
     return {"url": url, "scannable": not url.startswith("http://localhost") and not url.startswith("http://127.")}
 
 
 @app.get("/api/companion/qr.svg")
-async def companion_qr(request: Request, user_id: Optional[str] = None):
+async def companion_qr(request: Request, user_id: Optional[str] = None, hint_host: Optional[str] = None):
     import io
     import qrcode
     import qrcode.image.svg
-    url = _companion_url(request)
+    url = _companion_url(request, hint_host)
     if user_id:
         # Pairing token (BUILD_PLAN_2 §7): the QR registers the phone as
         # the logged-in web user, no login. Single-use, 10-min expiry,

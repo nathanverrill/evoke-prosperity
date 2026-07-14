@@ -138,7 +138,7 @@ const Evoke = (() => {
     minecraftStatus: () => apiGet("/api/minecraft/status"),
     mcArena: (userId) => apiGet(`/api/mc-arena/${userId}`),
     mcGauntlet: (userId) => apiGet(`/api/mc-gauntlet/${userId}`),
-    companionInfo: () => apiGet("/api/companion/info"),
+    companionInfo: (hintHost) => apiGet(`/api/companion/info${hintHost ? `?hint_host=${encodeURIComponent(hintHost)}` : ""}`),
     teamWheel: (teamId) => apiGet(`/api/team/${teamId}/wheel`),
     adminCohort: (userId) => apiGet(`/api/admin/cohort?user_id=${userId}`),
     adminRoster: () => apiGet("/api/admin/roster"),
@@ -569,6 +569,39 @@ const Evoke = (() => {
     return div.innerHTML;
   }
 
+  // The server can only guess the Field Kit QR's URL from the Host header
+  // the browser used (main.py's _companion_url) -- if that's "localhost"
+  // (the natural thing to type on the machine actually running the
+  // stack), the server has no way to do better: behind Docker's bridge
+  // network it can't see the host's real LAN IP either. The browser can,
+  // though, even when it navigated via localhost -- creating an
+  // RTCPeerConnection and reading its ICE candidates reveals the machine's
+  // real local network IP(s), independent of what's in the address bar.
+  // Best-effort only: privacy-hardened browsers (mDNS-obfuscated ICE
+  // candidates) may not expose a usable IP, in which case this resolves
+  // null and the UI just keeps its existing localhost guidance.
+  function detectLocalIP() {
+    return new Promise((resolve) => {
+      const isPrivate = (ip) => /^(10\.|192\.168\.|172\.(1[6-9]|2\d|3[01])\.)/.test(ip);
+      let settled = false;
+      const finish = (ip) => { if (!settled) { settled = true; resolve(ip); } };
+      try {
+        const pc = new RTCPeerConnection({ iceServers: [] });
+        const found = new Set();
+        pc.createDataChannel("");
+        pc.onicecandidate = (e) => {
+          if (!e.candidate) { pc.close(); finish([...found].find(isPrivate) || null); return; }
+          const m = e.candidate.candidate.match(/(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})/);
+          if (m) found.add(m[1]);
+        };
+        pc.createOffer().then((offer) => pc.setLocalDescription(offer)).catch(() => finish(null));
+        setTimeout(() => { try { pc.close(); } catch (e) {} finish([...found].find(isPrivate) || null); }, 1500);
+      } catch (e) {
+        finish(null);
+      }
+    });
+  }
+
   // ---------- Router ----------
   const routes = [
     { pattern: /^#\/welcome$/, screen: "welcome" },
@@ -680,5 +713,5 @@ const Evoke = (() => {
     await router();
   }
 
-  return { state, api, mount, boot, escapeHtml, toast, sfx, screens: {} };
+  return { state, api, mount, boot, escapeHtml, toast, sfx, detectLocalIP, screens: {} };
 })();

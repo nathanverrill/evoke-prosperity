@@ -180,10 +180,10 @@ Evoke.screens.hub = async function hub() {
   const fieldKitCard = companion ? `
     <div class="card" id="fieldkit-card">
       <div class="card__eyebrow">Field Kit — your phone</div>
-      <div class="fieldkit-qr"><img src="/api/companion/qr.svg?user_id=${state.userId}" alt="QR code to the Companion Field Kit"></div>
-      <p class="empty-state">${companion.scannable
+      <div class="fieldkit-qr"><img id="fieldkit-qr-img" src="/api/companion/qr.svg?user_id=${state.userId}" alt="QR code to the Companion Field Kit"></div>
+      <p class="empty-state" id="fieldkit-qr-status">${companion.scannable
         ? "Scan to open your Field Kit — it registers your phone as you automatically (no login). Daily field reports, Basin linking, quests, and B1llbot from the field."
-        : "Open this site from your machine's LAN IP (not localhost) and this QR becomes scannable from your phone."}</p>
+        : "Checking whether this device's local network address can make the QR scannable…"}</p>
     </div>
   ` : "";
 
@@ -320,6 +320,25 @@ Evoke.screens.hub = async function hub() {
     localStorage.setItem(guideKey, "1");
     document.getElementById("hub-guide").remove();
   });
+
+  // If the server's own guess isn't scannable (we're on localhost), see if
+  // the browser can do better -- it can discover its own LAN IP via WebRTC
+  // even when the address bar says "localhost" (see app.js's
+  // detectLocalIP). Best-effort: silently keeps the original guidance if
+  // the browser can't or won't expose an IP.
+  if (companion && !companion.scannable) {
+    Evoke.detectLocalIP().then(async (ip) => {
+      if (!ip) return;
+      try {
+        const better = await api.companionInfo(ip);
+        if (!better.scannable) return;
+        const img = document.getElementById("fieldkit-qr-img");
+        const status = document.getElementById("fieldkit-qr-status");
+        if (img) img.src = `/api/companion/qr.svg?user_id=${state.userId}&hint_host=${encodeURIComponent(ip)}`;
+        if (status) status.textContent = "Scan to open your Field Kit — it registers your phone as you automatically (no login). Daily field reports, Basin linking, quests, and B1llbot from the field.";
+      } catch (e) { /* keep the original localhost guidance */ }
+    });
+  }
 
   // The Field Report objective is already on this same page -- scroll to
   // it instead of a real navigation (its href is "#/" as a harmless

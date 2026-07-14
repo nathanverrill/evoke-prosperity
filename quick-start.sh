@@ -44,6 +44,12 @@ python3 seed.py || {
 echo ""
 echo "🟢 Starting application services (fastapi, brightspace-sim, minecraft-bridge)..."
 cd ../evoke
+# Docker Compose only auto-loads a .env file from the same directory as the
+# compose file it's running -- the root .env (MINECRAFT_PUBLIC_HOST,
+# PUBLIC_WEB_URL, etc.) was silently never reaching this stack without this,
+# no matter how it was set at the root. Kept in sync on every run so editing
+# the root .env is still the one place to change things.
+cp ../.env .env
 docker compose up -d
 
 echo "⏳ Waiting for services to start..."
