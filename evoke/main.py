@@ -2319,6 +2319,17 @@ MINIGAME_KEYS = {"flow-control", "signal-decrypt"}
 MINIGAME_DAILY_XP = 25
 MINIGAME_BEST_BONUS = 10
 
+# Scores are computed client-side and posted as a plain int with no signing
+# -- fine for a self-reported honor-system XP grant (already capped above),
+# but an unclamped score would also land straight on the public per-game
+# leaderboard, where a spoofed request is far more visible than a spoofed
+# quest. Clamp to each game's real theoretical max (with headroom) so a
+# forged score can't out-rank real play. See games.js for the math each
+# ceiling is derived from: Flow Control's gauges cap at 100/100/12/12 plus
+# a +20 survive bonus; Signal Decrypt's streak multiplier over an 8-card
+# deck tops out at 100*(1+2+...+8).
+MINIGAME_MAX_SCORE = {"flow-control": 300, "signal-decrypt": 3700}
+
 # The Alchemy Signal hunt: 5 fragments hidden across the app. NOTE:
 # GAME_DESIGN.md §13.5 explicitly leaves Alchemy's encrypted-signal beats
 # as an open narrative question -- the unlock copy stays deliberately
@@ -2332,6 +2343,8 @@ async def submit_minigame_score(game_key: str, user_id: str, score: int = Form(.
     if game_key not in MINIGAME_KEYS:
         raise HTTPException(status_code=404, detail="Unknown training sim")
     try:
+        score = max(0, min(score, MINIGAME_MAX_SCORE[game_key]))
+
         prev_best = db_fetch_one(
             "SELECT MAX(score) FROM minigame_scores WHERE user_id = %s::uuid AND game_key = %s",
             (user_id, game_key)

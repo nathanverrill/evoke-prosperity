@@ -8,4 +8,4 @@ scoreboard players set @s arenaActive 0
 scoreboard players set @s arenaWave 0
 scoreboard players set #global arenaOccupied 0
 kill @e[tag=arena_mob]
-tp @s -30 71 87
+tp @s -30 71 85

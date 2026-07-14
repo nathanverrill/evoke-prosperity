@@ -71,28 +71,45 @@ the same chunk as the villager pen.
 ## 3. The three real in-world minigames
 
 All three are **live on the running server right now**. None are wired to
-the web app (flagged, not built — see `GAPS.md`). None exist as portable
-datapacks; all are raw command blocks physically placed in the world save.
+the web app (flagged, not built — see `GAPS.md`). Originally all three were
+raw command blocks physically placed in the world save with no source file
+anywhere; as of the 2026-07-14 robustness pass, coinflip and the minecart
+ride have been extracted into portable, version-controlled datapacks (same
+pattern `mines_lift_precheck` already used for the mines entry check) —
+the physical command blocks that used to hold the logic are now inert stubs
+or a single trigger call, and the datapack file is the real source of truth.
+The mines room-randomizer itself is the one piece still raw-command-block-only
+(see below).
 
 ### Coinflip gambling
-`r.-1.0.mca`, ~`(-137 to -140, 62, 149)`. A "2 gold to play" sign gates a
-`/execute store result score @p coinflip run random value 0..1` — win pays
-3 gold ingots, lose pays nothing. Scoreboards: `coinflip`, `hasgold`, `bet`,
-`detected`.
+`r.-1.0.mca`, ~`(-137 to -140, 62, 149)`. **Extracted**:
+`evoke-infra/minecraft/datapacks/coinflip/`, function `coinflip:play`. A "2
+gold to play" sign gates a coin flip — win pays 3 gold ingots, lose pays
+nothing. Scoreboards: `coinflip`, `hasgold`. (The original raw version had a
+real bug — the payout fired regardless of whether the player had actually
+paid, a free-gold exploit; fixed as part of the extraction, see `GAPS.md`.)
 
 ### The mines (4-room randomized dungeon)
 Entrance ~`(-140, 66, 168)`, "Enter the mines" sign. Gated by a real
 pickaxe check (`mines_lift_precheck` datapack — **already extracted and
 committed** at `evoke-infra/minecraft/datapacks/mines_lift_precheck/`, though
-that only covers the entry check, not the room-randomizer itself). Four
+that only covers the entry check, not the room-randomizer itself, which
+**remains raw command blocks in the world save**, no source file). Four
 pre-built room layouts (`mine00`/`mine01`/`mine10`/`mine11`, region
 `r.-1.-1.mca` ~chunks 787-825) swapped in via structure blocks, driven by a
 `room00`/`room01`/`room10`/`room11` "room assign sys" state machine. Infinite
-admin coal shop, auto-refilling unbreakable pickaxe.
+admin coal shop, auto-refilling unbreakable pickaxe. (A tick-order bug in
+the `room10`/`room11` occupancy check was found and fixed live via RCON in
+the 2026-07-14 pass — see `GAPS.md` — but the extraction itself is still
+open, flagged as the next candidate for this treatment.)
 
 ### Minecart/dropper ride
-`r.0.-1.mca`, ~`(304-306, 128-134, -142 to -144)`. A `rail1`/`cartTimer`
-timer loop summons a chest minecart every 80 ticks, fed by two droppers.
+`r.0.-1.mca`, ~`(304-306, 128-134, -142 to -144)`. **Extracted**:
+`evoke-infra/minecraft/datapacks/minecart_ride/`, `#minecraft:tick` function
+calling one `laneN.mcfunction` per rail. A timer loop per lane summons a
+chest minecart every 80 ticks, fed by two droppers. (The original raw
+version had all 3 lanes sharing one `rail1` counter instead of one each,
+tripling the effective tick rate; fixed as part of the extraction.)
 
 ---
 
@@ -233,16 +250,22 @@ removing if that key is real, independent of everything else in this doc.
 
 Already portable and committed at `evoke-infra/minecraft/datapacks/`:
 `custom_drops`, `halyard_rent_functions` (rent/late-fee half only),
-`inventory_save`, `mines_lift_precheck` (entry check only), and
-`halyard_mob_arena` (new — see §10).
+`inventory_save`, `mines_lift_precheck` (entry check only),
+`halyard_mob_arena` (see §10), and, new in the 2026-07-14 robustness pass,
+`coinflip` and `minecart_ride` (both §3) — extracted specifically because
+that pass found and fixed real bugs in both (a free-gold exploit in
+coinflip, a shared-counter bug in the minecart ride) and there was
+otherwise nowhere for the fix to live durably.
 
 **Still only raw command blocks in the world save**, not portable, not in
-git: the coinflip room, the mines room-randomizer itself, the minecart ride,
-the full day-job stage machine, the hidden room + parkour shaft, the
-teleport hub, every badge-granting command block, and the B1llbot kiosk /
-factory dialogue. If any of these ever need to survive a world rebuild or
-be code-reviewed, they'd need the same extraction treatment
-`mines_lift_precheck` already got.
+git: the mines room-randomizer itself (entry check only is extracted; a
+tick-order bug in it was fixed live via RCON in the same pass but the
+extraction is still open — flagged as the next candidate), the full
+day-job stage machine, the hidden room + parkour shaft, the teleport hub,
+every badge-granting command block, and the B1llbot kiosk / factory
+dialogue. If any of these ever need to survive a world rebuild or be
+code-reviewed, they'd need the same extraction treatment
+`mines_lift_precheck`, `coinflip`, and `minecart_ride` already got.
 
 ---
 

@@ -12,3 +12,18 @@ execute as @a[scores={arenaActive=1,arenaWave=1..5}] if entity @s unless entity 
 # Death -- deathCount (vanilla built-in) ticked up since the snapshot we
 # took at the start of this run.
 execute as @a[scores={arenaActive=1}] if score @s arenaDeaths > @s arenaLastDeaths run function halyard_arena:on_death
+
+# Self-heal (walked out without dying/winning, or reconnected after a
+# mid-run disconnect and respawned elsewhere): an active player who is no
+# longer inside the room bounds gets their run closed out here instead of
+# staying stuck -- also covers a stale arenaActive from the disconnect case
+# below, since a reconnecting player gets caught by this the moment they're
+# next seen outside the box.
+execute as @a[scores={arenaActive=1}] unless entity @s[x=-37,y=69,z=89,dx=14,dy=10,dz=14] run function halyard_arena:leave_early
+
+# Self-heal (disconnected mid-run and hasn't reconnected yet): nobody
+# online currently has an active run, but the room is still marked
+# occupied -- release the global lock so other players aren't blocked
+# while we wait for that player to come back (they'll get caught by the
+# rule above once they do).
+execute if score #global arenaOccupied matches 1 unless entity @a[scores={arenaActive=1}] run scoreboard players set #global arenaOccupied 0

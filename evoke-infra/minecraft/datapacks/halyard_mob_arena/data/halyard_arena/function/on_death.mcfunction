@@ -14,4 +14,4 @@ scoreboard players operation @s arenaLastDeaths = @s arenaDeaths
 scoreboard players set @s arenaActive 0
 scoreboard players set @s arenaWave 0
 scoreboard players set #global arenaOccupied 0
-tp @s -30 71 87
+tp @s -30 71 85
