@@ -448,11 +448,14 @@ def _process_event(event: dict, producer):
     # 5b. TEAM WHEEL WORKER (GAME_DESIGN §7.1, variants #1 + #3)
     # -------------------------------------------------------------
     # A team's wheel for a mission completes when every *current* roster
-    # member has submitted it (rolling roster, no deadline -- the doc's own
-    # recommended combination). Purely additive/celebratory: publishes
-    # TeamWheelCompleted, never gates anyone. MissionCompleted fires once
-    # per (user, mission) (resubmissions don't re-fire it), so this fires
-    # exactly once, on the final member's completion.
+    # member has reflected on it (rolling roster, no deadline -- the doc's
+    # own recommended combination). The team's evidence is one shared file,
+    # not one per member, so "submitted" can't be the per-member signal
+    # anymore -- the personal, per-member act under the team-evidence model
+    # is the reflection (see mission_reflections / _complete_mission_for_user
+    # in main.py). Purely additive/celebratory: publishes TeamWheelCompleted,
+    # never gates anyone. MissionCompleted fires once per (user, mission),
+    # so this fires exactly once, on the final member's completion.
     if event_type == "MissionCompleted":
         user_id = event['data']['user_id']
         mission_id = event['data']['mission_id']
@@ -467,7 +470,7 @@ def _process_event(event: dict, producer):
                 if not roster:
                     continue
                 completed = _db_fetch_all(
-                    "SELECT DISTINCT user_id FROM submissions WHERE mission_id = %s::uuid AND user_id = ANY(%s::uuid[])",
+                    "SELECT DISTINCT user_id FROM mission_reflections WHERE mission_id = %s::uuid AND user_id = ANY(%s::uuid[])",
                     (mission_id, roster)
                 )
                 if len(completed) < len(roster):

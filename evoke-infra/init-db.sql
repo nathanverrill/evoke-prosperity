@@ -208,8 +208,14 @@ CREATE TABLE evoke_identities (
 -- Submissions (for tracking LMS assignment submissions)
 CREATE TABLE submissions (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    -- Who physically submitted (attribution/feed messages only, as of the
+    -- team-evidence model -- see team_id below for the real completion key).
     user_id UUID NOT NULL REFERENCES users(id),
     mission_id UUID NOT NULL REFERENCES missions(id),
+    -- The team's shared evidence artifact -- any member can submit it, and
+    -- it's owned by the team, not the submitter. NULL only for historical
+    -- rows that predate this column.
+    team_id UUID REFERENCES teams(id),
     brightspace_submission_id VARCHAR(255),
     submitted_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     file_path VARCHAR(500),
@@ -219,6 +225,21 @@ CREATE TABLE submissions (
     feedback TEXT,
     graded_at TIMESTAMP,
     UNIQUE(user_id, mission_id, submitted_at)
+);
+
+-- Each individual team member's own reflection on a mission -- required,
+-- separately from the team's shared evidence above, to receive their own
+-- award/XP (an AND-gate: see main.py's _complete_mission_for_user). Not the
+-- same thing as daily_reflections (the Field Report/Wisdom Journal), which
+-- is unrelated and once-a-day.
+CREATE TABLE mission_reflections (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    user_id UUID NOT NULL REFERENCES users(id),
+    mission_id UUID NOT NULL REFERENCES missions(id),
+    team_id UUID NOT NULL REFERENCES teams(id),
+    reflection TEXT NOT NULL,
+    submitted_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE(user_id, mission_id)
 );
 
 -- Badge to Brightspace Award mapping

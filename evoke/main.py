@@ -203,6 +203,22 @@ async def startup():
         # new user always 500'd. init-db.sql has it inline for fresh volumes;
         # this is the same fix for a volume that predates that.
         db_execute("CREATE UNIQUE INDEX IF NOT EXISTS users_email_org_unique ON users(email, org_id)")
+        # Team-evidence + individual-reflection model: submissions become the
+        # team's shared artifact (team_id is the real completion key now,
+        # user_id kept only for submitted-by attribution); mission_reflections
+        # is each member's own required reflection, gating their own award/XP
+        # -- see main.py's _complete_mission_for_user. Not the same thing as
+        # daily_reflections (Field Report/Wisdom Journal), which is unrelated.
+        db_execute("ALTER TABLE submissions ADD COLUMN IF NOT EXISTS team_id UUID REFERENCES teams(id)")
+        db_execute("""CREATE TABLE IF NOT EXISTS mission_reflections (
+            id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+            user_id UUID NOT NULL REFERENCES users(id),
+            mission_id UUID NOT NULL REFERENCES missions(id),
+            team_id UUID NOT NULL REFERENCES teams(id),
+            reflection TEXT NOT NULL,
+            submitted_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            UNIQUE(user_id, mission_id)
+        )""")
         # Identity customization: uploaded avatar (MinIO object key), the
         # procedural Agent Sigil config (small JSON: glyph + hue), and the
         # equipped Field Gear (JSON list of gear keys, validated on write).
@@ -1109,14 +1125,180 @@ async def admin_unrelease_mission(mission_id: str):
 
 
 # ========== Evidence Submission ==========
+def _get_user_team(user_id: str) -> Optional[str]:
+    """A learner belongs to exactly one team (see the admin roster/team
+    endpoints) -- this is the single lookup everything in the
+    team-evidence-submission flow resolves "current team" through."""
+    row = db_fetch_one("SELECT team_id FROM team_members WHERE user_id = %s::uuid LIMIT 1", (user_id,))
+    return str(row[0]) if row else None
+
+
+def _team_member_ids(team_id: str) -> List[str]:
+    rows = db_fetch_all("SELECT user_id FROM team_members WHERE team_id = %s::uuid", (team_id,))
+    return [str(r[0]) for r in rows]
+
+
+async def _complete_mission_for_user(user_id: str, mission_id: str, team_id: str):
+    """The AND-gate: fires the one-time completion effects (award, XP,
+    MissionCompleted, stage completion, Power/Quality unlocks, notification)
+    only once BOTH the team's shared evidence exists for this mission AND
+    this specific member has submitted their own reflection. Safe to call
+    speculatively from either submit-evidence (evidence just landed) or
+    submit-reflection (a reflection just landed) -- checks its own
+    already-completed guard first, so calling it when the gate isn't
+    closed, or when it's already closed, are both safe no-ops."""
+    already = db_fetch_one(
+        "SELECT 1 FROM awards WHERE user_id = %s::uuid AND mission_id = %s::uuid AND tier = 'common' AND source = 'submission'",
+        (user_id, mission_id)
+    )
+    if already:
+        return
+
+    evidence = db_fetch_one(
+        "SELECT 1 FROM submissions WHERE team_id = %s::uuid AND mission_id = %s::uuid LIMIT 1",
+        (team_id, mission_id)
+    )
+    reflected = db_fetch_one(
+        "SELECT 1 FROM mission_reflections WHERE user_id = %s::uuid AND mission_id = %s::uuid LIMIT 1",
+        (user_id, mission_id)
+    )
+    if not evidence or not reflected:
+        return  # gate not closed yet
+
+    # Grant common tier award locally
+    award_id = str(uuid.uuid4())
+    db_execute(
+        """INSERT INTO awards (id, user_id, mission_id, tier, source, awarded_at)
+           VALUES (%s::uuid, %s::uuid, %s::uuid, 'common', 'submission', CURRENT_TIMESTAMP)
+           ON CONFLICT (user_id, mission_id, tier, source) DO NOTHING""",
+        (award_id, user_id, mission_id)
+    )
+
+    # Get campaign for badge mapping
+    campaign_id = db_fetch_one(
+        "SELECT active_campaign_id FROM organizations o JOIN users u ON u.org_id = o.id WHERE u.id = %s::uuid",
+        (user_id,)
+    )
+    if campaign_id:
+        campaign_id = campaign_id[0]
+
+        # Get common tier badge for this campaign
+        badge_id = db_fetch_one(
+            "SELECT id FROM badges WHERE campaign_id = %s::uuid AND key = 'common-tier' LIMIT 1",
+            (campaign_id,)
+        )
+
+        # Sync badge to Brightspace if adapter available
+        if brightspace_lms and badge_id:
+            try:
+                await brightspace_lms.push_badge_award(
+                    evoke_user_id=user_id,
+                    badge_id=badge_id[0],
+                    campaign_id=campaign_id,
+                    criteria="Completed mission (team evidence + reflection)",
+                    evidence=f"Mission ID: {mission_id}"
+                )
+                logger.info(f"Badge synced to Brightspace for user {user_id}")
+            except Exception as e:
+                logger.error(f"Badge sync failed: {e}")
+
+    # Publish AwardGranted event
+    await publish_event("AwardGranted", {
+        "award_id": award_id,
+        "user_id": user_id,
+        "mission_id": mission_id,
+        "tier": "common",
+        "source": "submission"
+    })
+
+    # Team evidence + your own reflection is what "completes" a mission for
+    # badge/count purposes -- later AI/teacher award tiers (trigger_ai_review/
+    # brightspace_review) are quality upgrades on an already-completed
+    # mission, not separate completions, so MissionCompleted/BadgeAwarded
+    # only fire here.
+    await publish_event("MissionCompleted", {
+        "user_id": user_id,
+        "mission_id": mission_id
+    })
+
+    # XP value is a placeholder (matches overview.md's example table) —
+    # GAPS.md flags the real XP economy as still undecided.
+    await publish_event("XPGranted", {
+        "user_id": user_id,
+        "amount": 100,
+        "reason": "mission_completed",
+        "mission_id": mission_id
+    })
+
+    # Achievements are Power-level (GAME_DESIGN.md §4.1), not just the 4
+    # Quality badges: each of the mission's Primary/Secondary tags
+    # resolves (via skills_framework.resolve_power, which also handles
+    # the 3 non-canonical mission-tag terms) to one of the 16 real
+    # Powers, and a Quality badge only "earns" once all 4 of its
+    # constituent Powers are unlocked. Route by the Power's own Table 1
+    # Quality, never the mission's labeled `superpower` field — those
+    # disagree in real cases (e.g. mission-09's primary tag, Courage, is
+    # a Creative Visionary Power despite that mission being headlined
+    # "Empathetic Changemaker").
+    # Stage completion (BUILD_PLAN_2 §3): if this closed out the user's
+    # stage ring, say so everywhere — the chapter-level celebration
+    # GAPS.md flags as missing. Keyed on real completion (an award exists)
+    # now, not just evidence existing somewhere.
+    stage_row = db_fetch_one("SELECT stage, week FROM missions WHERE id = %s::uuid", (mission_id,))
+    if stage_row:
+        the_stage = stage_row[0] or stage_row[1] or 1
+        remaining = db_fetch_one(
+            """SELECT COUNT(*) FROM missions m
+               WHERE COALESCE(m.stage, m.week, 1) = %s
+                 AND m.campaign_id = (SELECT campaign_id FROM missions WHERE id = %s::uuid)
+                 AND NOT EXISTS (SELECT 1 FROM awards a
+                                 WHERE a.user_id = %s::uuid AND a.mission_id = m.id AND a.source = 'submission')""",
+            (the_stage, mission_id, user_id)
+        )
+        if remaining and remaining[0] == 0:
+            await publish_event("StageCompleted", {
+                "user_id": user_id, "stage": the_stage,
+            })
+
+    mission_tags = db_fetch_one(
+        "SELECT primary_skill, secondary_skill FROM missions WHERE id = %s::uuid", (mission_id,)
+    )
+    if mission_tags:
+        for raw_tag, tag_type in [(mission_tags[0], "primary"), (mission_tags[1], "secondary")]:
+            power_key = skills_framework.resolve_power(raw_tag)
+            if not power_key:
+                continue
+            await publish_event("BadgeAwarded", {
+                "user_id": user_id,
+                "badge_key": skills_framework.POWER_TO_QUALITY[power_key],
+                "power_key": power_key,
+                "tag_type": tag_type,
+                "mission_id": mission_id
+            })
+
+    # Create notification
+    notification_id = str(uuid.uuid4())
+    award_id_from_db = db_fetch_one(
+        "SELECT id FROM awards WHERE user_id = %s::uuid AND mission_id = %s::uuid AND tier = 'common' AND source = 'submission' LIMIT 1",
+        (user_id, mission_id)
+    )[0]
+
+    db_execute(
+        "INSERT INTO notifications (id, user_id, award_id) VALUES (%s::uuid, %s::uuid, %s::uuid)",
+        (notification_id, user_id, award_id_from_db)
+    )
+
+
 @app.post("/api/submit-evidence")
 async def submit_evidence(
     user_id: str = Form(...),
     mission_id: str = Form(...),
     file: UploadFile = File(...),
-    reflection: Optional[str] = Form(None)
 ):
-    """Submit evidence for a mission"""
+    """Submit the TEAM's shared evidence for a mission -- any member can
+    call this. Closes the completion AND-gate (see
+    _complete_mission_for_user) for any teammate who already reflected;
+    everyone else's completion waits on their own reflection."""
     try:
         mission_release = db_fetch_one(
             "SELECT released_at FROM missions WHERE id = %s::uuid", (mission_id,)
@@ -1128,18 +1310,23 @@ async def submit_evidence(
             # "mission ordering" item: admin-release, not order-of-completion.
             raise HTTPException(status_code=403, detail="This mission hasn't been released yet")
 
+        team_id = _get_user_team(user_id)
+        if not team_id:
+            raise HTTPException(status_code=400, detail="You're not on a team yet -- ask an admin to assign you one")
+
         submission_id = str(uuid.uuid4())
 
         # Revise-and-resubmit is a first-class path (GAPS.md #3): a later
-        # submission of the same mission re-runs the AI review (which can
-        # upgrade the award tier) but must NOT re-fire the one-time
-        # completion effects -- previously every resubmission re-published
-        # MissionCompleted/XPGranted/BadgeAwarded and duplicate AwardGranted
-        # feed events, which both spammed the feed and made resubmission an
-        # infinite +100 XP faucet.
+        # submission of the same TEAM's evidence re-runs the AI review
+        # (which can upgrade the award tier) but must NOT re-fire the
+        # one-time completion effects for anyone already completed --
+        # previously every resubmission re-published MissionCompleted/
+        # XPGranted/BadgeAwarded and duplicate AwardGranted feed events,
+        # which both spammed the feed and made resubmission an infinite
+        # +100 XP faucet.
         prior = db_fetch_one(
-            "SELECT 1 FROM submissions WHERE user_id = %s::uuid AND mission_id = %s::uuid LIMIT 1",
-            (user_id, mission_id)
+            "SELECT 1 FROM submissions WHERE team_id = %s::uuid AND mission_id = %s::uuid LIMIT 1",
+            (team_id, mission_id)
         )
         is_resubmission = bool(prior)
 
@@ -1153,11 +1340,12 @@ async def submit_evidence(
             ContentType=file.content_type or "application/octet-stream"
         )
 
-        # Create submission record
+        # Create submission record -- team-owned; user_id here is
+        # submitted-by attribution only, not the completion key.
         db_execute(
-            """INSERT INTO submissions (id, user_id, mission_id, file_path, status, reflection)
-               VALUES (%s::uuid, %s::uuid, %s::uuid, %s, 'submitted', %s)""",
-            (submission_id, user_id, mission_id, object_key, reflection or None)
+            """INSERT INTO submissions (id, user_id, mission_id, team_id, file_path, status)
+               VALUES (%s::uuid, %s::uuid, %s::uuid, %s::uuid, %s, 'submitted')""",
+            (submission_id, user_id, mission_id, team_id, object_key)
         )
 
         # Sync to Brightspace if adapter available
@@ -1235,10 +1423,16 @@ async def submit_evidence(
             else:
                 logger.info(f"No Brightspace identity linked for {user_id}; skipping sim dropbox sync")
 
-        # Publish EvidenceSubmitted event
-        await publish_event("EvidenceSubmitted", {
+        team_members = _team_member_ids(team_id)
+
+        # Publish TeamEvidenceSubmitted (fans out AI-coach feedback to every
+        # member independently -- see workers.py's AI COACH WORKER, which
+        # already expected this event and just needed a real publisher).
+        await publish_event("TeamEvidenceSubmitted", {
             "submission_id": submission_id,
             "user_id": user_id,
+            "team_id": team_id,
+            "team_members": team_members,
             "mission_id": mission_id,
             "object_key": object_key,
             "filename": file.filename
@@ -1248,139 +1442,22 @@ async def submit_evidence(
             # Re-run the AI review (the upgrade path), skip every one-time
             # completion effect, and tell the client which case this was.
             if AI_ENABLED:
-                await trigger_ai_review(user_id, mission_id, object_key)
+                await trigger_ai_review(team_id, mission_id, object_key)
             return {"status": "success", "submission_id": submission_id, "resubmission": True}
 
-        # Grant common tier award locally
-        award_id = str(uuid.uuid4())
-        db_execute(
-            """INSERT INTO awards (id, user_id, mission_id, tier, source, awarded_at)
-               VALUES (%s::uuid, %s::uuid, %s::uuid, 'common', 'submission', CURRENT_TIMESTAMP)
-               ON CONFLICT (user_id, mission_id, tier, source) DO NOTHING""",
-            (award_id, user_id, mission_id)
-        )
-
-        # Get campaign for badge mapping
-        campaign_id = db_fetch_one(
-            "SELECT active_campaign_id FROM organizations o JOIN users u ON u.org_id = o.id WHERE u.id = %s::uuid",
-            (user_id,)
-        )
-        if campaign_id:
-            campaign_id = campaign_id[0]
-
-            # Get common tier badge for this campaign
-            badge_id = db_fetch_one(
-                "SELECT id FROM badges WHERE campaign_id = %s::uuid AND key = 'common-tier' LIMIT 1",
-                (campaign_id,)
-            )
-
-            # Sync badge to Brightspace if adapter available
-            if brightspace_lms and badge_id:
-                try:
-                    await brightspace_lms.push_badge_award(
-                        evoke_user_id=user_id,
-                        badge_id=badge_id[0],
-                        campaign_id=campaign_id,
-                        criteria="Submitted evidence for mission",
-                        evidence=f"Submission ID: {submission_id}"
-                    )
-                    logger.info(f"Badge synced to Brightspace for user {user_id}")
-                except Exception as e:
-                    logger.error(f"Badge sync failed: {e}")
-
-        # Publish AwardGranted event
-        await publish_event("AwardGranted", {
-            "award_id": award_id,
-            "user_id": user_id,
-            "mission_id": mission_id,
-            "tier": "common",
-            "source": "submission"
-        })
-
-        # Submitting evidence is what "completes" a mission for badge/count
-        # purposes — later AI/teacher award tiers (below, and in
-        # trigger_ai_review/brightspace_review) are quality upgrades on an
-        # already-completed mission, not separate completions, so
-        # MissionCompleted/BadgeAwarded only fire here.
-        await publish_event("MissionCompleted", {
-            "user_id": user_id,
-            "mission_id": mission_id
-        })
-
-        # XP value is a placeholder (matches overview.md's example table) —
-        # GAPS.md flags the real XP economy as still undecided.
-        await publish_event("XPGranted", {
-            "user_id": user_id,
-            "amount": 100,
-            "reason": "mission_completed",
-            "mission_id": mission_id
-        })
-
-        # Achievements are Power-level (GAME_DESIGN.md §4.1), not just the 4
-        # Quality badges: each of the mission's Primary/Secondary tags
-        # resolves (via skills_framework.resolve_power, which also handles
-        # the 3 non-canonical mission-tag terms) to one of the 16 real
-        # Powers, and a Quality badge only "earns" once all 4 of its
-        # constituent Powers are unlocked. Route by the Power's own Table 1
-        # Quality, never the mission's labeled `superpower` field — those
-        # disagree in real cases (e.g. mission-09's primary tag, Courage, is
-        # a Creative Visionary Power despite that mission being headlined
-        # "Empathetic Changemaker").
-        # Stage completion (BUILD_PLAN_2 §3): if this first submission just
-        # closed out its stage's ring, say so everywhere — the chapter-level
-        # celebration GAPS.md flags as missing.
-        stage_row = db_fetch_one("SELECT stage, week FROM missions WHERE id = %s::uuid", (mission_id,))
-        if stage_row:
-            the_stage = stage_row[0] or stage_row[1] or 1
-            remaining = db_fetch_one(
-                """SELECT COUNT(*) FROM missions m
-                   WHERE COALESCE(m.stage, m.week, 1) = %s
-                     AND m.campaign_id = (SELECT campaign_id FROM missions WHERE id = %s::uuid)
-                     AND NOT EXISTS (SELECT 1 FROM submissions s
-                                     WHERE s.user_id = %s::uuid AND s.mission_id = m.id)""",
-                (the_stage, mission_id, user_id)
-            )
-            if remaining and remaining[0] == 0:
-                await publish_event("StageCompleted", {
-                    "user_id": user_id, "stage": the_stage,
-                })
-
-        mission_tags = db_fetch_one(
-            "SELECT primary_skill, secondary_skill FROM missions WHERE id = %s::uuid", (mission_id,)
-        )
-        if mission_tags:
-            for raw_tag, tag_type in [(mission_tags[0], "primary"), (mission_tags[1], "secondary")]:
-                power_key = skills_framework.resolve_power(raw_tag)
-                if not power_key:
-                    continue
-                await publish_event("BadgeAwarded", {
-                    "user_id": user_id,
-                    "badge_key": skills_framework.POWER_TO_QUALITY[power_key],
-                    "power_key": power_key,
-                    "tag_type": tag_type,
-                    "mission_id": mission_id
-                })
-
-        # Create notification
-        notification_id = str(uuid.uuid4())
-        award_id_from_db = db_fetch_one(
-            "SELECT id FROM awards WHERE user_id = %s::uuid AND mission_id = %s::uuid AND tier = 'common' AND source = 'submission' LIMIT 1",
-            (user_id, mission_id)
-        )[0]
-
-        db_execute(
-            "INSERT INTO notifications (id, user_id, award_id) VALUES (%s::uuid, %s::uuid, %s::uuid)",
-            (notification_id, user_id, award_id_from_db)
-        )
-
-        # Trigger AI review if enabled
+        # Evidence alone doesn't complete anyone's mission -- only close the
+        # gate for teammates who already reflected before this landed.
+        # Teammates who haven't reflected yet complete later, from
+        # submit-reflection, when they do.
         if AI_ENABLED:
-            await trigger_ai_review(user_id, mission_id, object_key)
+            await trigger_ai_review(team_id, mission_id, object_key)
+
+        for member_id in team_members:
+            await _complete_mission_for_user(member_id, mission_id, team_id)
 
         return {
             "status": "success",
             "submission_id": submission_id,
-            "award_id": str(award_id_from_db),
             "resubmission": False
         }
     except HTTPException:
@@ -1389,8 +1466,51 @@ async def submit_evidence(
         logger.error(f"Submit evidence error: {e}")
         raise HTTPException(status_code=400, detail=str(e))
 
-async def trigger_ai_review(user_id: str, mission_id: str, object_key: str):
-    """Trigger AI review of submission"""
+
+@app.post("/api/submit-reflection")
+async def submit_reflection(
+    user_id: str = Form(...),
+    mission_id: str = Form(...),
+    reflection: str = Form(...),
+):
+    """An individual team member's own reflection on a mission -- always
+    personal, always available regardless of who submitted the team's
+    evidence. Closes the completion AND-gate for this one user if the
+    team's evidence already exists (see _complete_mission_for_user)."""
+    try:
+        mission_release = db_fetch_one(
+            "SELECT released_at FROM missions WHERE id = %s::uuid", (mission_id,)
+        )
+        if not mission_release or mission_release[0] is None:
+            raise HTTPException(status_code=403, detail="This mission hasn't been released yet")
+
+        team_id = _get_user_team(user_id)
+        if not team_id:
+            raise HTTPException(status_code=400, detail="You're not on a team yet -- ask an admin to assign you one")
+
+        db_execute(
+            """INSERT INTO mission_reflections (user_id, mission_id, team_id, reflection)
+               VALUES (%s::uuid, %s::uuid, %s::uuid, %s)
+               ON CONFLICT (user_id, mission_id) DO UPDATE SET reflection = EXCLUDED.reflection""",
+            (user_id, mission_id, team_id, reflection)
+        )
+
+        await _complete_mission_for_user(user_id, mission_id, team_id)
+
+        return {"status": "success"}
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Submit reflection error: {e}")
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+async def trigger_ai_review(team_id: str, mission_id: str, object_key: str):
+    """Trigger AI review of the team's shared evidence. One judgment for
+    the team; the resulting epic-tier award fans out to every member who's
+    actually completed the mission (has a common/submission award) --
+    members who haven't reflected yet aren't awarded anything here either,
+    same AND-gate as the common tier."""
     try:
         async with httpx.AsyncClient() as client:
             response = await client.post(
@@ -1417,32 +1537,38 @@ async def trigger_ai_review(user_id: str, mission_id: str, object_key: str):
 
             if response.status_code == 200:
                 # Assume consistent for now - in real implementation, parse response
-                award_id = str(uuid.uuid4())
-                db_execute(
-                    """INSERT INTO awards (id, user_id, mission_id, tier, source, awarded_at)
-                       VALUES (%s::uuid, %s::uuid, %s::uuid, 'epic', 'ai_review', CURRENT_TIMESTAMP)
-                       ON CONFLICT (user_id, mission_id, tier, source) DO NOTHING""",
-                    (award_id, user_id, mission_id)
+                completed_members = db_fetch_all(
+                    "SELECT DISTINCT user_id FROM awards WHERE mission_id = %s::uuid AND source = 'submission' AND user_id = ANY(SELECT user_id FROM team_members WHERE team_id = %s::uuid)",
+                    (mission_id, team_id)
                 )
-
-                await publish_event("AwardGranted", {
-                    "award_id": award_id,
-                    "user_id": user_id,
-                    "mission_id": mission_id,
-                    "tier": "epic",
-                    "source": "ai_review"
-                })
-
-                notification_id = str(uuid.uuid4())
-                award_id_from_db = db_fetch_one(
-                    "SELECT id FROM awards WHERE user_id = %s::uuid AND mission_id = %s::uuid AND tier = 'epic' AND source = 'ai_review' LIMIT 1",
-                    (user_id, mission_id)
-                )
-                if award_id_from_db:
+                for (member_id,) in completed_members:
+                    member_id = str(member_id)
+                    award_id = str(uuid.uuid4())
                     db_execute(
-                        "INSERT INTO notifications (id, user_id, award_id) VALUES (%s::uuid, %s::uuid, %s::uuid)",
-                        (notification_id, user_id, award_id_from_db[0])
+                        """INSERT INTO awards (id, user_id, mission_id, tier, source, awarded_at)
+                           VALUES (%s::uuid, %s::uuid, %s::uuid, 'epic', 'ai_review', CURRENT_TIMESTAMP)
+                           ON CONFLICT (user_id, mission_id, tier, source) DO NOTHING""",
+                        (award_id, member_id, mission_id)
                     )
+
+                    await publish_event("AwardGranted", {
+                        "award_id": award_id,
+                        "user_id": member_id,
+                        "mission_id": mission_id,
+                        "tier": "epic",
+                        "source": "ai_review"
+                    })
+
+                    notification_id = str(uuid.uuid4())
+                    award_id_from_db = db_fetch_one(
+                        "SELECT id FROM awards WHERE user_id = %s::uuid AND mission_id = %s::uuid AND tier = 'epic' AND source = 'ai_review' LIMIT 1",
+                        (member_id, mission_id)
+                    )
+                    if award_id_from_db:
+                        db_execute(
+                            "INSERT INTO notifications (id, user_id, award_id) VALUES (%s::uuid, %s::uuid, %s::uuid)",
+                            (notification_id, member_id, award_id_from_db[0])
+                        )
     except Exception as e:
         print(f"AI review error: {e}")
 
@@ -1845,14 +1971,14 @@ async def get_activity(limit: int = 30):
 # ========== Submissions ==========
 @app.get("/api/submissions/{user_id}/{mission_id}")
 async def get_submission(user_id: str, mission_id: str):
-    """The learner's own submitted evidence for one mission -- reflection
-    text, when it was submitted. Feeds the Vault retrospective screen,
-    which needed a way to show what the learner actually wrote, not just
-    the timeline's system-generated insights."""
+    """The learner's own reflection for one mission -- text, when it was
+    submitted. Feeds the Vault retrospective screen, which needed a way to
+    show what the learner actually wrote, not just the timeline's
+    system-generated insights. Reflections are personal (mission_reflections)
+    even though the evidence file itself is team-owned (submissions)."""
     row = db_fetch_one(
-        """SELECT reflection, submitted_at, status FROM submissions
-           WHERE user_id = %s::uuid AND mission_id = %s::uuid
-           ORDER BY submitted_at DESC LIMIT 1""",
+        """SELECT reflection, submitted_at FROM mission_reflections
+           WHERE user_id = %s::uuid AND mission_id = %s::uuid""",
         (user_id, mission_id)
     )
     if not row:
@@ -1861,7 +1987,7 @@ async def get_submission(user_id: str, mission_id: str):
         "submitted": True,
         "reflection": row[0],
         "submitted_at": row[1].isoformat() if row[1] else None,
-        "status": row[2],
+        "status": "submitted",
     }
 
 
@@ -1878,12 +2004,13 @@ async def get_timeline(user_id: str, mission_id: str):
         doc = os_client.get(index="learner-timeline", id=projection_id)["_source"]
     except Exception:
         # No feedback event has landed yet -- valid pre-processing state, not
-        # an error. "Submitted" only reflects reality if a submission row
-        # actually exists; otherwise this is a mission the learner hasn't
-        # touched yet and the timeline shouldn't claim otherwise.
-        has_submission = db_fetch_one(
-            "SELECT 1 FROM submissions WHERE user_id = %s::uuid AND mission_id = %s::uuid LIMIT 1",
-            (user_id, mission_id)
+        # an error. "Submitted" reflects the TEAM's shared evidence (the
+        # closest analog to the old per-user submission row) -- this is
+        # "has our team turned this in," not "have I personally reflected."
+        team_id = _get_user_team(user_id)
+        has_submission = team_id and db_fetch_one(
+            "SELECT 1 FROM submissions WHERE team_id = %s::uuid AND mission_id = %s::uuid LIMIT 1",
+            (team_id, mission_id)
         )
         submitted_status = "completed" if has_submission else "pending"
         doc = {
@@ -1970,7 +2097,11 @@ async def get_gallery(mission_id: Optional[str] = None, limit: int = 30):
     not a projection -- this is a straightforward indexed catalog read (the
     same category as GET /api/mc-quests), not the kind of cross-event
     aggregation the "no request-time aggregation" rule in UI_SPEC.md is
-    about."""
+    about.
+
+    Under the team-evidence model, each row is still the team's one shared
+    file, attributed to whoever on the team actually submitted it (s.user_id)
+    -- a valid, unchanged interpretation, not every reflecting member."""
     try:
         query = """SELECT s.user_id, u.display_name, s.mission_id, m.title, m.superpower, s.submitted_at
                     FROM submissions s
@@ -2489,9 +2620,11 @@ async def signal_progress(user_id: str):
 async def team_wheel(team_id: str):
     """GAME_DESIGN §7.1's Team Wheel, rolling-roster variant: one wheel per
     released mission, a wedge per *current* member, filled when that member
-    has submitted the mission. Computed live from submissions, so roster
-    changes are reflected immediately (variant #1) and wheels never expire
-    (variant #3)."""
+    has reflected on the mission (the team's shared evidence is one file
+    for everyone -- the personal, per-member act is the reflection, so
+    that's what a wedge represents under the team-evidence model). Computed
+    live from mission_reflections, so roster changes are reflected
+    immediately (variant #1) and wheels never expire (variant #3)."""
     try:
         members = db_fetch_all(
             """SELECT tm.user_id, u.display_name FROM team_members tm
@@ -2511,7 +2644,7 @@ async def team_wheel(team_id: str):
         wheels = []
         for mission_id, title, week in missions:
             done_rows = db_fetch_all(
-                "SELECT DISTINCT user_id FROM submissions WHERE mission_id = %s::uuid AND user_id = ANY(%s::uuid[])",
+                "SELECT DISTINCT user_id FROM mission_reflections WHERE mission_id = %s::uuid AND user_id = ANY(%s::uuid[])",
                 (mission_id, roster_ids)
             ) if roster_ids else []
             done = {str(r[0]) for r in done_rows}
@@ -2546,19 +2679,32 @@ async def admin_cohort(user_id: str):
                 profile = os_client.get(index="player-profile", id=lid)["_source"]
             except Exception:
                 profile = {}
+            # Last activity: the more recent of this learner's own last
+            # reflection, or their team's last evidence submission -- either
+            # is genuine per-learner engagement under the team-evidence
+            # model (a teammate submitting the shared file doesn't count as
+            # *this* learner's activity on its own, but their team doing so
+            # is still worth surfacing here).
             last_sub = db_fetch_one(
-                "SELECT MAX(submitted_at) FROM submissions WHERE user_id = %s::uuid", (lid,)
+                """SELECT GREATEST(
+                     (SELECT MAX(mr.submitted_at) FROM mission_reflections mr WHERE mr.user_id = %s::uuid),
+                     (SELECT MAX(s.submitted_at) FROM submissions s
+                        JOIN team_members tm ON tm.team_id = s.team_id
+                        WHERE tm.user_id = %s::uuid)
+                   )""",
+                (lid, lid)
             )
             last_checkin = db_fetch_one(
                 "SELECT MAX(checkin_date) FROM checkins WHERE user_id = %s::uuid", (lid,)
             )
-            # Waiting on the teacher: submitted missions with no
-            # teacher_review award yet.
+            # Waiting on the teacher: completed missions (evidence +
+            # reflection both landed -- a real 'submission' award exists)
+            # with no teacher_review award yet.
             pending = db_fetch_one(
-                """SELECT COUNT(DISTINCT s.mission_id) FROM submissions s
-                   WHERE s.user_id = %s::uuid AND NOT EXISTS (
-                     SELECT 1 FROM awards a WHERE a.user_id = s.user_id
-                       AND a.mission_id = s.mission_id AND a.source = 'teacher_review')""",
+                """SELECT COUNT(DISTINCT a.mission_id) FROM awards a
+                   WHERE a.user_id = %s::uuid AND a.source = 'submission' AND NOT EXISTS (
+                     SELECT 1 FROM awards a2 WHERE a2.user_id = a.user_id
+                       AND a2.mission_id = a.mission_id AND a2.source = 'teacher_review')""",
                 (lid,)
             )
             out.append({
@@ -2781,7 +2927,7 @@ async def progress_map(user_id: str):
             """SELECT m.id, m.title, m.week, m.stage, m.released_at IS NOT NULL AS released,
                       (SELECT MAX(CASE a.tier WHEN 'legendary' THEN 3 WHEN 'epic' THEN 2 ELSE 1 END)
                          FROM awards a WHERE a.user_id = %s::uuid AND a.mission_id = m.id) AS best_rank,
-                      EXISTS(SELECT 1 FROM submissions s WHERE s.user_id = %s::uuid AND s.mission_id = m.id) AS submitted
+                      EXISTS(SELECT 1 FROM awards a2 WHERE a2.user_id = %s::uuid AND a2.mission_id = m.id AND a2.source = 'submission') AS submitted
                FROM missions m WHERE m.campaign_id = %s::uuid
                ORDER BY m.stage NULLS LAST, m.week, m.sequence""",
             (user_id, user_id, org_row[0])

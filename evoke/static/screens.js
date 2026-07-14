@@ -421,12 +421,13 @@ Evoke.screens.novel = async function novel() {
 
 Evoke.screens.missionBrief = async function missionBrief(missionId) {
   const { api, state, mount } = Evoke;
-  const [missionsRes, timeline, mcLink, aarProfile, aarAchievements] = await Promise.all([
+  const [missionsRes, timeline, mcLink, aarProfile, aarAchievements, mySubmission] = await Promise.all([
     api.missions(state.userId),
     api.timeline(state.userId, missionId).catch(() => null),
     api.minecraftLink(state.userId).catch(() => ({ linked: false })),
     api.playerProfile(state.userId).catch(() => null),
     api.achievements(state.userId).catch(() => null),
+    api.submission(state.userId, missionId).catch(() => ({ submitted: false })),
   ]);
   // Snapshot XP/level/achievements *before* any submission on this page, so
   // a fresh completion can render an itemized after-action report (count up
@@ -496,51 +497,88 @@ Evoke.screens.missionBrief = async function missionBrief(missionId) {
       ` : "")}
 
       ${(() => {
-        // Revise-and-resubmit is a visible, welcomed path (GAPS.md #3), not
-        // a loophole: a prior submission changes the framing, never blocks.
-        const alreadySubmitted = timeline && (timeline.timeline || []).some(s => s.id === "submitted" && s.status === "completed");
+        // Team-evidence + individual-reflection model: the file is one
+        // shared artifact any team member can submit; the reflection is
+        // always personal, and is what actually closes YOUR OWN completion
+        // gate (see main.py's _complete_mission_for_user). Revise-and-
+        // resubmit is a visible, welcomed path on both sides (GAPS.md #3)
+        // -- a prior submission changes the framing, never blocks.
+        const teamHasSubmitted = timeline && (timeline.timeline || []).some(s => s.id === "submitted" && s.status === "completed");
+        const iHaveReflected = !!mySubmission.submitted;
         return `
       <div class="card">
-        <div class="card__eyebrow">${alreadySubmitted ? "Resubmit — strengthen your work" : "Submit Evidence"}</div>
-        ${alreadySubmitted ? `<p class="empty-state">You've already completed this mission. A stronger resubmission can upgrade your award tier — your first take is never punished, and nothing you earned gets taken back.</p>` : ""}
+        <div class="card__eyebrow">${teamHasSubmitted ? "Team Evidence — submitted" : "Team Evidence"}</div>
+        <p class="empty-state">One shared file for your whole team — any member can submit or improve it.</p>
+        ${teamHasSubmitted ? `<p class="empty-state">Your team has already submitted. A stronger resubmission can upgrade everyone's award tier — nothing already earned gets taken back.</p>` : ""}
         <form class="evidence-form" id="evidence-form">
           <input type="file" name="file" required>
-          <label for="evidence-reflection">Field Note ${mission.superpower ? `— what did this mission teach you about being a ${Evoke.escapeHtml(mission.superpower)}?` : ""}</label>
-          <textarea id="evidence-reflection" name="reflection" rows="3" placeholder="Optional — B1llbot reads these."></textarea>
-          <button type="submit" class="btn btn-primary">${alreadySubmitted ? "Resubmit Evidence" : "Submit Mission Evidence"}</button>
+          <button type="submit" class="btn btn-primary">${teamHasSubmitted ? "Resubmit Team Evidence" : "Submit Team Evidence"}</button>
         </form>
         <p id="evidence-status"></p>
+      </div>
+
+      <div class="card">
+        <div class="card__eyebrow">${iHaveReflected ? "Your Reflection — submitted" : "Your Reflection"}</div>
+        <p class="empty-state">${mission.superpower ? `What did this mission teach you about being a ${Evoke.escapeHtml(mission.superpower)}?` : "Your own take on this mission."} Required to receive your own award and XP — separate from your team's evidence.</p>
+        <form id="reflection-form">
+          <textarea id="my-reflection" rows="3" placeholder="Your own reflection...">${mySubmission.reflection ? Evoke.escapeHtml(mySubmission.reflection) : ""}</textarea>
+          <button type="submit" class="btn btn-primary">${iHaveReflected ? "Update Your Reflection" : "Submit Your Reflection"}</button>
+        </form>
+        <p id="reflection-status"></p>
       </div>`;
       })()}
     </div>
   `);
 
+  const teamHasSubmitted = timeline && (timeline.timeline || []).some(s => s.id === "submitted" && s.status === "completed");
+  const iHaveReflected = !!mySubmission.submitted;
+
   document.getElementById("evidence-form").addEventListener("submit", async (e) => {
     e.preventDefault();
     const statusEl = document.getElementById("evidence-status");
     const fileInput = e.target.querySelector("input[type=file]");
-    const reflectionInput = document.getElementById("evidence-reflection");
     if (!fileInput.files[0]) return;
     const formData = new FormData();
     formData.append("user_id", state.userId);
     formData.append("mission_id", missionId);
     formData.append("file", fileInput.files[0]);
-    if (reflectionInput.value.trim()) formData.append("reflection", reflectionInput.value.trim());
     statusEl.textContent = "Submitting...";
     try {
       const res = await api.submitEvidence(formData);
       if (res.resubmission) {
         // No fresh-completion celebration for a resubmission -- toast the
         // upgrade path and land on the normal debrief instead.
-        Evoke.toast("Resubmitted — the AI Coach is re-reviewing. Improvements can upgrade your award tier.");
+        Evoke.toast("Team evidence resubmitted — the AI Coach is re-reviewing. Improvements can upgrade everyone's award tier.");
         statusEl.textContent = "Resubmitted!";
         setTimeout(() => { location.hash = `#/mission/${missionId}/debrief`; }, 800);
       } else {
         statusEl.textContent = "Submitted!";
-        setTimeout(() => { location.hash = `#/mission/${missionId}/debrief?fresh=1`; }, 800);
+        // This only closes YOUR OWN gate if you'd already reflected before
+        // the team's evidence landed -- otherwise nothing completed for
+        // you yet, so no fresh-AAR celebration.
+        const fresh = iHaveReflected ? "?fresh=1" : "";
+        setTimeout(() => { location.hash = `#/mission/${missionId}/debrief${fresh}`; }, 800);
       }
     } catch (err) {
       statusEl.textContent = "Submission failed: " + err.message;
+    }
+  });
+
+  document.getElementById("reflection-form").addEventListener("submit", async (e) => {
+    e.preventDefault();
+    const statusEl = document.getElementById("reflection-status");
+    const textEl = document.getElementById("my-reflection");
+    if (!textEl.value.trim()) return;
+    statusEl.textContent = "Saving...";
+    try {
+      await api.submitReflection(state.userId, missionId, textEl.value.trim());
+      statusEl.textContent = "Saved!";
+      // Only closes YOUR gate if the team's evidence already existed --
+      // otherwise this is just recording your reflection ahead of time.
+      const fresh = teamHasSubmitted ? "?fresh=1" : "";
+      setTimeout(() => { location.hash = `#/mission/${missionId}/debrief${fresh}`; }, 800);
+    } catch (err) {
+      statusEl.textContent = "Couldn't save: " + err.message;
     }
   });
 };

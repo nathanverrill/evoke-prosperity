@@ -101,6 +101,13 @@ const Evoke = (() => {
   const api = {
     missions: (userId) => apiGet(`/api/missions?user_id=${userId}`),
     submitEvidence: (formData) => apiPostForm("/api/submit-evidence", formData),
+    submitReflection: (userId, missionId, reflection) => {
+      const fd = new FormData();
+      fd.append("user_id", userId);
+      fd.append("mission_id", missionId);
+      fd.append("reflection", reflection);
+      return apiPostForm("/api/submit-reflection", fd);
+    },
     notifications: (userId) => apiGet(`/api/notifications/${userId}`),
     guideOverlay: (userId) => apiGet(`/api/guide-overlay/${userId}`),
     awards: (userId) => apiGet(`/api/awards/${userId}`),
