@@ -480,6 +480,15 @@ a.objectives-list__label:hover { color: var(--cyan-300); }
 }
 .quest-card__eyebrow { font-family: var(--font-mono); font-size: var(--text-xs); letter-spacing: 0.14em; text-transform: uppercase; color: var(--teal-400); }
 
+/* Mission narrative (the real "Your Mission" + Step 1/2/3 text) + evidence
+   checklist -- previously the app only ever showed a one-line summary. */
+.mission-narrative p { margin: 0 0 var(--space-2); }
+.mission-narrative p:last-child { margin-bottom: 0; }
+.mission-narrative ul { margin: 0 0 var(--space-3); padding-left: var(--space-4); }
+.mission-narrative li { margin-bottom: var(--space-1); }
+.evidence-checklist { margin: 0; padding-left: var(--space-4); }
+.evidence-checklist li { margin-bottom: var(--space-2); }
+
 /* B1llbot drawer */
 .billbot-drawer {
   background: var(--color-surface);

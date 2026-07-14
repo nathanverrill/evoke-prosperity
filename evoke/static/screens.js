@@ -419,6 +419,40 @@ Evoke.screens.novel = async function novel() {
   renderChapter();
 };
 
+// Light structure for the "Evoke Mission (direct to students)" narrative
+// text (Prosperity Campaign Missions docx): "Step N: <title>" as the first
+// line of a paragraph block renders bold; "- " lines within a block become
+// a real bullet list. Not full markdown -- just enough to make the actual
+// mission content (previously never shown at all, only a one-line summary)
+// readable instead of a wall of escaped text.
+function formatMissionNarrative(text) {
+  return text.split(/\n\n+/).map(block => {
+    const lines = block.split("\n");
+    let html = "";
+    let bullets = [];
+    const flush = () => {
+      if (bullets.length) {
+        html += `<ul>${bullets.map(b => `<li>${Evoke.escapeHtml(b)}</li>`).join("")}</ul>`;
+        bullets = [];
+      }
+    };
+    lines.forEach((line, i) => {
+      if (/^-\s+/.test(line)) {
+        bullets.push(line.replace(/^-\s+/, ""));
+        return;
+      }
+      flush();
+      if (!line.trim()) return;
+      const isStepHeader = i === 0 && /^Step \d+/.test(line);
+      html += isStepHeader
+        ? `<p><strong>${Evoke.escapeHtml(line)}</strong></p>`
+        : `<p>${Evoke.escapeHtml(line)}</p>`;
+    });
+    flush();
+    return html;
+  }).join("");
+}
+
 Evoke.screens.missionBrief = async function missionBrief(missionId) {
   const { api, state, mount } = Evoke;
   const [missionsRes, timeline, mcLink, aarProfile, aarAchievements, mySubmission] = await Promise.all([
@@ -482,6 +516,24 @@ Evoke.screens.missionBrief = async function missionBrief(missionId) {
         <div class="card__eyebrow">Mission Brief</div>
         <p>${Evoke.escapeHtml(mission.brief || "No brief text yet.").replace(/\n/g, "<br>")}</p>
       </div>
+
+      ${mission.pbl_description ? `
+        <div class="card">
+          <div class="card__eyebrow">Your Mission</div>
+          <div class="mission-narrative">${formatMissionNarrative(mission.pbl_description)}</div>
+        </div>
+      ` : ""}
+
+      ${mission.evidence_requirements ? `
+        <div class="card">
+          <div class="card__eyebrow">Evidence — what your team must submit</div>
+          <ul class="evidence-checklist">
+            ${mission.evidence_requirements.split("\n").filter(l => l.trim().startsWith("-")).map(l =>
+              `<li>${Evoke.escapeHtml(l.replace(/^-\s*/, "").trim())}</li>`
+            ).join("")}
+          </ul>
+        </div>
+      ` : ""}
 
       ${mission.quest && mcLink.linked ? `
         <div class="quest-card">

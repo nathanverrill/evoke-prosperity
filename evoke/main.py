@@ -111,18 +111,32 @@ async def sync_missions_from_lms():
         db_execute(
             """INSERT INTO missions
                (id, campaign_id, lms_assignment_ref, week, sequence, title, arc,
-                superpower, primary_skill, secondary_skill, pfl_domain, mission_brief_md)
-               VALUES (gen_random_uuid(), %s::uuid, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                superpower, primary_skill, secondary_skill, pfl_domain, mission_brief_md,
+                pbl_description, evidence_requirements_md)
+               VALUES (gen_random_uuid(), %s::uuid, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                ON CONFLICT (campaign_id, lms_assignment_ref) DO UPDATE SET
                    week = EXCLUDED.week, sequence = EXCLUDED.sequence, title = EXCLUDED.title,
                    arc = EXCLUDED.arc, superpower = EXCLUDED.superpower,
                    primary_skill = EXCLUDED.primary_skill, secondary_skill = EXCLUDED.secondary_skill,
-                   pfl_domain = EXCLUDED.pfl_domain, mission_brief_md = EXCLUDED.mission_brief_md""",
+                   pfl_domain = EXCLUDED.pfl_domain, mission_brief_md = EXCLUDED.mission_brief_md,
+                   pbl_description = EXCLUDED.pbl_description,
+                   evidence_requirements_md = EXCLUDED.evidence_requirements_md""",
             (
                 campaign_id, assignment["AssignmentId"], fields.get("Week"), fields.get("Sequence"),
                 assignment["Name"], fields.get("Arc"), fields.get("Superpower"),
                 fields.get("PrimarySkill"), fields.get("SecondarySkill"), fields.get("PflDomain"),
                 fields.get("Description"),
+                # pbl_description holds the full "Evoke Mission (direct to
+                # students)" narrative (the "Your Mission" framing + Step
+                # 1/2/3) -- not literally the docx's separate, instructor-
+                # facing "Activity (PBL Description)" paragraph, which is
+                # what the column name suggests. Reusing this existing,
+                # previously-unpopulated column rather than adding a new one
+                # for content that's genuinely the richer version of the
+                # same "what is this mission" idea `mission_brief_md` (the
+                # short summary) already carries.
+                fields.get("MissionNarrative"),
+                fields.get("EvidenceRequirements"),
             )
         )
         synced += 1
@@ -1008,14 +1022,15 @@ async def list_missions(user_id: str):
 
         # Fetch all missions for this campaign
         missions_data = db_fetch_all(
-            """SELECT id, title, week, arc, superpower, mission_brief_md, released_at
+            """SELECT id, title, week, arc, superpower, mission_brief_md, released_at,
+                      pbl_description, evidence_requirements_md
                FROM missions WHERE campaign_id = %s::uuid ORDER BY week, sequence""",
             (campaign_id,)
         )
 
         missions = []
         for mission in missions_data:
-            mission_id, title, week, arc, superpower, brief, released_at = mission
+            mission_id, title, week, arc, superpower, brief, released_at, pbl_description, evidence_requirements = mission
 
             # Get any linked quest
             quest = db_fetch_one(
@@ -1030,6 +1045,8 @@ async def list_missions(user_id: str):
                 "arc": arc,
                 "superpower": superpower,
                 "brief": brief,
+                "pbl_description": pbl_description,
+                "evidence_requirements": evidence_requirements,
                 "released": released_at is not None,
                 "quest": {
                     "id": str(quest[0]),
