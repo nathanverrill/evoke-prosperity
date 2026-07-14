@@ -22,6 +22,7 @@ from evoke.lms import get_brightspace_lms
 from evoke.lti import BrightspaceLTIProvider
 from evoke import skills_framework, progression, world_state, gear as gear_catalog
 from evoke.live import live_hub
+from evoke.identity import get_or_create_evoke_player
 
 logger = logging.getLogger(__name__)
 
@@ -196,6 +197,12 @@ async def startup():
         # Same split for the Mob Gauntlet (evoke-infra/minecraft/datapacks/mob_gauntlet) --
         # bridge-owned table, mirrors mc_arena_best.
         db_execute("CREATE TABLE IF NOT EXISTS mc_gauntlet_best (user_id UUID PRIMARY KEY, best_wave INT NOT NULL DEFAULT 0)")
+        # evoke/identity.py's get_or_create_evoke_player needs this for its
+        # ON CONFLICT (email, org_id) clause -- found live (2026-07-16) that
+        # it never actually existed, so LTI auto-provisioning of a genuinely
+        # new user always 500'd. init-db.sql has it inline for fresh volumes;
+        # this is the same fix for a volume that predates that.
+        db_execute("CREATE UNIQUE INDEX IF NOT EXISTS users_email_org_unique ON users(email, org_id)")
         # Identity customization: uploaded avatar (MinIO object key), the
         # procedural Agent Sigil config (small JSON: glyph + hue), and the
         # equipped Field Gear (JSON list of gear keys, validated on write).
@@ -2567,6 +2574,169 @@ async def admin_cohort(user_id: str):
         return {"cohort": out}
     except HTTPException:
         raise
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+# ========== Admin: roster import + team management ==========
+# EVOKE Players are 1:1 with LMS students (evoke_identities, see
+# evoke/identity.py); this is the admin-driven half of that link -- the
+# other half is a student's first real LTI launch
+# (evoke/lti/brightspace_lti_provider.py). Same unprotected-dev status as
+# the rest of /api/admin (see admin_cohort's note) -- not introducing a new,
+# inconsistent auth model just for these.
+
+async def _fetch_classlist():
+    """Real adapter in production mode; the simulator's own classlist call
+    (same service-account-token pattern submit_evidence's fallback already
+    uses) when brightspace_lms is None."""
+    if brightspace_lms:
+        return await brightspace_lms.get_classlist()
+    async with httpx.AsyncClient() as client:
+        token_response = await client.post(
+            f"{BRIGHTSPACE_SIM_URL}/oauth2/token",
+            data={"grant_type": "password", "username": "teacher@evoke.local", "password": "sim-demo"}
+        )
+        sim_token = token_response.json().get("access_token") if token_response.status_code == 200 else None
+        if not sim_token:
+            return None
+        resp = await client.get(
+            f"{BRIGHTSPACE_SIM_URL}/d2l/api/le/1.x/1/classlist/",
+            headers={"Authorization": f"Bearer {sim_token}"}
+        )
+        return resp.json() if resp.status_code == 200 else None
+
+
+@app.get("/api/admin/roster")
+async def admin_roster():
+    """LMS classlist cross-referenced against evoke_identities and
+    team_members -- who's already an EVOKE Player, and which team (if any)
+    they're on."""
+    try:
+        classlist = await _fetch_classlist()
+        if classlist is None:
+            raise HTTPException(status_code=502, detail="Could not reach the LMS roster")
+
+        out = []
+        for student in classlist:
+            bs_id = int(student["Identifier"])
+            link = db_fetch_one(
+                "SELECT user_id FROM evoke_identities WHERE brightspace_user_id = %s", (bs_id,)
+            )
+            user_id = str(link[0]) if link else None
+            team = None
+            if user_id:
+                team_row = db_fetch_one(
+                    """SELECT t.id, t.name FROM teams t
+                       JOIN team_members tm ON tm.team_id = t.id
+                       WHERE tm.user_id = %s::uuid LIMIT 1""",
+                    (user_id,)
+                )
+                if team_row:
+                    team = {"team_id": str(team_row[0]), "name": team_row[1]}
+            out.append({
+                "brightspace_user_id": bs_id,
+                "display_name": student["DisplayName"],
+                "email": student["Email"],
+                "imported": user_id is not None,
+                "user_id": user_id,
+                "team": team,
+            })
+        return {"roster": out}
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@app.post("/api/admin/roster/{brightspace_user_id}/import")
+async def admin_import_student(brightspace_user_id: int):
+    """Provisions an EVOKE Player for this LMS student ahead of their first
+    LTI launch, so an admin can assign them to a team right away.
+    Idempotent -- importing an already-linked student returns their
+    existing user_id, no duplicate row."""
+    try:
+        classlist = await _fetch_classlist()
+        student = next((s for s in (classlist or []) if int(s["Identifier"]) == brightspace_user_id), None)
+        if not student:
+            raise HTTPException(status_code=404, detail="Student not found on LMS roster")
+
+        user_id = await get_or_create_evoke_player(
+            async_db_pool, brightspace_user_id, student["Email"], student["DisplayName"], "learner"
+        )
+        if not user_id:
+            raise HTTPException(status_code=500, detail="Failed to provision EVOKE Player")
+        return {"status": "ok", "user_id": user_id}
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@app.get("/api/admin/teams")
+async def admin_list_teams():
+    try:
+        teams = db_fetch_all("SELECT id, name FROM teams ORDER BY name")
+        out = []
+        for tid, name in teams:
+            members = db_fetch_all(
+                """SELECT u.id, u.display_name, u.email FROM team_members tm
+                   JOIN users u ON u.id = tm.user_id WHERE tm.team_id = %s::uuid
+                   ORDER BY u.display_name""",
+                (tid,)
+            )
+            out.append({
+                "team_id": str(tid), "name": name,
+                "members": [{"user_id": str(m[0]), "display_name": m[1], "email": m[2]} for m in members],
+            })
+        return {"teams": out}
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@app.post("/api/admin/teams")
+async def admin_create_team(name: str = Form(...)):
+    try:
+        org_row = db_fetch_one("SELECT id FROM organizations LIMIT 1")
+        if not org_row:
+            raise HTTPException(status_code=500, detail="No organization configured")
+        team_id = str(uuid.uuid4())
+        db_execute(
+            "INSERT INTO teams (id, org_id, name) VALUES (%s::uuid, %s::uuid, %s)",
+            (team_id, org_row[0], name)
+        )
+        return {"status": "ok", "team_id": team_id}
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@app.post("/api/admin/teams/{team_id}/members")
+async def admin_add_team_member(team_id: str, user_id: str = Form(...)):
+    """A learner belongs to exactly one team (matching how the curriculum
+    is actually run, and what the team-evidence-submission model assumes)
+    -- assigning here always means *moving* them, not adding a second
+    membership, so any prior team_members row is cleared first."""
+    try:
+        db_execute("DELETE FROM team_members WHERE user_id = %s::uuid", (user_id,))
+        db_execute(
+            "INSERT INTO team_members (team_id, user_id) VALUES (%s::uuid, %s::uuid)",
+            (team_id, user_id)
+        )
+        return {"status": "ok"}
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@app.delete("/api/admin/teams/{team_id}/members/{user_id}")
+async def admin_remove_team_member(team_id: str, user_id: str):
+    try:
+        db_execute(
+            "DELETE FROM team_members WHERE team_id = %s::uuid AND user_id = %s::uuid",
+            (team_id, user_id)
+        )
+        return {"status": "ok"}
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))
 

@@ -86,6 +86,23 @@ async def whoami(authorization: str = Header(None)):
         "IsActive": user["IsActive"]
     }
 
+@app.get("/d2l/api/le/1.x/{org_unit_id}/classlist/")
+async def get_classlist(org_unit_id: str, authorization: str = Header(None)):
+    """
+    GET /d2l/api/le/(version)/(orgUnitId)/classlist/
+    Real D2L Brightspace classlist call -- every learner enrolled in the
+    course. Backs the admin roster-import flow (GAPS.md: "no roster import
+    for non-LTI pilots").
+    """
+    if not authorization or not authorization.startswith("Bearer "):
+        raise HTTPException(status_code=401, detail="Missing bearer token")
+
+    token = authorization.split(" ")[1]
+    if not simulator.whoami(token):
+        raise HTTPException(status_code=401, detail="Invalid or expired token")
+
+    return simulator.get_classlist(org_unit_id)
+
 # ========== AWARD SERVICE (BAS) ENDPOINTS ==========
 
 @app.get("/d2l/api/bas/1.62/issued/users/{user_id}")

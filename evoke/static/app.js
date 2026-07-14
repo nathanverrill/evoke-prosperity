@@ -134,6 +134,20 @@ const Evoke = (() => {
     companionInfo: () => apiGet("/api/companion/info"),
     teamWheel: (teamId) => apiGet(`/api/team/${teamId}/wheel`),
     adminCohort: (userId) => apiGet(`/api/admin/cohort?user_id=${userId}`),
+    adminRoster: () => apiGet("/api/admin/roster"),
+    adminImportStudent: (brightspaceUserId) => fetch(`/api/admin/roster/${brightspaceUserId}/import`, { method: "POST" }).then(r => r.json()),
+    adminTeams: () => apiGet("/api/admin/teams"),
+    adminCreateTeam: (name) => {
+      const fd = new FormData();
+      fd.append("name", name);
+      return apiPostForm("/api/admin/teams", fd);
+    },
+    adminAddTeamMember: (teamId, userId) => {
+      const fd = new FormData();
+      fd.append("user_id", userId);
+      return apiPostForm(`/api/admin/teams/${teamId}/members`, fd);
+    },
+    adminRemoveTeamMember: (teamId, userId) => fetch(`/api/admin/teams/${teamId}/members/${userId}`, { method: "DELETE" }).then(r => r.json()),
     progressMap: (userId) => apiGet(`/api/progress-map/${userId}`),
     setStage: (missionId, stage) => {
       const fd = new FormData();

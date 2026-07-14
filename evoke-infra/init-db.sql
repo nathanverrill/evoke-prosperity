@@ -25,7 +25,13 @@ CREATE TABLE users (
     display_name VARCHAR(255) NOT NULL,
     email VARCHAR(255) NOT NULL,
     role VARCHAR(50) NOT NULL CHECK (role IN ('learner', 'instructor', 'admin')),
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    -- evoke/identity.py's get_or_create_evoke_player targets this in its
+    -- ON CONFLICT (email, org_id) clause -- without it, that INSERT is
+    -- invalid SQL and 500s on every call (found live, 2026-07-16: this
+    -- constraint had never actually existed, so the LTI auto-provisioning
+    -- path had never successfully created a new user).
+    UNIQUE(email, org_id)
 );
 
 -- Auth Identities

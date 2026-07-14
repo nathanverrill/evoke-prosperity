@@ -42,8 +42,31 @@ class BrightspaceSimulator:
                 "Email": "teacher@evoke.local",
                 "IsActive": True,
                 "Role": "instructor"
-            }
+            },
         }
+        # A realistic class roster for testing the admin roster-import/team-
+        # assignment flow (GAPS.md: "no roster import for non-LTI pilots") --
+        # 6001/6002 above are the original two demo accounts; these are a
+        # separate, larger cohort a real classlist call would actually return.
+        _roster = [
+            ("Amara", "Okafor"), ("Liam", "Chen"), ("Sofia", "Reyes"), ("Noah", "Patel"),
+            ("Zoe", "Nakamura"), ("Ethan", "Osei"), ("Maya", "Kowalski"), ("Diego", "Alvarez"),
+            ("Priya", "Sharma"), ("Jackson", "Whitehorse"), ("Layla", "Haddad"), ("Mateo", "Silva"),
+            ("Nina", "Petrov"), ("Caleb", "Johnson"), ("Aaliyah", "Brooks"), ("Kenji", "Tanaka"),
+            ("Fatima", "Al-Rashid"), ("Owen", "Murphy"), ("Ines", "Dubois"), ("Tyler", "Running Bear"),
+            ("Grace", "Kim"), ("Marcus", "Thompson"), ("Elena", "Volkov"), ("Amir", "Hassan"),
+        ]
+        for i, (first, last) in enumerate(_roster):
+            uid = str(6100 + i)
+            self.users[uid] = {
+                "UserId": int(uid),
+                "Username": f"{first.lower().replace(' ', '')}.{last.lower().replace(' ', '').replace('-', '')}@evoke.local",
+                "FirstName": first,
+                "LastName": last,
+                "Email": f"{first.lower().replace(' ', '')}.{last.lower().replace(' ', '').replace('-', '')}@evoke.local",
+                "IsActive": True,
+                "Role": "learner",
+            }
 
         # Refresh tokens: token -> user_id
         self.refresh_tokens: Dict[str, str] = {}
@@ -456,6 +479,25 @@ class BrightspaceSimulator:
     def get_all_users(self) -> List[dict]:
         """Returns all users (for admin/testing)"""
         return list(self.users.values())
+
+    def get_classlist(self, org_unit_id: str) -> List[dict]:
+        """Real D2L shape for GET /d2l/api/le/(version)/(orgUnitId)/classlist/
+        -- every learner enrolled in the org unit (course). Doesn't model
+        per-course enrollment (this sim only has one org unit), so it's
+        every learner-role user regardless of org_unit_id, matching how the
+        rest of this simulator treats org_unit_id as a formality."""
+        return [
+            {
+                "Identifier": str(u["UserId"]),
+                "ProfileIdentifier": str(u["UserId"]),
+                "DisplayName": f'{u["FirstName"]} {u["LastName"]}',
+                "Username": u["Username"],
+                "OrgDefinedId": str(u["UserId"]),
+                "Email": u["Email"],
+            }
+            for u in self.users.values()
+            if u["Role"] == "learner"
+        ]
 
     def get_all_groups(self) -> List[dict]:
         """Returns all groups (for admin/testing)"""

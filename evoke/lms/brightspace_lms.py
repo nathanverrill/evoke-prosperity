@@ -432,6 +432,29 @@ class BrightspaceLMS:
             logger.error(f"Error getting submissions: {e}")
             return None
 
+    async def get_classlist(self) -> Optional[list]:
+        """
+        Get the course roster.
+
+        GET /d2l/api/le/1.x/{orgUnitId}/classlist/
+
+        Backs the admin roster-import flow -- pulling the real class list
+        so an admin can bring students into EVOKE and assign them to teams
+        without waiting for each one's first LTI launch.
+        """
+        token = await self.get_service_account_token()
+
+        url = f"{self.tenant_url}/d2l/api/le/1.x/{self.org_unit_id}/classlist/"
+        headers = {"Authorization": f"Bearer {token}"}
+
+        try:
+            response = await self.client.get(url, headers=headers)
+            response.raise_for_status()
+            return response.json()
+        except httpx.HTTPError as e:
+            logger.error(f"Error getting classlist: {e}")
+            return None
+
 
 # ========== Configuration from Environment ==========
 

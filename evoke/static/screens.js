@@ -1305,14 +1305,18 @@ Evoke.screens.teamProfile = async function teamProfile(teamId) {
 // today, not a promoted destination.
 Evoke.screens.admin = async function admin() {
   const { api, mount } = Evoke;
-  const [missionsRes, cohortRes, world, mcStatus] = await Promise.all([
+  const [missionsRes, cohortRes, world, mcStatus, rosterRes, teamsRes] = await Promise.all([
     api.adminMissions(Evoke.state.userId).catch(() => ({ missions: [] })),
     api.adminCohort(Evoke.state.userId).catch(() => ({ cohort: [] })),
     api.worldState().catch(() => null),
     api.minecraftStatus().catch(() => null),
+    api.adminRoster().catch(() => ({ roster: [] })),
+    api.adminTeams().catch(() => ({ teams: [] })),
   ]);
   const missions = missionsRes.missions || [];
   const cohort = cohortRes.cohort || [];
+  const roster = rosterRes.roster || [];
+  const teams = teamsRes.teams || [];
   const daysAgo = (iso) => iso ? Math.max(0, Math.floor((Date.now() - parseUtc(iso)) / 86400000)) : null;
 
   mount(`
@@ -1347,6 +1351,59 @@ Evoke.screens.admin = async function admin() {
           </table>
           <p class="empty-state" style="margin-top:var(--space-2)">⚠ = no submission in 7+ days. Reviews happen in the Brightspace sim's teacher screen; awards land here automatically.</p>
         ` : `<p class="empty-state">No learners in this org yet.</p>`}
+      </section>
+
+      <h2 class="section-title">Teams</h2>
+      <p class="empty-state">EVOKE Teams contain EVOKE Players — every Player is 1:1 with an LMS student. Import from the roster below, then assign here. A learner belongs to exactly one team; assigning moves them.</p>
+      <section class="card">
+        <form id="create-team-form" class="row" style="margin-bottom:var(--space-3)">
+          <input type="text" id="new-team-name" placeholder="New team name" required style="flex:1">
+          <button type="submit" class="btn btn-primary">Create Team</button>
+        </form>
+        ${teams.length ? `
+          <div class="stack-sm">
+            ${teams.map(t => `
+              <div class="card" data-team-id="${t.team_id}">
+                <strong>${Evoke.escapeHtml(t.name)}</strong>
+                <p class="empty-state">${t.members.length} member${t.members.length === 1 ? "" : "s"}</p>
+                ${t.members.length ? `
+                  <ul class="stack-sm">
+                    ${t.members.map(m => `
+                      <li class="row-between">
+                        <span>${Evoke.escapeHtml(m.display_name)}</span>
+                        <button class="btn" data-remove-member="${m.user_id}" data-team-id="${t.team_id}">Remove</button>
+                      </li>
+                    `).join("")}
+                  </ul>
+                ` : `<p class="empty-state">No members yet.</p>`}
+              </div>
+            `).join("")}
+          </div>
+        ` : `<p class="empty-state">No teams yet — create one above.</p>`}
+      </section>
+
+      <section class="card">
+        <div class="card__eyebrow">LMS Roster</div>
+        ${roster.length ? `
+          <table class="cohort-table">
+            <thead><tr><th>Student</th><th>Email</th><th>EVOKE Player</th><th>Team</th></tr></thead>
+            <tbody>
+              ${roster.map(r => `
+                <tr>
+                  <td>${Evoke.escapeHtml(r.display_name)}</td>
+                  <td>${Evoke.escapeHtml(r.email)}</td>
+                  <td>${r.imported ? `<span class="chip chip--green">Imported</span>` : `<button class="btn" data-import-bsid="${r.brightspace_user_id}">Import</button>`}</td>
+                  <td>${r.imported ? `
+                    <select data-assign-user="${r.user_id}" data-current-team="${r.team ? r.team.team_id : ""}">
+                      <option value="">Unassigned</option>
+                      ${teams.map(t => `<option value="${t.team_id}" ${r.team && r.team.team_id === t.team_id ? "selected" : ""}>${Evoke.escapeHtml(t.name)}</option>`).join("")}
+                    </select>
+                  ` : `<span class="empty-state">Import first</span>`}</td>
+                </tr>
+              `).join("")}
+            </tbody>
+          </table>
+        ` : `<p class="empty-state">No roster data — is brightspace-sim reachable?</p>`}
       </section>
 
       <h2 class="section-title">Mission Release</h2>
@@ -1394,6 +1451,49 @@ Evoke.screens.admin = async function admin() {
         btn.disabled = false;
         alert("Failed: " + err.message);
       }
+    });
+  });
+
+  document.getElementById("create-team-form")?.addEventListener("submit", async (e) => {
+    e.preventDefault();
+    const nameInput = document.getElementById("new-team-name");
+    try {
+      await api.adminCreateTeam(nameInput.value);
+      await Evoke.screens.admin();
+    } catch (err) { alert("Couldn't create team: " + err.message); }
+  });
+
+  document.querySelectorAll("[data-import-bsid]").forEach(btn => {
+    btn.addEventListener("click", async () => {
+      btn.disabled = true;
+      try {
+        await api.adminImportStudent(btn.dataset.importBsid);
+        await Evoke.screens.admin();
+      } catch (err) {
+        btn.disabled = false;
+        alert("Import failed: " + err.message);
+      }
+    });
+  });
+
+  document.querySelectorAll("[data-assign-user]").forEach(sel => {
+    sel.addEventListener("change", async () => {
+      const userId = sel.dataset.assignUser;
+      const currentTeam = sel.dataset.currentTeam;
+      try {
+        if (sel.value) await api.adminAddTeamMember(sel.value, userId);
+        else if (currentTeam) await api.adminRemoveTeamMember(currentTeam, userId);
+        await Evoke.screens.admin();
+      } catch (err) { alert("Couldn't update team assignment: " + err.message); }
+    });
+  });
+
+  document.querySelectorAll("[data-remove-member]").forEach(btn => {
+    btn.addEventListener("click", async () => {
+      try {
+        await api.adminRemoveTeamMember(btn.dataset.teamId, btn.dataset.removeMember);
+        await Evoke.screens.admin();
+      } catch (err) { alert("Couldn't remove member: " + err.message); }
     });
   });
 };
