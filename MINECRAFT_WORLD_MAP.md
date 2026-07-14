@@ -37,9 +37,13 @@ to the starter villager pen (three unemployed desert villagers named
 **chuzz**, **Ethan**, **Fredster** — the "NPC villagers at the start").
 
 **Mechanism:** two command blocks, not a physical structure or GUI:
-- `(-49, 62, 206)` — chain command block, tags the player `billbot_intro`
-  once
+- `(-49, 62, 206)` — tags the player `billbot_intro` once
 - `(-49, 63, 206)` — fires the message, gated on `tag=!billbot_intro`
+
+(The static host copy at `~/evoke-prosperity-files/...` reads `(-49,62,206)`
+as a `chain_command_block`; the live deployed server reads it as a plain
+`command_block` — the one real discrepancy found between the two copies
+during this investigation. See `scripts/minecraft-world-tools/README.md`.)
 
 **Original message** (verbatim, still intact):
 > *psst* hey! hey no one else in this city can see this kiosk so dont tell
@@ -255,24 +259,28 @@ be code-reviewed, they'd need the same extraction treatment
 
 ---
 
-## 11. Investigation tooling (currently ephemeral — not saved anywhere durable)
+## 11. Investigation tooling
 
 Built this session, stdlib-only Python (no NBT libraries were installed or
-needed):
+needed) — now committed at `scripts/minecraft-world-tools/` (see that
+directory's own README for usage and the workflow that actually found
+everything in this doc):
 
-- `mca_nbt_dump.py` — raw NBT/Anvil region-file parser
+- `mca_nbt_dump.py` — the foundational NBT/Anvil region-file parser
 - `block_at.py` — decodes the actual block palette + bit-packed section data
   to answer "what block is at world X,Y,Z" (verified against known ground
-  truth before trusting it)
+  truth before trusting it — see the one static/live discrepancy it
+  surfaced, noted in §2)
 - `full_command_block_scan.py` — exhaustive command-block + spawner
   inventory across an entire world
 - `scan_signs.py` — exhaustive sign-text inventory
-- `scan_chunk_palettes.py` — fast per-chunk block-type search across a wide
-  area (how the parkour shaft in §7 was actually found)
+- `scan_chunk_palettes.py` — fast per-chunk block-*material* search across a
+  wide area, for areas with no command-block/sign text to grep (this is
+  what actually found the parkour shaft in §7, once the other two scanners
+  came up empty around the suspected spot)
+- `render_slice.py` — ASCII top-down/vertical rendering + a "floating
+  platform" detector, for turning a `scan_chunk_palettes.py` hit into an
+  actual understanding of the shape
 
-These live in this session's scratchpad
-(`/private/tmp/claude-501/.../scratchpad/`), which does not persist. If
-this tooling is worth keeping for future investigation (checking `unmodded`
-more thoroughly, mapping the rest of Halyard/Oasis, verifying future world
-edits), it should be copied into the repo — say the word and I'll do that
-in a follow-up.
+Worth reusing for checking `unmodded` more thoroughly, mapping the rest of
+Halyard/Oasis, or verifying any future direct world edit before it ships.

@@ -33,11 +33,13 @@ brightspace-sim/ Brightspace LMS simulator (real Brightspace API shapes) -- syst
 evoke-minecraft-bridge/ Real-RCON bridge: reward delivery, world-stage celebrations + Restoration Beacon, presence, scoreboard quest-triggers, /trigger link codes, heartbeat
 ui/             "Final Prosperity Showcase.html" -- the approved visual reference; the live skin was ported from it
 docs/           Narrative, curriculum, and planning source material -- see docs/README.md
+scripts/        Deployment/setup shell scripts, plus minecraft-world-tools/ -- stdlib-only NBT/Anvil tools for reading the real Minecraft world save directly
 ```
 
 - [`CONCEPTS.md`](CONCEPTS.md) — glossary and orientation (start here)
 - [`GAPS.md`](GAPS.md) — current, actively-maintained audit of what's built, partially built, and still open
 - [`GAME_DESIGN.md`](GAME_DESIGN.md) — world, characters, the World Bank skills framework the badge/achievement system is built on, B1llbot's voice and system prompt
+- [`MINECRAFT_WORLD_MAP.md`](MINECRAFT_WORLD_MAP.md) — what's *actually built* in the real `true_oasis` world save (minigames, secrets, economy, kiosk) — found by directly parsing the world files, not from any design doc
 - [`ARCHITECTURE.md`](ARCHITECTURE.md) — the original target-state technical architecture and the reasoning behind it (largely executed at this point — treat as historical/rationale, defer to `GAPS.md` for current status)
 - [`BUILD_PLAN.md`](BUILD_PLAN.md) — the build spec this pass worked from (custom Minecraft container, missions synced from the Brightspace sim, event catalog, profiles)
 - [`UI_SPEC.md`](UI_SPEC.md) — the gamified web experience: mission loop, profile pages, Companion Mode, and the wireframe skinning contract
