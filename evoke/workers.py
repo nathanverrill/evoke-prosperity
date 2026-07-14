@@ -532,6 +532,24 @@ def _process_event(event: dict, producer):
         os_client.index(index="activity-feed", body=doc)
         live_hub.broadcast({"type": "ActivityPosted", "data": doc})
 
+    # Halyard Mob Arena web wiring: the bridge's heartbeat already read the
+    # arenaBestWave scoreboard and only publishes this on a genuine new best
+    # (see check_arena_progress in bridge.py) -- XPGranted for the reward,
+    # this event purely for visibility (feed + live toast).
+    if event_type == "ArenaWaveReached":
+        user_id = event['data']['user_id']
+        wave = event['data']['wave']
+        now_str = datetime.datetime.now().isoformat()
+        name_row = _db_fetch_one("SELECT display_name FROM users WHERE id = %s::uuid", (user_id,))
+        display_name = name_row[0] if name_row else "An agent"
+        doc = {
+            "timestamp": now_str, "user_id": user_id, "display_name": display_name,
+            "kind": "arena_wave", "tier": None,
+            "message": f"⚔ {display_name} reached wave {wave} in the Halyard Mob Arena",
+        }
+        os_client.index(index="activity-feed", body=doc)
+        live_hub.broadcast({"type": "ActivityPosted", "data": doc})
+
     # -------------------------------------------------------------
     # 6. PRESENCE WORKER — who's in the Basin right now
     # -------------------------------------------------------------

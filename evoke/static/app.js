@@ -129,6 +129,7 @@ const Evoke = (() => {
     adminUnrelease: (missionId) => fetch(`/api/admin/missions/${missionId}/unrelease`, { method: "POST" }).then(r => r.json()),
     worldState: () => apiGet("/api/world-state"),
     minecraftStatus: () => apiGet("/api/minecraft/status"),
+    mcArena: (userId) => apiGet(`/api/mc-arena/${userId}`),
     companionInfo: () => apiGet("/api/companion/info"),
     teamWheel: (teamId) => apiGet(`/api/team/${teamId}/wheel`),
     adminCohort: (userId) => apiGet(`/api/admin/cohort?user_id=${userId}`),
@@ -292,6 +293,13 @@ const Evoke = (() => {
         `<a href="#/mission/${d.mission_id}">Open Mission Brief →</a>`,
         { kind: "release", ttl: 12000 }
       );
+    } else if (msg.type === "ArenaWaveReached" && d.user_id === state.userId) {
+      // No full-screen celebration for this one (unlike missions/levels) --
+      // just a toast. Other players' runs already reach everyone through
+      // the generic ActivityPosted branch above (arena_wave isn't excluded
+      // there), so this only needs to cover the achiever's own case.
+      sfx.award();
+      toast(`⚔ Halyard Mob Arena — new best: <strong>Wave ${d.wave}</strong>`);
     } else if (msg.type === "XPGranted" && d.user_id === state.userId) {
       sfx.xpTick();
       renderTopbar();

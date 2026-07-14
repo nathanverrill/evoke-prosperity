@@ -478,6 +478,66 @@ def get_online_linked_players(conn, online_players: list) -> dict:
     finally:
         cur.close()
 
+ARENA_XP_PER_WAVE = 20
+
+
+def _parse_scoreboard_value(response: str):
+    """'<player> has <N> [<objective>]' -> N; None if the player has never
+    touched that objective ("Can't get value of ... none is set")."""
+    if "has" not in response:
+        return None
+    try:
+        return int(response.split(" has ", 1)[1].split(" ", 1)[0])
+    except (IndexError, ValueError):
+        return None
+
+
+def check_arena_progress(conn, rcon: "RCONClient", linked: dict):
+    """Halyard Mob Arena web wiring: reads each online-linked player's
+    arenaBestWave scoreboard (the datapack updates it in-world; this is the
+    read-only bridge half). Own small table, same ownership split as
+    world_meta (bridge-owned Postgres state, not main.py's schema) --
+    mc_arena_best just remembers the last value we already granted XP for,
+    so a heartbeat tick only reacts to a genuine new best, not the same
+    wave reported again."""
+    cur = conn.cursor()
+    try:
+        cur.execute("CREATE TABLE IF NOT EXISTS mc_arena_best (user_id UUID PRIMARY KEY, best_wave INT NOT NULL DEFAULT 0)")
+        conn.commit()
+    finally:
+        cur.close()
+
+    for player_name, user_id in linked.items():
+        response = rcon.execute_command(f"scoreboard players get {player_name} arenaBestWave")
+        wave = _parse_scoreboard_value(response)
+        if wave is None or wave <= 0:
+            continue
+
+        cur = conn.cursor()
+        try:
+            cur.execute("SELECT best_wave FROM mc_arena_best WHERE user_id = %s::uuid", (user_id,))
+            row = cur.fetchone()
+            known = row[0] if row else 0
+            if wave <= known:
+                continue
+            cur.execute(
+                """INSERT INTO mc_arena_best (user_id, best_wave) VALUES (%s::uuid, %s)
+                   ON CONFLICT (user_id) DO UPDATE SET best_wave = EXCLUDED.best_wave""",
+                (user_id, wave)
+            )
+            conn.commit()
+        finally:
+            cur.close()
+
+        publish_event("XPGranted", {
+            "user_id": user_id,
+            "amount": ARENA_XP_PER_WAVE * (wave - known),
+            "reason": "arena_wave",
+        })
+        publish_event("ArenaWaveReached", {"user_id": user_id, "wave": wave})
+        print(f"✓ Arena progress: {player_name} reached wave {wave} (was {known})")
+
+
 def get_random_ambient_reward(conn) -> dict:
     cur = conn.cursor()
     try:
@@ -1006,6 +1066,16 @@ async def heartbeat_loop():
                 linked = get_online_linked_players(conn, online_players)
             finally:
                 return_db_connection(conn)
+
+            if linked:
+                arena_rcon = RCONClient(MINECRAFT_HOST, MINECRAFT_PORT, RCON_PASSWORD)
+                if arena_rcon.connect():
+                    conn = get_db_connection()
+                    try:
+                        check_arena_progress(conn, arena_rcon, linked)
+                    finally:
+                        return_db_connection(conn)
+                    arena_rcon.close()
 
             for player_name, user_id in linked.items():
                 publish_event("XPGranted", {

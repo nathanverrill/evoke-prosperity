@@ -188,6 +188,11 @@ async def startup():
         )""")
         db_execute("CREATE INDEX IF NOT EXISTS idx_minigame_scores_user_game ON minigame_scores(user_id, game_key)")
         db_execute("CREATE INDEX IF NOT EXISTS idx_minigame_scores_game_score ON minigame_scores(game_key, score DESC)")
+        # Halyard Mob Arena progress -- bridge-owned table (matches world_meta's
+        # split: the bridge is the only thing that ever writes it, from RCON
+        # reads of the arenaBestWave scoreboard), created here too so the web
+        # side can read it even before the bridge's first heartbeat tick.
+        db_execute("CREATE TABLE IF NOT EXISTS mc_arena_best (user_id UUID PRIMARY KEY, best_wave INT NOT NULL DEFAULT 0)")
         # Identity customization: uploaded avatar (MinIO object key), the
         # procedural Agent Sigil config (small JSON: glyph + hue), and the
         # equipped Field Gear (JSON list of gear keys, validated on write).
@@ -2247,6 +2252,14 @@ async def minecraft_status():
         "linked_players": doc.get("linked_players", {}),
         "stale": stale,
     }
+
+
+@app.get("/api/mc-arena/{user_id}")
+async def get_arena_progress(user_id: str):
+    """Halyard Mob Arena best-wave reached -- bridge-owned table (see
+    check_arena_progress in bridge.py), read-only here."""
+    row = db_fetch_one("SELECT best_wave FROM mc_arena_best WHERE user_id = %s::uuid", (user_id,))
+    return {"best_wave": row[0] if row else 0}
 
 
 # ========== Companion (phone) ==========
