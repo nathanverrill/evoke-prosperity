@@ -339,13 +339,12 @@ const Evoke = (() => {
   // display font, cyan-highlighted when active. On narrow screens it
   // collapses to a fixed bottom tab bar (layout.css).
   const NAV_ITEMS = [
-    { href: "#/", icon: "home", label: "Home", fill: true },
-    { href: "#/map", icon: "hub", label: "Campaign Map" },
-    { href: "#/novel", icon: "auto_stories", label: "Story" },
-    { href: "#/gallery", icon: "groups", label: "Cohort" },
-    { href: "#/arcade", icon: "sports_esports", label: "Field Ops" },
+    { href: "#/", icon: "home", label: "Learn", fill: true },
+    { href: "#/ops", icon: "hub", label: "Operations Hub" },
+    { href: "#/progress", icon: "shield", label: "Progress" },
+    { href: "#/vault", icon: "inventory_2", label: "Vault" },
     { href: "#/billbot", icon: "smart_toy", label: "B1llbot" },
-    { href: "#/profile", icon: "person", label: "Dossier", fill: true },
+    { href: "#/profile", icon: "person", label: "Profile", fill: true },
   ];
 
   function navIsActive(href) {
@@ -358,14 +357,13 @@ const Evoke = (() => {
     const el = document.getElementById("nav-rail");
     if (!el) return;
     el.innerHTML = `
-      <a href="#/" class="topbar__brand rail__brand" aria-label="EVOKE Prosperity — home">
-        <span class="glyph" aria-hidden="true"></span>
-        <span class="rail__brandwords"><span class="word">EVOKE</span><span class="word--sub">Prosperity</span></span>
+      <a href="#/" class="brand-lockup lockup rail__brand" aria-label="EVOKE — home">
+        <img class="wordmark-img" src="img/evoke-wordmark.png" alt="EVOKE">
       </a>
       ${NAV_ITEMS.map(it => `
         <a class="nav ${navIsActive(it.href) ? "on" : ""}" href="${it.href}">
-          <span class="ms ${it.fill ? "ms--fill" : ""}" aria-hidden="true">${it.icon}</span>
-          <span class="nav__lbl">${it.label}</span>
+          <span class="ms ${it.fill ? "fill" : ""}" aria-hidden="true" style="font-size:28px;">${it.icon}</span>
+          <span class="lbl">${it.label}</span>
         </a>
       `).join("")}
     `;
@@ -618,6 +616,10 @@ const Evoke = (() => {
     { pattern: /^#\/team\/([^/]+)$/, screen: "teamProfile" },
     { pattern: /^#\/admin$/, screen: "admin" },
     { pattern: /^#\/map$/, screen: "campaignMap" },
+    { pattern: /^#\/progress$/, screen: "progress" },
+    { pattern: /^#\/ops$/, screen: "ops" },
+    { pattern: /^#\/vault$/, screen: "vaultGrid" },
+    { pattern: /^#\/story$/, screen: "story" },
     { pattern: /^#\/faq$/, screen: "faq" },
     { pattern: /^#\/arcade$/, screen: "arcade" },
     { pattern: /^#\/game\/flow$/, screen: "gameFlow" },
@@ -640,6 +642,7 @@ const Evoke = (() => {
           screenEl.innerHTML = `<div class="card"><p>Something didn't load. ${escapeHtml(e.message)}</p></div>`;
         }
         renderTopbar();
+        syncSettingsUI();
         return;
       }
     }
@@ -649,6 +652,36 @@ const Evoke = (() => {
   function mount(html) {
     document.getElementById("screen").innerHTML = html;
   }
+
+  // ---------- Accessibility settings (Profile → Settings card) ----------
+  // Persisted display prefs; applied on boot so they survive reload, and the
+  // toggles sync to saved state whenever the Profile screen renders.
+  const SETTINGS = {
+    hc: { cls: "hc", on: "High contrast on", off: "Standard contrast" },
+    "reduce-motion": { cls: "reduce-motion", on: "Animations reduced", off: "Animations on" },
+    reminders: { cls: null, on: "Reminders on", off: "Reminders off" },
+  };
+  const settingKey = (k) => "evoke_setting_" + k;
+  const isSettingOn = (k) => localStorage.getItem(settingKey(k)) === "1";
+  function applySavedSettings() {
+    Object.keys(SETTINGS).forEach((k) => { if (SETTINGS[k].cls) document.body.classList.toggle(SETTINGS[k].cls, isSettingOn(k)); });
+  }
+  function syncSettingsUI() {
+    document.querySelectorAll(".pf-toggle[data-setting]").forEach((btn) => {
+      const k = btn.dataset.setting, on = isSettingOn(k);
+      btn.setAttribute("aria-checked", on ? "true" : "false");
+      const val = btn.closest(".pf-set-row")?.querySelector(".pf-set-val");
+      if (val && SETTINGS[k]) val.textContent = on ? SETTINGS[k].on : SETTINGS[k].off;
+    });
+  }
+  document.addEventListener("click", (e) => {
+    const btn = e.target.closest(".pf-toggle[data-setting]");
+    if (!btn || !SETTINGS[btn.dataset.setting]) return;
+    const k = btn.dataset.setting, on = !isSettingOn(k);
+    localStorage.setItem(settingKey(k), on ? "1" : "0");
+    if (SETTINGS[k].cls) document.body.classList.toggle(SETTINGS[k].cls, on);
+    syncSettingsUI();
+  });
 
   // ---------- Controller-grammar keyboard nav ----------
   // Console-player feedback: A=select/B=back/bumpers-switch-tabs has a web
@@ -691,6 +724,7 @@ const Evoke = (() => {
   }
 
   async function boot() {
+    applySavedSettings();
     await ensureLoggedIn();
     // Fire-and-forget: the backend dedupes to one grant per calendar day, so
     // calling this on every boot is safe and simplest (no client-side

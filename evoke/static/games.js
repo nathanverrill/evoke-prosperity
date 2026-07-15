@@ -125,7 +125,7 @@
     Evoke.mount(`
       <div class="stack">
         <div class="row-between">
-          <h1>Training</h1>
+          <h1 class="glow-h" style="font-size:clamp(30px,5vw,52px);margin:0 0 8px;">Training</h1>
           <span class="chip chip--green"><span class="dot"></span>Sim Deck Online</span>
         </div>
         <p class="empty-state">Field simulations. Optional, never graded — but the Basin remembers your scores. Daily training earns XP once per sim.</p>
@@ -224,7 +224,7 @@
       Evoke.mount(`
         <div class="stack game-screen">
           <div class="row-between">
-            <h1>Flow Control</h1>
+            <h1 class="glow-h" style="font-size:clamp(26px,4.5vw,44px);margin:0 0 8px;">Flow Control</h1>
             <span class="chip">CYCLE ${s.cycle} / ${TOTAL_CYCLES}</span>
           </div>
           <div class="grid-2">
@@ -351,7 +351,7 @@
       Evoke.mount(`
         <div class="stack game-screen">
           <div class="row-between">
-            <h1>Signal Decrypt</h1>
+            <h1 class="glow-h" style="font-size:clamp(26px,4.5vw,44px);margin:0 0 8px;">Signal Decrypt</h1>
             <span class="chip ${s.traces >= 2 ? "" : "chip--green"}">TRACE ${s.traces}/3 · SCORE ${s.score}${s.streak > 1 ? ` · ×${s.streak}` : ""}</span>
           </div>
           <div class="card decrypt-card">
