@@ -1,0 +1,188 @@
+/* layout.css — structural CSS only (grid/flex/positioning/sizing). No colors,
+   fonts, radii, or shadows here — those are theme.css's job, consuming
+   tokens.css. Keeping these separate is what lets the skin pass touch only
+   tokens.css + theme.css and never this file. */
+
+* { box-sizing: border-box; }
+
+html, body {
+  margin: 0;
+  padding: 0;
+  min-height: 100vh;
+  width: 100%;
+  overflow-x: hidden;
+}
+
+/* App shell: a left nav rail + main column (the showcase's layout).
+   On narrow screens the rail collapses to a fixed bottom tab bar. */
+#app-root {
+  display: flex;
+  flex-direction: row;
+  min-height: 100vh;
+}
+
+.rail {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  width: 280px;
+  padding: var(--space-6) var(--space-5);
+  flex: none;
+  position: sticky;
+  top: 0;
+  align-self: flex-start;
+  max-height: 100vh;
+  overflow-y: auto;
+}
+.rail__brand { margin-bottom: var(--space-6); }
+.rail__brandwords { display: flex; flex-direction: column; line-height: 1.1; }
+
+.app-main {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  min-height: 100vh;
+}
+
+.topbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-4);
+  padding: var(--space-3) var(--space-5);
+}
+
+.topbar__left, .topbar__right {
+  display: flex;
+  align-items: center;
+  gap: var(--space-4);
+}
+
+@media (max-width: 900px) {
+  #app-root { flex-direction: column; }
+  .rail {
+    position: fixed;
+    bottom: 0;
+    left: 0;
+    right: 0;
+    top: auto;
+    width: 100%;
+    max-height: none;
+    flex-direction: row;
+    justify-content: space-around;
+    padding: var(--space-2);
+    z-index: 55;
+    overflow-y: visible;
+    overflow-x: auto;
+  }
+  .rail__brand { display: none; }
+  .rail .nav { flex-direction: column; gap: 2px; padding: var(--space-1) var(--space-2); width: auto; }
+  .rail .nav__lbl { font-size: 0.6rem; }
+  .app-main { padding-bottom: 84px; }
+  .billbot-drawer { bottom: 92px; }
+}
+
+main#screen {
+  flex: 1;
+  width: 100%;
+  max-width: 1100px;
+  margin: 0 auto;
+  padding: var(--space-5) var(--space-4);
+}
+
+.stack { display: flex; flex-direction: column; gap: var(--space-4); }
+.stack-sm { display: flex; flex-direction: column; gap: var(--space-2); }
+.row { display: flex; align-items: center; gap: var(--space-3); flex-wrap: wrap; }
+.row-between { display: flex; align-items: center; justify-content: space-between; gap: var(--space-3); flex-wrap: wrap; }
+.grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: var(--space-4); }
+.grid-3 { display: grid; grid-template-columns: repeat(3, 1fr); gap: var(--space-4); }
+
+@media (max-width: 720px) {
+  .grid-2, .grid-3 { grid-template-columns: 1fr; }
+  main#screen { padding: var(--space-4) var(--space-3); }
+  .topbar { flex-wrap: wrap; }
+}
+
+.hub-layout {
+  display: grid;
+  grid-template-columns: 2fr 1fr;
+  gap: var(--space-5);
+  align-items: start;
+}
+@media (max-width: 900px) {
+  .hub-layout { grid-template-columns: 1fr; }
+}
+
+.mission-board {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: var(--space-4);
+}
+@media (max-width: 900px) {
+  .mission-board { grid-template-columns: 1fr 1fr; }
+}
+@media (max-width: 560px) {
+  .mission-board { grid-template-columns: 1fr; }
+}
+
+.badge-wall {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: var(--space-3);
+}
+
+.timeline-strip {
+  display: flex;
+  gap: 0;
+  width: 100%;
+}
+.timeline-step {
+  flex: 1;
+  padding: var(--space-2);
+  text-align: center;
+  position: relative;
+}
+
+.novel-panel {
+  width: 100%;
+  aspect-ratio: 16 / 9;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  padding: var(--space-5);
+}
+
+.chapter-rail {
+  display: flex;
+  gap: var(--space-2);
+  overflow-x: auto;
+  padding-bottom: var(--space-2);
+}
+
+.billbot-drawer {
+  position: fixed;
+  bottom: var(--space-4);
+  right: var(--space-4);
+  width: min(320px, calc(100vw - 32px));
+  max-height: 60vh;
+  display: flex;
+  flex-direction: column;
+  z-index: 50;
+}
+.billbot-drawer.is-collapsed .billbot-drawer__body { display: none; }
+.billbot-drawer__log {
+  flex: 1;
+  overflow-y: auto;
+  min-height: 120px;
+  max-height: 300px;
+}
+
+form.evidence-form { display: flex; flex-direction: column; gap: var(--space-3); }
+
+.companion-page {
+  max-width: 420px;
+  margin: 0 auto;
+  padding: var(--space-4);
+}

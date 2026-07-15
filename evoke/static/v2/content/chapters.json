@@ -1,0 +1,29 @@
+{
+  "_note": "Placeholder wireframe manifest — GAPS.md flags the real graphic-novel content pipeline as undefined (no chapters, no art, no authoring convention yet). This gives the reader mechanic (chapter rail, panel pager, lock state, CTA into the next mission) something real to render against until real content lands. Swap image_slot labels for real art paths under content/ when it exists — no JS changes needed.",
+  "chapters": [
+    { "id": "ch1", "title": "Week 1 — The Mountain", "panels": [
+      { "image_slot": "Keel at dawn", "caption": "Alex has lived his whole life at the bottom of the mountain." },
+      { "image_slot": "Alex and the water filter", "caption": "\"I'm not climbing to leave Keel behind. I'm climbing to bring something better back.\"" }
+    ]},
+    { "id": "ch2", "title": "Week 2 — The Collapse", "panels": [
+      { "image_slot": "Alpha Dynamics towers going dark", "caption": "The lights of Alpha go dark for the first time." },
+      { "image_slot": "Empty storefronts in Halyard", "caption": "The market moved on. The mountain was left behind." }
+    ]},
+    { "id": "ch3", "title": "Week 3 — The Brokers", "panels": [
+      { "image_slot": "The Brokers arrive", "caption": "A local faction fills the vacuum. They call themselves the Brokers." },
+      { "image_slot": "Alex at the midpoint", "caption": "\"I thought we needed better technology. We needed a better system.\"" }
+    ]},
+    { "id": "ch4", "title": "Week 4 — The Resistance", "panels": [
+      { "image_slot": "A failed prototype", "caption": "Not every build works the first time." },
+      { "image_slot": "Alex and Ada, regrouping", "caption": "Strong teams don't wait for perfect conditions." }
+    ]},
+    { "id": "ch5", "title": "Week 5 — Rebuilding", "panels": [
+      { "image_slot": "Community rebuilding together", "caption": "Alone, we were broken. Together, we are reclaimed." },
+      { "image_slot": "Water flowing again", "caption": "One filter helps one family. A network helps generations." }
+    ]},
+    { "id": "ch6", "title": "Week 6 — The Invitation", "panels": [
+      { "image_slot": "A mysterious signal", "caption": "Alchemy: \"You rebuilt one mountain. There are thousands.\"" },
+      { "image_slot": "The map dissolves into Earth", "caption": "Every community has its own mountain. The next Evokation isn't Alex's. It's yours." }
+    ]}
+  ]
+}

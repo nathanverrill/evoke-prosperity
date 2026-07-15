@@ -1,0 +1,134 @@
+/* tokens.css — every color, font, radius, shadow, and gradient lives here
+   and ONLY here, per UI_SPEC.md's wireframe skinning contract. This is the
+   production skin, ported from the design team's approved look in
+   "Prosperity Showcase-44.html" (the v44 "lighter-dark" iteration): navy
+   lifted toward blue-gray, brighter glass panels, TEAL signal energy (no
+   electric cyan), softened glows, Lexend display + Bricolage Grotesque body.
+   Fonts load from Google Fonts with system fallbacks — offline, the app
+   degrades to system-ui and stays fully usable. */
+
+@import url('https://fonts.googleapis.com/css2?family=Lexend:wght@400;500;600;700;800&family=Bricolage+Grotesque:opsz,wght@48,400;48,600;48,700&family=Cousine:wght@400;700&display=swap');
+/* Nav rail icons, same as the showcase. Offline fallback renders the
+   ligature word ("home", "hub") — readable, just not iconic. */
+@import url('https://fonts.googleapis.com/css2?family=Material+Symbols+Rounded:opsz,wght,FILL,GRAD@24,400,0,0&family=Material+Symbols+Rounded:opsz,wght,FILL,GRAD@24,400,1,0&display=swap');
+
+:root {
+  /* Showcase v44 base palette — lighter-dark navy, teal energy */
+  --navy-900: #0a1f35;
+  --navy-800: #12293f;
+  --navy-700: #1a3247;
+  --navy-600: #284056;
+  --navy-500: #3a5064;
+  --navy-400: #8b9cae;
+  /* "cyan-*" names retained for API stability, but now carry TEAL values
+     (v44 replaced the electric-cyan accent with global teal). */
+  --cyan-500: #00a596;
+  --cyan-300: #26c0b0;
+  --cyan-200: #57d2c3;
+  --cyan-100: #89e0d3;
+  --blue-500: #2b7fff;
+  --teal-600: #0a6b73;
+  --teal-500: #009688;
+  --teal-400: #3aa89b;
+  --teal-200: #7fcabf;
+  --teal-100: #9fd6cc;
+  --teal-050: #d7f2ec;
+  --green-400: #00d492;
+  --orange-500: #ff6b35;
+  --orange-600: #e85520;
+  --amber: #e8a33a;
+  --slate-200: #e6ebf2;
+
+  /* Semantic color API (names consumed by theme.css) */
+  --color-bg: var(--navy-900);
+  --color-surface: rgba(23, 46, 68, 0.84);
+  --color-surface-dim: rgba(14, 34, 54, 0.74);
+  --color-border: rgba(160, 200, 205, 0.18);
+  --color-border-strong: #3aa89b;
+  --color-text: var(--slate-200);
+  --color-text-muted: var(--teal-200);
+  --color-text-heading: var(--teal-050);
+  --color-text-inverse: #06121f;
+  --color-accent: var(--cyan-500);
+  --color-accent-text: #06121f;
+  --color-locked: var(--navy-800);
+  --color-locked-text: #a6b3cf;
+
+  /* Award tiers */
+  --tier-common: var(--navy-500);
+  --tier-epic: var(--blue-500);
+  --tier-legendary: var(--amber);
+
+  /* Arc colors (Explore / Imagine / Act / Communicate) */
+  --arc-explore: var(--green-400);
+  --arc-imagine: var(--cyan-300);
+  --arc-act: var(--orange-500);
+  --arc-communicate: var(--teal-500);
+
+  /* State */
+  --state-locked-bg: rgba(10, 26, 51, 0.55);
+  --state-available-bg: rgba(23, 46, 68, 0.84);
+  --state-submitted-bg: rgba(232, 163, 58, 0.10);
+  --state-inreview-bg: rgba(38, 192, 176, 0.10);
+  --state-complete-bg: rgba(0, 212, 146, 0.08);
+
+  /* Typography — v44: Lexend display, Bricolage Grotesque body, Cousine mono */
+  --font-display: 'Lexend', system-ui, sans-serif;
+  --font-body: 'Bricolage Grotesque', 'Inter', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  --font-mono: 'Cousine', ui-monospace, "SF Mono", Menlo, monospace;
+
+  --text-xs: 0.75rem;
+  --text-sm: 0.875rem;
+  --text-base: 1rem;
+  --text-lg: 1.25rem;
+  --text-xl: 1.75rem;
+  --text-2xl: 2.25rem;
+
+  /* Spacing scale */
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 24px;
+  --space-6: 40px;
+
+  /* Shape */
+  --radius: 12px;
+  --radius-lg: 16px;
+  --radius-pill: 999px;
+  --border-width: 1px;
+
+  /* Elevation + glow (v44's softened glass language) */
+  --shadow: inset 0 0 0 1px var(--color-border-strong), 0 18px 40px -22px rgba(6, 15, 30, 0.55);
+  --glow-md: 0 8px 18px -8px rgba(6, 15, 30, 0.5);
+  --glow-text: 0 0 24px rgba(0, 150, 136, 0.30), 0 1px 0 rgba(6, 15, 30, 0.25);
+  --glow-green: 0 0 10px var(--green-400);
+
+  /* Gradients */
+  --grad-logo: linear-gradient(135deg, #009688 0%, #009688 50%, #009689 100%);
+  --grad-logo-inner: linear-gradient(135deg, #009688 0%, #009689 100%);
+  --grad-page: radial-gradient(120% 80% at 50% 0%, #163049 0%, #0f2740 45%, #0a1f35 100%);
+  --grad-divider: linear-gradient(90deg, rgba(0, 0, 0, 0) 0%, #009688 50%, rgba(0, 0, 0, 0) 100%);
+  --grad-xp: linear-gradient(90deg, #ff6b35 0%, #e85520 100%);
+  --grad-water: linear-gradient(90deg, #009688 0%, #26c0b0 100%);
+
+  --ease-out: cubic-bezier(0.16, 1, 0.3, 1);
+
+  /* Showcase (v44) component token aliases — the exact names the ported
+     showcase.css consumes, mapped onto the same palette/semantics above so
+     both the legacy theme.css and the showcase.css read one source of truth. */
+  --white: #fff;
+  --surface-glass: var(--color-surface);
+  --surface-glass-dim: var(--color-surface-dim);
+  --border-ui: var(--color-border-strong);
+  --border-faint: var(--color-border);
+  --text-heading: var(--color-text-heading);
+  --text-body: var(--color-text);
+  --text-label: var(--teal-200);
+  --text-muted: #bcd3d6;
+  --text-faint: #aec6ca;
+  --text-locked: var(--color-locked-text);
+  --orange-300: #ffb877;
+  --radius-md: 12px;
+  --elev-glass: var(--shadow);
+}
