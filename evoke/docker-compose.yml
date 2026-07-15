@@ -28,8 +28,14 @@ services:
       OPENWEBUI_API_KEY: ${OPENWEBUI_API_KEY:-}
       AI_ENABLED: "true"
       MINECRAFT_PUBLIC_HOST: ${MINECRAFT_PUBLIC_HOST:-localhost}
-      MINECRAFT_PUBLIC_PORT_JAVA: ${PORT_MINECRAFT:-25565}
-      MINECRAFT_PUBLIC_PORT_BEDROCK: ${PORT_MINECRAFT_BEDROCK:-19132}
+      # These previously aliased PORT_MINECRAFT/PORT_MINECRAFT_BEDROCK (the
+      # vars that control the actual Docker host-port binding in
+      # evoke-infra/docker-compose.yml), so there was no way to advertise a
+      # different external port than the container's real bind port -- e.g.
+      # for a router-level port remap (external X -> internal 25565/19132).
+      # Now genuinely independent, matching MINECRAFT_PUBLIC_HOST's pattern.
+      MINECRAFT_PUBLIC_PORT_JAVA: ${MINECRAFT_PUBLIC_PORT_JAVA:-25565}
+      MINECRAFT_PUBLIC_PORT_BEDROCK: ${MINECRAFT_PUBLIC_PORT_BEDROCK:-19132}
       # .env.example has documented this since it was added, but it was
       # never actually wired through here -- setting it in .env silently
       # did nothing; main.py's _companion_url() never saw it.
