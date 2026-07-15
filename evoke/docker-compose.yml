@@ -36,6 +36,8 @@ services:
       # Now genuinely independent, matching MINECRAFT_PUBLIC_HOST's pattern.
       MINECRAFT_PUBLIC_PORT_JAVA: ${MINECRAFT_PUBLIC_PORT_JAVA:-25565}
       MINECRAFT_PUBLIC_PORT_BEDROCK: ${MINECRAFT_PUBLIC_PORT_BEDROCK:-19132}
+      ADMIN_USERNAME: ${ADMIN_USERNAME:-admin}
+      ADMIN_PASSWORD: ${ADMIN_PASSWORD:-devsecret123}
       # .env.example has documented this since it was added, but it was
       # never actually wired through here -- setting it in .env silently
       # did nothing; main.py's _companion_url() never saw it.
@@ -73,9 +75,12 @@ services:
     environment:
       DATABASE_URL: postgresql://evoke:devsecret123@postgres:5432/evoke
       REDPANDA_BROKER: redpanda:29092
-      MINECRAFT_HOST: minecraft
-      MINECRAFT_RCON_PORT: 25575
-      RCON_PASSWORD: devsecret123
+      # Previously hardcoded to the local `minecraft` container -- these were
+      # never actually configurable via .env until now, matching the same gap
+      # already found and fixed for PUBLIC_WEB_URL/MINECRAFT_PUBLIC_PORT_JAVA.
+      MINECRAFT_HOST: ${MINECRAFT_BRIDGE_HOST:-minecraft}
+      MINECRAFT_RCON_PORT: ${MINECRAFT_BRIDGE_RCON_PORT:-25575}
+      RCON_PASSWORD: ${MINECRAFT_BRIDGE_RCON_PASSWORD:-devsecret123}
       OPENWEBUI_URL: http://open-webui:8080
       OPENWEBUI_API_KEY: ${OPENWEBUI_API_KEY:-}
     healthcheck:

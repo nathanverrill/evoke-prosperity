@@ -4,12 +4,14 @@ import datetime
 import asyncio
 import random
 import re
+import secrets
 import uuid
 from typing import Optional, List
-from fastapi import FastAPI, HTTPException, File, UploadFile, Form, Depends, Response, Request, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI, APIRouter, HTTPException, File, UploadFile, Form, Depends, Response, Request, WebSocket, WebSocketDisconnect
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse, JSONResponse, RedirectResponse
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.security import HTTPBasic, HTTPBasicCredentials
 from pydantic import BaseModel
 import psycopg2
 from psycopg2.pool import SimpleConnectionPool
@@ -48,6 +50,14 @@ MINECRAFT_PUBLIC_HOST = os.getenv("MINECRAFT_PUBLIC_HOST", "localhost")
 MINECRAFT_PUBLIC_PORT_JAVA = os.getenv("MINECRAFT_PUBLIC_PORT_JAVA", "25565")
 MINECRAFT_PUBLIC_PORT_BEDROCK = os.getenv("MINECRAFT_PUBLIC_PORT_BEDROCK", "19132")
 
+# /api/admin/* gate -- was completely unauthenticated (see GAPS.md: "Auth is
+# dev-grade"). Deliberately simple (HTTP Basic, one shared username/password,
+# no per-instructor accounts) rather than building out real admin auth --
+# matches what was actually asked for once this app became internet-reachable
+# via ngrok, not a general-purpose auth system.
+ADMIN_USERNAME = os.getenv("ADMIN_USERNAME", "admin")
+ADMIN_PASSWORD = os.getenv("ADMIN_PASSWORD", "devsecret123")
+
 # Brightspace integration (adapter or simulator)
 BRIGHTSPACE_SIMULATOR_MODE = os.getenv("BRIGHTSPACE_SIMULATOR_MODE", "true").lower() == "true"
 BRIGHTSPACE_TENANT_URL = os.getenv("BRIGHTSPACE_TENANT_URL")
@@ -77,6 +87,28 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# ========== Admin auth (HTTP Basic) ==========
+_admin_basic = HTTPBasic()
+
+def require_admin_auth(credentials: HTTPBasicCredentials = Depends(_admin_basic)):
+    """Gate for every /api/admin/* route. Uses secrets.compare_digest for
+    both fields so a wrong-length guess can't be timed against the real
+    value char-by-char."""
+    user_ok = secrets.compare_digest(credentials.username, ADMIN_USERNAME)
+    pass_ok = secrets.compare_digest(credentials.password, ADMIN_PASSWORD)
+    if not (user_ok and pass_ok):
+        raise HTTPException(
+            status_code=401,
+            detail="Invalid admin credentials",
+            headers={"WWW-Authenticate": "Basic"},
+        )
+    return credentials.username
+
+# All /api/admin/* routes attach to this router instead of `app` directly, so
+# the auth dependency applies once here rather than needing to remember it on
+# every individual endpoint (and on every future one added later).
+admin_router = APIRouter(dependencies=[Depends(require_admin_auth)])
 
 # ========== Mission Catalog Sync ==========
 async def sync_missions_from_lms():
@@ -1066,7 +1098,7 @@ async def list_missions(user_id: str):
 # outside LTI" gap). Not a new gap introduced here, just inheriting the
 # existing one; real deployment needs an instructor-role check before this
 # ships to a real classroom.
-@app.get("/api/admin/missions")
+@admin_router.get("/api/admin/missions")
 async def admin_list_missions(user_id: str):
     """All missions for the caller's campaign, including release state --
     the admin-facing counterpart to GET /api/missions, which only shows
@@ -1096,7 +1128,7 @@ async def admin_list_missions(user_id: str):
         raise HTTPException(status_code=400, detail=str(e))
 
 
-@app.post("/api/admin/missions/{mission_id}/release")
+@admin_router.post("/api/admin/missions/{mission_id}/release")
 async def admin_release_mission(mission_id: str):
     """Console-player feedback (BUILD_PLAN_2's "season drops" gap): a
     stage/mission release is already this campaign's real content-drop
@@ -1127,7 +1159,7 @@ async def admin_release_mission(mission_id: str):
         raise HTTPException(status_code=400, detail=str(e))
 
 
-@app.post("/api/admin/missions/{mission_id}/unrelease")
+@admin_router.post("/api/admin/missions/{mission_id}/unrelease")
 async def admin_unrelease_mission(mission_id: str):
     """Puts a mission back behind the gate. Deliberately doesn't touch
     submissions/awards already granted while it was open -- unreleasing is
@@ -2691,7 +2723,7 @@ async def team_wheel(team_id: str):
 
 
 # ========== Instructor Ops Deck ==========
-@app.get("/api/admin/cohort")
+@admin_router.get("/api/admin/cohort")
 async def admin_cohort(user_id: str):
     """Per-learner overview for the instructor: level/XP, missions done,
     last activity, and what's waiting on the teacher. Same unprotected-dev
@@ -2785,7 +2817,7 @@ async def _fetch_classlist():
         return resp.json() if resp.status_code == 200 else None
 
 
-@app.get("/api/admin/roster")
+@admin_router.get("/api/admin/roster")
 async def admin_roster():
     """LMS classlist cross-referenced against evoke_identities and
     team_members -- who's already an EVOKE Player, and which team (if any)
@@ -2827,7 +2859,7 @@ async def admin_roster():
         raise HTTPException(status_code=400, detail=str(e))
 
 
-@app.post("/api/admin/roster/{brightspace_user_id}/import")
+@admin_router.post("/api/admin/roster/{brightspace_user_id}/import")
 async def admin_import_student(brightspace_user_id: int):
     """Provisions an EVOKE Player for this LMS student ahead of their first
     LTI launch, so an admin can assign them to a team right away.
@@ -2851,7 +2883,7 @@ async def admin_import_student(brightspace_user_id: int):
         raise HTTPException(status_code=400, detail=str(e))
 
 
-@app.get("/api/admin/teams")
+@admin_router.get("/api/admin/teams")
 async def admin_list_teams():
     try:
         teams = db_fetch_all("SELECT id, name FROM teams ORDER BY name")
@@ -2872,7 +2904,7 @@ async def admin_list_teams():
         raise HTTPException(status_code=400, detail=str(e))
 
 
-@app.post("/api/admin/teams")
+@admin_router.post("/api/admin/teams")
 async def admin_create_team(name: str = Form(...)):
     try:
         org_row = db_fetch_one("SELECT id FROM organizations LIMIT 1")
@@ -2890,7 +2922,7 @@ async def admin_create_team(name: str = Form(...)):
         raise HTTPException(status_code=400, detail=str(e))
 
 
-@app.post("/api/admin/teams/{team_id}/members")
+@admin_router.post("/api/admin/teams/{team_id}/members")
 async def admin_add_team_member(team_id: str, user_id: str = Form(...)):
     """A learner belongs to exactly one team (matching how the curriculum
     is actually run, and what the team-evidence-submission model assumes)
@@ -2907,7 +2939,7 @@ async def admin_add_team_member(team_id: str, user_id: str = Form(...)):
         raise HTTPException(status_code=400, detail=str(e))
 
 
-@app.delete("/api/admin/teams/{team_id}/members/{user_id}")
+@admin_router.delete("/api/admin/teams/{team_id}/members/{user_id}")
 async def admin_remove_team_member(team_id: str, user_id: str):
     try:
         db_execute(
@@ -2924,7 +2956,7 @@ TIER_RANK = {"common": 1, "epic": 2, "legendary": 3}
 STAGE_STARS = {1: "★", 2: "★★", 3: "★★★"}
 
 
-@app.post("/api/admin/missions/{mission_id}/stage")
+@admin_router.post("/api/admin/missions/{mission_id}/stage")
 async def admin_set_stage(mission_id: str, stage: int = Form(...)):
     """Stages are instructor pedagogy config (Nathan's decision: cadence
     must flex with classes/workshops), decoupled from the LMS week the
@@ -3451,6 +3483,8 @@ async def equip_gear(user_id: str, keys: str = Form(...)):
     return {"status": "equipped", "equipped": wanted}
 
 
+app.include_router(admin_router)
+
 # ========== Static Files ==========
 # Resolved relative to this file, not the process's working directory --
 # CWD is /app (so main.py can import itself as the evoke.* package, per the
@@ -3460,6 +3494,14 @@ async def equip_gear(user_id: str, keys: str = Form(...)):
 # and 2's Dockerfile fix for the package-import issue introduced this
 # regression without anyone noticing until the SPA was actually loaded).
 _static_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "static")
+# Hailey's pixel-exact redesign (see EVOKE-New-UI-Handoff.md), served
+# side-by-side with the current production UI rather than replacing it --
+# no backend changes either build needed. Must mount before "/" below:
+# Starlette matches mounts in registration order, and "/" is a catch-all
+# that would otherwise swallow every /v2/* request first.
+_v2_static_dir = os.path.join(_static_dir, "v2")
+if os.path.exists(_v2_static_dir):
+    app.mount("/v2", StaticFiles(directory=_v2_static_dir, html=True), name="static-v2")
 if os.path.exists(_static_dir):
     app.mount("/", StaticFiles(directory=_static_dir, html=True), name="static")
 
