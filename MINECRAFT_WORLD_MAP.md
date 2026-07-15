@@ -10,7 +10,7 @@ read directly from block/command-block NBT, or confirmed live against the
 running server.
 
 None of this was known/written down anywhere before this investigation.
-`GAPS.md` and `GAME_DESIGN.md` reference `true_oasis` constantly but never
+`GAPS.md` and `GAME_DESIGN.md` reference `basin` constantly but never
 described what's actually built inside it.
 
 ---
@@ -24,17 +24,17 @@ committed).
 
 | World | Size | Loader | Status |
 |---|---|---|---|
-| `true_oasis` | 704MB | Fabric (custom mods: PolyFactory, Chisels & Bits, Biomes O'Plenty) | **The real, currently-deployed world** — confirmed mounted in the live `evoke-infra-minecraft-1` container (`/server/world-data/world`, matches the 704MB exactly). Everything in this doc except §7 lives here. |
-| `unmodded/true_oasis` | 720MB | Same as above | An earlier dev/test snapshot of the *same* build — identical mechanics plus extra scaffolding: more named test players (`Benjamin`, `Beth`, `Craig`, `Jim`, `AsherFur`, `MZC3`, `RKram`, `SenpaiHenrey`), debug `tp`/`clear`/`resetmoney` commands, two dead references to `givemoney`/`hasgold` (see §4). Not deployed. |
+| `basin` | 704MB | Fabric (custom mods: PolyFactory, Chisels & Bits, Biomes O'Plenty) | **The real, currently-deployed world** — confirmed mounted in the live `evoke-infra-minecraft-1` container (`/server/world-data/world`, matches the 704MB exactly). Everything in this doc except §7 lives here. |
+| `unmodded/basin` | 720MB | Same as above | An earlier dev/test snapshot of the *same* build — identical mechanics plus extra scaffolding: more named test players (`Benjamin`, `Beth`, `Craig`, `Jim`, `AsherFur`, `MZC3`, `RKram`, `SenpaiHenrey`), debug `tp`/`clear`/`resetmoney` commands, two dead references to `givemoney`/`hasgold` (see §4). Not deployed. |
 | `wil-world` | 6.5MB | Paper/Bukkit, MC 1.21.11 | **Confirmed empty of built content** via exhaustive scan: 2 sheep, a chest minecart, 2 vanilla cave-spider mineshaft spawners, and vanilla mineshaft/ancient-city structure pieces. No command blocks, no signs, nothing built. An abandoned prototype, not a real minigame world. Not deployed, not referenced anywhere else in this repo. |
 
 **A second, separate set of world/mod exports** exists at
 `~/evoke-prosperity-files/minecraft/servers/{playtest,water_is_life,wil_unmodded}/`
-(each a `mods.zip` + `true_oasis.zip`, found 2026-07-15) — not the same
+(each a `mods.zip` + `basin.zip`, found 2026-07-15) — not the same
 files as the table above. None of the three bundled `mods.zip` matter for
 the live deployment; the running server's `Dockerfile` builds its own
 correct Geyser+Floodgate set fresh from Modrinth, independent of these.
-Of the three `true_oasis.zip` world saves: **`water_is_life`'s is the one
+Of the three `basin.zip` world saves: **`water_is_life`'s is the one
 actually running today** (confirmed via matching region-file count and
 `level.dat` against `evoke-infra/minecraft/world-seed/` and the live
 container). `playtest` and `wil_unmodded` are divergent snapshots from a
@@ -46,7 +46,7 @@ see §11.
 
 ## 2. The real B1llbot kiosk
 
-**Location:** `(-49, 63, 206)` in `true_oasis`, region `r.-1.0.mca`, right next
+**Location:** `(-49, 63, 206)` in `basin`, region `r.-1.0.mca`, right next
 to the starter villager pen (three unemployed desert villagers named
 **chuzz**, **Ethan**, **Fredster** — the "NPC villagers at the start").
 
@@ -175,7 +175,7 @@ Found via `give ... written_book_content` command blocks:
 | Monetary Master | Reach $200 |
 | Kindness | Donate an item to the donation bin |
 | Story | Read "The Old Oak" lore sign |
-| Critical Thinker / Foresight | Signs only, in an "admin / control room" at y=180-181 (both `true_oasis` and `unmodded`) — likely admin/testing signage, not confirmed as a live-earnable path |
+| Critical Thinker / Foresight | Signs only, in an "admin / control room" at y=180-181 (both `basin` and `unmodded`) — likely admin/testing signage, not confirmed as a live-earnable path |
 
 ---
 
@@ -343,7 +343,7 @@ Halyard/Oasis, or verifying any future direct world edit before it ships.
 ## 12. The Mob Gauntlet (ported from `wil_unmodded`, 2026-07-15)
 
 A real, finished 7-wave co-op combat arena existed in the `wil_unmodded`
-`true_oasis.zip` snapshot (§1) but never made it into the world lineage
+`basin.zip` snapshot (§1) but never made it into the world lineage
 actually running today. Found via `full_command_block_scan.py` +
 `scan_signs.py` against that snapshot: wave-number signs (1 through 8, wave
 6 marked "Reward") at `~(391-405, 141, 823)`, and — tellingly — a sign

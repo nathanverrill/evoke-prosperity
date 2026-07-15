@@ -6,7 +6,7 @@ MINECRAFT_WORLD_MAP.md §7 was actually mapped: plain terrain/scaffolding/
 wool blocks have no NBT of their own, so there's no RCON shortcut for them.
 
 Verified against known ground truth before trusting it: the command block
-at (-49, 63, 206) in true_oasis (the real B1llbot kiosk, MINECRAFT_WORLD_MAP.md
+at (-49, 63, 206) in basin (the real B1llbot kiosk, MINECRAFT_WORLD_MAP.md
 §2) round-trips correctly, matching what RCON's `data get block` independently
 confirmed.
 
@@ -56,7 +56,7 @@ def _read_chunk_nbt(region_path, idx):
 
 def get_block(world_dir, x, y, z):
     """world_dir is a world save root (the folder containing `region/`),
-    e.g. .../minecraft-world-files/true_oasis. Results are cached per
+    e.g. .../minecraft-world-files/basin. Results are cached per
     chunk -- cheap to call repeatedly across a scan of the same area."""
     chunk_x, chunk_z = x >> 4, z >> 4
     region_x, region_z = chunk_x >> 5, chunk_z >> 5

@@ -1,4 +1,4 @@
-# The Mob Gauntlet -- ported from `wil_unmodded`'s true_oasis.zip snapshot,
+# The Mob Gauntlet -- ported from `wil_unmodded`'s basin.zip snapshot,
 # a world lineage that diverged from the one actually running (see GAPS.md's
 # 2026-07-15 entry). That snapshot had a real, finished 7-wave co-op arena
 # ("my_mob_room" per its own structure block, "halyard arena" per a sign at

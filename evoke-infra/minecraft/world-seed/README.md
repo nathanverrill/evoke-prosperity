@@ -1,8 +1,8 @@
 # world-seed/
 
 Deliberately empty in git. This is where the real Basin Simulation world
-(`true_oasis`, currently ~704MB at `~/evoke-prosperity-files/minecraft/
-minecraft-world-files/true_oasis/`) needs to land before building this image
+(`basin`, currently ~704MB at `~/evoke-prosperity-files/minecraft/
+minecraft-world-files/basin/`) needs to land before building this image
 for anything beyond a smoke test — the entrypoint seeds a fresh volume from
 whatever's in this directory, and falls back to vanilla world generation if
 it's empty (which is how it was verified working in this build pass).

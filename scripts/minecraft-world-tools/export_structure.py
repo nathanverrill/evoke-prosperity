@@ -1,7 +1,7 @@
 """Exports a bounding box of a real world save as a vanilla structure NBT
 file (.nbt), the same format `/place template` reads. Companion to
 block_at.py (read-only) -- this is the write side, built specifically to
-pull the pre-existing 7-wave mob arena out of the `wil_unmodded` true_oasis
+pull the pre-existing 7-wave mob arena out of the `wil_unmodded` basin
 snapshot (see GAPS.md / MINECRAFT_WORLD_MAP.md) into a portable datapack,
 since that arena's physical structure never made it into the world lineage
 actually running today.

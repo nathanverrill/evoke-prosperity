@@ -3,7 +3,7 @@
 Stdlib-only Python for reading real Minecraft world saves (NBT + Anvil
 `.mca` region files) directly off disk — no NBT/Anvil library needed or
 assumed installed. Built to investigate the actual, undocumented content of
-the `true_oasis` world (see `../../MINECRAFT_WORLD_MAP.md` for what was
+the `basin` world (see `../../MINECRAFT_WORLD_MAP.md` for what was
 found); kept here because the same tools apply to any future "what's
 actually built in this world" question, or to verify a change to the real
 world files before deploying it.
@@ -11,7 +11,7 @@ world files before deploying it.
 These are read-only investigation tools. They don't modify anything and
 don't need the server running — point them at a world save directory
 (the folder containing `region/`), e.g.
-`~/evoke-prosperity-files/minecraft/minecraft-world-files/true_oasis`.
+`~/evoke-prosperity-files/minecraft/minecraft-world-files/basin`.
 
 ## Tools
 
@@ -54,7 +54,7 @@ The world files at
 `~/evoke-prosperity-files/minecraft/minecraft-world-files/` are a **static
 host copy**, separate from the actual Docker-managed named volume the live
 server runs on. They matched exactly everywhere checked except one block
-(`-49,62,206` in `true_oasis` — `chain_command_block` in the static copy,
+(`-49,62,206` in `basin` — `chain_command_block` in the static copy,
 plain `command_block` live via RCON), so treat the static copy as reliable
 but not byte-identical to the live deployment. For anything load-bearing,
 cross-check against the running server over RCON.
