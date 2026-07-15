@@ -5,6 +5,7 @@ import asyncio
 import random
 import re
 import uuid
+import hashlib
 from typing import Optional, List
 from fastapi import FastAPI, HTTPException, File, UploadFile, Form, Depends, Response, Request, WebSocket, WebSocketDisconnect
 from fastapi.staticfiles import StaticFiles
@@ -233,6 +234,24 @@ async def startup():
             reflection TEXT NOT NULL,
             submitted_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
             UNIQUE(user_id, mission_id)
+        )""")
+        # Submission redesign (Mission Submission Redesign doc): each mission
+        # can carry a per-learner Individual Task and a Team Product that every
+        # member turns in (Option A -- each uploads their own copy, hash-checked
+        # so a divergent file is flagged, never blocked). `kind` distinguishes
+        # the two; existing rows are team products. `content_hash` is the sha256
+        # of the uploaded file, used to detect who turned in the same file.
+        db_execute("ALTER TABLE submissions ADD COLUMN IF NOT EXISTS kind VARCHAR(32) NOT NULL DEFAULT 'team_product'")
+        db_execute("ALTER TABLE submissions ADD COLUMN IF NOT EXISTS content_hash TEXT")
+        # In-app Team Discussion thread (one per team per mission): the
+        # collaboration step, captured as evidence a facilitator can review.
+        db_execute("""CREATE TABLE IF NOT EXISTS team_discussion (
+            id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+            team_id UUID NOT NULL REFERENCES teams(id),
+            mission_id UUID NOT NULL REFERENCES missions(id),
+            user_id UUID NOT NULL REFERENCES users(id),
+            message TEXT NOT NULL,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         )""")
         # Identity customization: uploaded avatar (MinIO object key), the
         # procedural Agent Sigil config (small JSON: glyph + hue), and the
@@ -1173,7 +1192,7 @@ async def _complete_mission_for_user(user_id: str, mission_id: str, team_id: str
         return
 
     evidence = db_fetch_one(
-        "SELECT 1 FROM submissions WHERE team_id = %s::uuid AND mission_id = %s::uuid LIMIT 1",
+        "SELECT 1 FROM submissions WHERE team_id = %s::uuid AND mission_id = %s::uuid AND kind = 'team_product' LIMIT 1",
         (team_id, mission_id)
     )
     reflected = db_fetch_one(
@@ -1312,11 +1331,16 @@ async def submit_evidence(
     user_id: str = Form(...),
     mission_id: str = Form(...),
     file: UploadFile = File(...),
+    kind: str = Form("team_product"),
 ):
-    """Submit the TEAM's shared evidence for a mission -- any member can
-    call this. Closes the completion AND-gate (see
-    _complete_mission_for_user) for any teammate who already reflected;
-    everyone else's completion waits on their own reflection."""
+    """Submit evidence for a mission. `kind='team_product'` (default) is the
+    TEAM's shared artifact -- any member can call it, and it closes the
+    completion AND-gate (see _complete_mission_for_user) for any teammate who
+    already reflected. `kind='individual_task'` is a learner's own piece
+    (Submission Redesign doc, missions 1-4): stored + hash-recorded for the
+    roster/assessment, but it does not fire team-completion effects."""
+    if kind not in ("team_product", "individual_task"):
+        raise HTTPException(status_code=400, detail="kind must be 'team_product' or 'individual_task'")
     try:
         mission_release = db_fetch_one(
             "SELECT released_at FROM missions WHERE id = %s::uuid", (mission_id,)
@@ -1342,15 +1366,19 @@ async def submit_evidence(
         # XPGranted/BadgeAwarded and duplicate AwardGranted feed events,
         # which both spammed the feed and made resubmission an infinite
         # +100 XP faucet.
+        # Resubmission is scoped to the team's PRODUCT (the shared artifact that
+        # drives AI review + completion); individual-task and per-member product
+        # uploads don't count against the team-product first-submission guard.
         prior = db_fetch_one(
-            "SELECT 1 FROM submissions WHERE team_id = %s::uuid AND mission_id = %s::uuid LIMIT 1",
+            "SELECT 1 FROM submissions WHERE team_id = %s::uuid AND mission_id = %s::uuid AND kind = 'team_product' LIMIT 1",
             (team_id, mission_id)
         )
         is_resubmission = bool(prior)
 
         # Store file in MinIO
         file_bytes = await file.read()
-        object_key = f"evoke-evidence/{mission_id}/{user_id}_{file.filename}"
+        content_hash = hashlib.sha256(file_bytes).hexdigest()
+        object_key = f"evoke-evidence/{mission_id}/{kind}/{user_id}_{file.filename}"
         s3_client.put_object(
             Bucket="default-bucket",
             Key=object_key,
@@ -1358,13 +1386,18 @@ async def submit_evidence(
             ContentType=file.content_type or "application/octet-stream"
         )
 
-        # Create submission record -- team-owned; user_id here is
-        # submitted-by attribution only, not the completion key.
+        # Create submission record. content_hash lets the roster flag whether
+        # each member turned in the SAME team file (Option A hash-check).
         db_execute(
-            """INSERT INTO submissions (id, user_id, mission_id, team_id, file_path, status)
-               VALUES (%s::uuid, %s::uuid, %s::uuid, %s::uuid, %s, 'submitted')""",
-            (submission_id, user_id, mission_id, team_id, object_key)
+            """INSERT INTO submissions (id, user_id, mission_id, team_id, file_path, status, kind, content_hash)
+               VALUES (%s::uuid, %s::uuid, %s::uuid, %s::uuid, %s, 'submitted', %s, %s)""",
+            (submission_id, user_id, mission_id, team_id, object_key, kind, content_hash)
         )
+
+        # An individual task is a learner's own piece -- store it and stop.
+        # No Brightspace team sync, no AI team review, no completion effects.
+        if kind == "individual_task":
+            return {"status": "success", "submission_id": submission_id, "kind": kind}
 
         # Sync to Brightspace if adapter available
         if brightspace_lms:
@@ -1482,6 +1515,150 @@ async def submit_evidence(
         raise
     except Exception as e:
         logger.error(f"Submit evidence error: {e}")
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+def _initials(name: Optional[str]) -> str:
+    parts = [p for p in re.split(r"\s+", (name or "").strip()) if p]
+    if not parts:
+        return "?"
+    if len(parts) == 1:
+        return parts[0][:2].upper()
+    return (parts[0][0] + parts[-1][0]).upper()
+
+
+@app.get("/api/submission-state/{user_id}/{mission_id}")
+async def submission_state(user_id: str, mission_id: str):
+    """Per-member submission state for the requesting learner's team on one
+    mission -- drives the submission screen's roster strip, the motivational
+    banner, and completion status. Team-product files are hash-checked
+    (Option A): the most-common hash is 'canonical'; members matching it are
+    'matching', a different file is 'divergent', none is 'missing'."""
+    try:
+        team_id = _get_user_team(user_id)
+        if not team_id:
+            return {"team_id": None, "members": [], "you": None,
+                    "banner": {"show": False, "submitted": 0, "total": 0}, "canonical_hash": None}
+
+        members = db_fetch_all(
+            """SELECT u.id, u.display_name FROM team_members tm
+               JOIN users u ON u.id = tm.user_id
+               WHERE tm.team_id = %s::uuid ORDER BY u.display_name""",
+            (team_id,)
+        )
+        # team-product submissions (latest hash per member) for this mission
+        prod = db_fetch_all(
+            """SELECT DISTINCT ON (user_id) user_id, content_hash
+               FROM submissions
+               WHERE team_id = %s::uuid AND mission_id = %s::uuid AND kind = 'team_product'
+               ORDER BY user_id, submitted_at DESC""",
+            (team_id, mission_id)
+        )
+        product_hash = {str(r[0]): r[1] for r in prod}
+        indiv = {str(r[0]) for r in db_fetch_all(
+            "SELECT DISTINCT user_id FROM submissions WHERE team_id = %s::uuid AND mission_id = %s::uuid AND kind = 'individual_task'",
+            (team_id, mission_id))}
+        reflected = {str(r[0]) for r in db_fetch_all(
+            "SELECT user_id FROM mission_reflections WHERE mission_id = %s::uuid", (mission_id,))}
+        discussed = {str(r[0]) for r in db_fetch_all(
+            "SELECT DISTINCT user_id FROM team_discussion WHERE team_id = %s::uuid AND mission_id = %s::uuid",
+            (team_id, mission_id))}
+
+        # canonical = most common team-product hash
+        counts: dict = {}
+        for h in product_hash.values():
+            if h:
+                counts[h] = counts.get(h, 0) + 1
+        canonical = max(counts, key=counts.get) if counts else None
+
+        def product_status(uid: str) -> str:
+            if uid not in product_hash:
+                return "missing"
+            return "matching" if product_hash[uid] == canonical else "divergent"
+
+        out_members = []
+        for mid, name in members:
+            mid = str(mid)
+            out_members.append({
+                "user_id": mid,
+                "display_name": name,
+                "initials": _initials(name),
+                "is_you": mid == user_id,
+                "individual_task": mid in indiv,
+                "team_product": product_status(mid),
+                "reflected": mid in reflected,
+                "discussed": mid in discussed,
+            })
+
+        you = next((m for m in out_members if m["is_you"]), None)
+        submitted = sum(1 for m in out_members if m["team_product"] != "missing")
+        total = len(out_members)
+        banner_show = bool(you and you["team_product"] == "missing" and submitted >= 1)
+
+        return {
+            "team_id": team_id,
+            "mission_id": mission_id,
+            "canonical_hash": canonical,
+            "you": you,
+            "members": out_members,
+            "banner": {"show": banner_show, "submitted": submitted, "total": total},
+        }
+    except Exception as e:
+        logger.error(f"submission-state error: {e}")
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+class TeamDiscussionPost(BaseModel):
+    user_id: str
+    mission_id: str
+    message: str
+
+
+@app.post("/api/team-discussion")
+async def post_team_discussion(body: TeamDiscussionPost):
+    """Add a message to the team's in-app discussion thread for a mission."""
+    try:
+        msg = (body.message or "").strip()
+        if not msg:
+            raise HTTPException(status_code=400, detail="Message can't be empty")
+        team_id = _get_user_team(body.user_id)
+        if not team_id:
+            raise HTTPException(status_code=400, detail="You're not on a team yet")
+        mid = str(uuid.uuid4())
+        db_execute(
+            """INSERT INTO team_discussion (id, team_id, mission_id, user_id, message)
+               VALUES (%s::uuid, %s::uuid, %s::uuid, %s::uuid, %s)""",
+            (mid, team_id, body.mission_id, body.user_id, msg[:4000])
+        )
+        return {"status": "success", "id": mid}
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"team-discussion post error: {e}")
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@app.get("/api/team-discussion/{user_id}/{mission_id}")
+async def get_team_discussion(user_id: str, mission_id: str):
+    """The team's discussion thread for a mission (resolved via the caller's team)."""
+    try:
+        team_id = _get_user_team(user_id)
+        if not team_id:
+            return {"team_id": None, "messages": []}
+        rows = db_fetch_all(
+            """SELECT d.user_id, u.display_name, d.message, d.created_at
+               FROM team_discussion d JOIN users u ON u.id = d.user_id
+               WHERE d.team_id = %s::uuid AND d.mission_id = %s::uuid
+               ORDER BY d.created_at ASC""",
+            (team_id, mission_id)
+        )
+        return {"team_id": team_id, "messages": [{
+            "user_id": str(r[0]), "display_name": r[1], "initials": _initials(r[1]),
+            "message": r[2], "created_at": r[3].isoformat() if r[3] else None,
+            "is_you": str(r[0]) == user_id,
+        } for r in rows]}
+    except Exception as e:
+        logger.error(f"team-discussion get error: {e}")
         raise HTTPException(status_code=400, detail=str(e))
 
 

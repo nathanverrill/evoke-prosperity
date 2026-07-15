@@ -783,7 +783,7 @@
     renderOps(curMission()); window.renderOps=renderOps;
     window.opsMarkSubmitted=function(id){ try{localStorage.setItem('evoke-m'+id+'-submitted','1');}catch(e){} renderOps(current); if(window.syncAllXP) window.syncAllXP(); };
     document.getElementById('ops-brief').addEventListener('click',function(){ go('assignment'); });
-    document.getElementById('ops-submit').addEventListener('click',function(){ go('evidence'); });
+    document.getElementById('ops-submit').addEventListener('click',function(){ go('submission'); });
     // Operations Hub onboarding guide — auto-opens once, reopenable via the ? button
     (function(){
       var guide=document.getElementById('ops-guide');
@@ -1158,6 +1158,7 @@
     if(name==='assignment') renderAssignment();
     if(name==='missions') renderMissions(currentWeek);
     if(name==='ops' && window.renderOps) window.renderOps(curMission());
+    if(name==='submission' && window.renderSubmission) window.renderSubmission();
     if(name==='ops' && window.openOpsGuide){ var seen; try{ seen=localStorage.getItem('evoke-ops-guide-seen')==='1'; }catch(e){ seen=false; } if(!seen) setTimeout(window.openOpsGuide, 350); }
     if((name==='minecraft' || name==='companion') && window.renderMinecraftWeek) window.renderMinecraftWeek();
     if(name==='profile' && window.renderProfile2) window.renderProfile2();
@@ -1340,6 +1341,167 @@
           .catch(function(){ btn.disabled = false; if(status){ status.textContent = 'Could not link — check your connection.'; status.style.color = 'var(--text-faint)'; } });
       });
     }
+  })();
+
+  // ===== Mission Submission screen (individual task + team discussion + team product) =====
+  (function(){
+    var MISSIONS = window.EVOKE_SUBMISSION_MISSIONS || [];
+    var subMain = document.getElementById('sub-main');
+    if(!subMain) return;
+    var e2 = function(s){ return String(s==null?'':s).replace(/[&<>"]/g,function(c){return ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'})[c];}); };
+    var missionNo = function(){ try{ return (typeof curMission==='function') ? curMission() : 1; }catch(e){ return 1; } };
+    var missionData = function(no){ return MISSIONS.find(function(m){return m.n===no;}) || MISSIONS[0]; };
+    var backendId = function(no){ return STATE.missionIds && STATE.missionIds[no-1]; };
+
+    function statusChip(text, tone){
+      var c = tone==='done'?['green','check_circle']: tone==='todo'?['orange','pending']:['','schedule'];
+      return '<span class="chip '+c[0]+'" style="margin-left:auto;"><span class="ms" aria-hidden="true" style="font-size:14px;">'+c[1]+'</span>'+text+'</span>';
+    }
+    function reqList(items){
+      return '<div class="ev-reqs" style="margin-bottom:18px;">'+items.map(function(it){
+        return '<div style="display:flex;gap:12px;align-items:flex-start;margin-bottom:10px;"><span class="ms" aria-hidden="true" style="font-size:20px;color:var(--cyan-300);flex:none;">task_alt</span><span style="font-family:var(--font-body);font-size:14px;line-height:1.55;color:var(--teal-050);">'+e2(it)+'</span></div>';
+      }).join('')+'</div>';
+    }
+    function stepPill(num,label,state){
+      var cfg = state==='done'?['rgba(0,212,146,0.4)','rgba(0,212,146,0.07)','var(--green-400)','rgba(0,212,146,0.16)','check','Done']
+              : state==='todo'?['rgba(0,150,136,0.4)','rgba(0,150,136,0.06)','var(--cyan-300)','rgba(0,150,136,0.16)','upload_file','To do']
+              : ['var(--border-ui)','transparent','var(--text-faint)','rgba(145,209,209,0.1)','forum','Optional'];
+      return '<div style="flex:1;min-width:170px;display:flex;align-items:center;gap:12px;padding:14px 16px;border-radius:14px;box-shadow:inset 0 0 0 1px '+cfg[0]+';background:'+cfg[1]+';">'
+        +'<span style="width:34px;height:34px;flex:none;border-radius:50%;display:flex;align-items:center;justify-content:center;background:'+cfg[3]+';color:'+cfg[2]+';"><span class="ms" aria-hidden="true" style="font-size:20px;">'+cfg[4]+'</span></span>'
+        +'<div><div class="hud" style="font-size:9px;color:'+cfg[2]+';">'+cfg[5]+'</div><div style="font-family:var(--font-display);font-weight:700;font-size:14px;color:var(--text-heading);">'+label+'</div></div></div>';
+    }
+    function rosterChip(mem){
+      var st = mem.team_product; // matching | divergent | missing
+      var box = st==='matching'?['rgba(0,212,146,0.4)','rgba(0,212,146,0.07)','check_circle','var(--green-400)']
+              : st==='divergent'?['rgba(217,164,65,0.5)','rgba(217,164,65,0.08)','error','#e0a83f']
+              : ['var(--border-ui)','rgba(15,23,43,0.3)','radio_button_unchecked','var(--text-faint)'];
+      var ring = mem.is_you?'box-shadow:inset 0 0 0 1.5px var(--cyan-500);':'box-shadow:inset 0 0 0 1px '+box[0]+';';
+      var nm = mem.is_you?'<span style="font-family:var(--font-body);font-size:13px;color:var(--cyan-100);font-weight:700;">You</span>':'<span style="font-family:var(--font-body);font-size:13px;color:var(--teal-050);">'+e2(mem.display_name)+'</span>';
+      return '<span style="display:inline-flex;align-items:center;gap:8px;padding:8px 14px 8px 8px;border-radius:999px;'+ring+'background:'+box[1]+';"><span class="mtile" style="width:26px;height:26px;border-radius:50%;font-family:var(--font-display);font-weight:700;font-size:11px;display:flex;align-items:center;justify-content:center;color:var(--cyan-100);">'+e2(mem.initials)+'</span>'+nm+'<span class="ms" aria-hidden="true" style="font-size:16px;color:'+box[3]+';">'+box[2]+'</span></span>';
+    }
+
+    var currentState = null, currentMsgs = [];
+
+    function render(){
+      var no = missionNo();
+      var m = missionData(no);
+      var hasInd = !!m.individual;
+      var st = currentState || {};
+      var you = st.you || {};
+      var members = st.members || [];
+      var banner = (st.banner && st.banner.show) ? ('<div class="glass brackets" style="display:flex;gap:18px;align-items:center;flex-wrap:wrap;padding:18px 22px;margin-bottom:26px;box-shadow:inset 0 0 0 1px rgba(0,150,136,0.35),0 0 34px -12px rgba(0,150,136,0.5);">'
+        +'<span style="width:56px;height:60px;flex:none;"><img src="img/ui/3.png" alt="" style="width:100%;height:100%;object-fit:contain;filter:drop-shadow(0 5px 14px rgba(0,150,136,0.45));"></span>'
+        +'<div style="flex:1;min-width:240px;"><div class="hud" style="font-size:10px;color:var(--cyan-300);margin-bottom:5px;">B1llbot · Team Nudge</div>'
+        +'<div style="font-family:var(--font-body);font-size:15px;line-height:1.5;color:var(--teal-050);">Your team’s rolling, Agent — <strong style="color:var(--cyan-100);">'+st.banner.submitted+' of '+st.banner.total+'</strong> have turned in the Evokation and you’re the last piece. Drop yours in and finish it together. 🚀</div></div></div>') : '';
+
+      var indStatus = you.individual_task ? 'done' : 'todo';
+      var prodStatus = (you.team_product && you.team_product!=='missing') ? 'done' : 'todo';
+
+      var head = banner
+        + '<div style="display:flex;justify-content:center;gap:8px;flex-wrap:wrap;margin-bottom:14px;">'
+        + '<span class="chip"><span class="ms" aria-hidden="true" style="font-size:16px;">groups</span>'+e2(m.phase)+' · Week '+m.week+' · Mission '+m.n+'</span>'
+        + '<span class="chip teal"><span class="ms" aria-hidden="true" style="font-size:15px;">military_tech</span>'+e2(m.superpower)+'</span></div>'
+        + '<h1 style="font-family:var(--font-display);font-weight:700;font-size:clamp(28px,5vw,46px);text-transform:uppercase;color:var(--cyan-500);text-shadow:0 0 24px rgba(0,150,136,0.3);text-align:center;margin:0 0 8px;">'+e2(m.title)+'</h1>'
+        + '<p style="text-align:center;color:var(--teal-100);font-family:var(--font-body);font-size:15px;line-height:1.55;margin:0 auto 26px;max-width:640px;">'+(hasInd?'Complete your steps below. Your individual work feeds the team’s shared Evokation — everyone contributes.':'A team deliverable — talk it through, then everyone turns in your team’s shared product.')+'</p>';
+
+      var stepper = '<div style="display:flex;gap:12px;flex-wrap:wrap;margin-bottom:28px;">'
+        + (hasInd?stepPill(1,'Individual Task',indStatus):'')
+        + stepPill(hasInd?2:1,'Team Discussion', you.discussed?'done':'optional')
+        + stepPill(hasInd?3:2,'Team Product', prodStatus) + '</div>';
+
+      var indHtml = '';
+      if(hasInd){
+        indHtml = '<div class="glass" style="padding:clamp(22px,3.5vw,30px);margin-bottom:22px;">'
+          + '<div style="display:flex;align-items:center;gap:12px;margin-bottom:6px;flex-wrap:wrap;"><span class="ms" aria-hidden="true" style="font-size:24px;color:var(--cyan-300);">person</span><h2 class="hud" style="font-size:12px;margin:0;color:var(--cyan-300);">Step 1 · Your Individual Task</h2>'+statusChip(you.individual_task?'Submitted':'To do', you.individual_task?'done':'todo')+'</div>'
+          + '<p style="font-family:var(--font-body);font-size:14px;color:var(--teal-100);margin:0 0 14px;">Your own contribution — the piece only you are accountable for. Turn in:</p>'
+          + reqList(m.individual.items)
+          + '<div class="ev-drop" id="sub-ind-drop" role="button" tabindex="0" style="margin-bottom:16px;"><span class="ms" aria-hidden="true">cloud_upload</span><div class="ev-drop-title">Drop your individual work</div><div class="ev-drop-sub">or <span class="ev-browse">browse from your device</span></div></div>'
+          + '<input type="file" id="sub-ind-file" class="sr-only" aria-hidden="true">'
+          + '<label class="ev-label">Your reflection</label><textarea id="sub-reflect" class="ev-textarea" placeholder="What did you learn or notice…" style="min-height:90px;">'+e2(you.reflection_text||'')+'</textarea>'
+          + '<div style="text-align:right;margin-top:12px;"><button class="btn sec" id="sub-reflect-save" type="button">Save reflection</button></div></div>';
+      }
+
+      var msgsHtml = (currentMsgs||[]).map(function(mm){
+        return '<div style="display:flex;gap:12px;align-items:flex-start;"><span class="mtile" style="width:36px;height:36px;flex:none;border-radius:50%;font-family:var(--font-display);font-weight:700;font-size:14px;display:flex;align-items:center;justify-content:center;color:var(--cyan-100);">'+e2(mm.initials)+'</span><div style="flex:1;"><div style="font-family:var(--font-display);font-weight:700;font-size:13px;color:var(--cyan-200);margin-bottom:3px;">'+e2(mm.display_name)+(mm.is_you?' <span class="hud" style="font-weight:400;color:var(--text-faint);font-size:10px;">you</span>':'')+'</div><div style="font-family:var(--font-body);font-size:14px;line-height:1.5;color:var(--teal-050);padding:10px 14px;border-radius:0 12px 12px 12px;box-shadow:inset 0 0 0 1px var(--border-ui);">'+e2(mm.message)+'</div></div></div>';
+      }).join('') || '<p class="hud" style="font-size:12px;color:var(--text-faint);margin:0 0 14px;">No messages yet — start the conversation below.</p>';
+      var discHtml = '<div class="glass" style="padding:clamp(22px,3.5vw,30px);margin-bottom:22px;">'
+        + '<div style="display:flex;align-items:center;gap:12px;margin-bottom:6px;flex-wrap:wrap;"><span class="ms" aria-hidden="true" style="font-size:24px;color:var(--cyan-300);">forum</span><h2 class="hud" style="font-size:12px;margin:0;color:var(--cyan-300);">Step '+(hasInd?2:1)+' · Team Discussion</h2><span class="hud" style="margin-left:auto;font-size:11px;color:var(--text-faint);">'+(currentMsgs.length)+' message'+(currentMsgs.length===1?'':'s')+'</span></div>'
+        + '<p style="font-family:var(--font-body);font-size:14px;color:var(--teal-100);margin:0 0 16px;"><strong style="color:var(--cyan-100);">Prompt:</strong> '+e2(m.discussionPrompt)+'</p>'
+        + '<div style="display:flex;flex-direction:column;gap:12px;margin-bottom:16px;">'+msgsHtml+'</div>'
+        + '<form id="sub-disc-form" style="display:flex;gap:10px;align-items:center;"><input id="sub-disc-input" type="text" placeholder="Add to the discussion…" style="flex:1;padding:12px 14px;border-radius:12px;border:none;background:rgba(0,150,136,0.06);box-shadow:inset 0 0 0 1px var(--border-ui);color:var(--text-heading);font-family:var(--font-body);font-size:14px;"><button class="btn sec" type="submit" style="flex:none;">Post</button></form></div>';
+
+      var chips = members.map(rosterChip).join('');
+      var diverge = members.filter(function(x){return x.team_product==='divergent';});
+      var divNote = diverge.length ? '<div style="display:flex;align-items:center;gap:8px;margin-top:14px;font-family:var(--font-mono);font-size:11px;color:var(--text-faint);"><span class="ms" aria-hidden="true" style="font-size:15px;color:#e0a83f;">info</span>'+e2(diverge.map(function(x){return x.display_name;}).join(', '))+' turned in a different file than the rest of the team — your facilitator will take a look. It won’t block anyone.</div>' : '';
+      var teamHtml = '<div class="glass brackets" style="padding:clamp(22px,3.5vw,30px);margin-bottom:22px;box-shadow:inset 0 0 0 1px rgba(0,150,136,0.32),var(--elev-glass);">'
+        + '<div style="display:flex;align-items:center;gap:12px;margin-bottom:6px;flex-wrap:wrap;"><span class="ms" aria-hidden="true" style="font-size:24px;color:var(--cyan-300);">groups</span><h2 class="hud" style="font-size:12px;margin:0;color:var(--cyan-300);">Step '+(hasInd?3:2)+' · Team Product</h2>'+statusChip(prodStatus==='done'?'Submitted':'Your turn', prodStatus)+'</div>'
+        + '<p style="font-family:var(--font-body);font-size:14px;color:var(--teal-100);margin:0 0 14px;">Your team’s shared deliverable. Everyone turns in the <strong style="color:var(--cyan-100);">same file</strong> — that’s how we know the whole team signed off. Include:</p>'
+        + reqList(m.teamProduct.items)
+        + '<div class="ev-drop" id="sub-team-drop" role="button" tabindex="0" style="margin-bottom:18px;"><span class="ms" aria-hidden="true">cloud_upload</span><div class="ev-drop-title">Drag &amp; drop your team’s Evokation</div><div class="ev-drop-sub">or <span class="ev-browse">browse from your device</span></div><div class="ev-drop-hint">Should match your teammates’ file</div></div>'
+        + '<input type="file" id="sub-team-file" class="sr-only" aria-hidden="true">'
+        + '<div class="hud" style="font-size:10px;color:var(--cyan-300);margin-bottom:10px;">Team Roster · who’s turned it in</div>'
+        + '<div style="display:flex;flex-wrap:wrap;gap:10px;">'+chips+'</div>'+divNote+'</div>';
+
+      var footer = '<div style="display:flex;align-items:center;justify-content:space-between;gap:14px;flex-wrap:wrap;"><button class="btn sec back-step" type="button">◀ Back</button><button class="btn" id="sub-complete" type="button">Back to Operations Hub ▶<span class="key" aria-hidden="true"></span></button></div>';
+
+      subMain.innerHTML = head + stepper + indHtml + discHtml + teamHtml + footer;
+      wire(no);
+    }
+
+    function wire(no){
+      var mid = backendId(no);
+      // uploads
+      function hookUpload(dropId, fileId, kind){
+        var drop = document.getElementById(dropId), file = document.getElementById(fileId);
+        if(!drop || !file) return;
+        drop.addEventListener('click', function(){ file.click(); });
+        drop.addEventListener('keydown', function(e){ if(e.key==='Enter'||e.key===' '){ e.preventDefault(); file.click(); } });
+        file.addEventListener('change', function(){
+          if(!file.files || !file.files[0] || !mid || !STATE.userId) return;
+          var fd = new FormData();
+          fd.append('user_id', STATE.userId); fd.append('mission_id', mid); fd.append('kind', kind); fd.append('file', file.files[0]);
+          drop.querySelector('.ev-drop-title').textContent = 'Uploading…';
+          fetch('/api/submit-evidence', {method:'POST', body:fd}).then(function(r){return r.json();})
+            .then(function(){ refresh(no); }).catch(function(){ drop.querySelector('.ev-drop-title').textContent = 'Upload failed — try again'; });
+        });
+      }
+      hookUpload('sub-ind-drop','sub-ind-file','individual_task');
+      hookUpload('sub-team-drop','sub-team-file','team_product');
+      // discussion
+      var df = document.getElementById('sub-disc-form');
+      if(df) df.addEventListener('submit', function(e){
+        e.preventDefault();
+        var inp = document.getElementById('sub-disc-input'); var msg = (inp.value||'').trim();
+        if(!msg || !mid) return; inp.value='';
+        fetch('/api/team-discussion', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({user_id:STATE.userId, mission_id:mid, message:msg})})
+          .then(function(){ refresh(no); }).catch(function(){});
+      });
+      // reflection
+      var rs = document.getElementById('sub-reflect-save');
+      if(rs) rs.addEventListener('click', function(){
+        var ta = document.getElementById('sub-reflect'); var val = (ta.value||'').trim();
+        if(!val || !mid) return; rs.disabled = true; rs.textContent = 'Saving…';
+        var fd = new FormData(); fd.append('user_id', STATE.userId); fd.append('mission_id', mid); fd.append('reflection', val);
+        fetch('/api/submit-reflection', {method:'POST', body:fd}).then(function(){ rs.textContent='Saved ✓'; setTimeout(function(){ refresh(no); }, 600); }).catch(function(){ rs.disabled=false; rs.textContent='Save reflection'; });
+      });
+      var comp = document.getElementById('sub-complete');
+      if(comp) comp.addEventListener('click', function(){ go('ops'); });
+    }
+
+    function refresh(no){
+      var mid = backendId(no);
+      if(!mid || !STATE.userId){ currentState=null; currentMsgs=[]; render(); return; }
+      Promise.all([
+        fetch('/api/submission-state/'+STATE.userId+'/'+mid).then(function(r){return r.ok?r.json():null;}).catch(function(){return null;}),
+        fetch('/api/team-discussion/'+STATE.userId+'/'+mid).then(function(r){return r.ok?r.json():null;}).catch(function(){return null;})
+      ]).then(function(res){
+        currentState = res[0] || {};
+        currentMsgs = (res[1] && res[1].messages) || [];
+        render();
+      });
+    }
+
+    window.renderSubmission = function(){ refresh(missionNo()); };
   })();
 
   });
