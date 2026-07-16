@@ -834,10 +834,32 @@
   </main>
 </section>
 
-<!-- ===== TEAM (info + communication) ===== -->
-<section class="screen" data-screen="team" aria-label="Your Team" style="flex-direction:column;">
-  <header class="topbar"><div class="lockup brand-static"></div></header>
-  <main id="team-main" style="flex:1;padding:28px clamp(20px,4vw,48px) 90px;max-width:1180px;margin:0 auto;width:100%;"></main>
+<!-- ===== TEAM (info + communication) — B1llbot "holo-comms" layout ===== -->
+<section class="screen bb-room" data-screen="team" aria-label="Your Team">
+  <header class="topbar">
+    <div class="topbar-left"><div class="lockup brand-static"></div></div>
+    <span class="chip green"><span class="dot" aria-hidden="true"></span>Team Channel</span>
+  </header>
+  <div class="bb-inner">
+    <div class="bb-split">
+    <div class="bb-holo-col brackets" id="team-info" style="justify-content:flex-start;align-items:stretch;padding:26px 22px;overflow:auto;">
+      <span class="bay-tag bay-tag-tl" aria-hidden="true">REC ●</span>
+      <span class="bay-tag bay-tag-tr" aria-hidden="true">SQUAD</span>
+      <span class="bay-tag bay-tag-bl" aria-hidden="true">CH · TEAM</span>
+    </div>
+    <div class="bb-chat-col brackets">
+    <div class="chat-hdr"><span>// TEAM CHANNEL</span><span class="hdots" aria-hidden="true"><i></i><i></i><i></i></span></div>
+    <div class="chat-log" id="team-chat-log" role="log" aria-live="polite" aria-label="Team chat"></div>
+      <form class="chat-input" id="team-chat-form">
+      <label class="sr-only" for="team-chat-field">Message your team</label>
+      <span class="ms" aria-hidden="true" style="font-size:22px;color:var(--cyan-300);flex:none;">groups</span>
+      <input id="team-chat-field" type="text" autocomplete="off" placeholder="Message your team…">
+      <button class="send" type="submit" aria-label="Send message"><span class="ms" aria-hidden="true" style="font-size:24px;">send</span></button>
+      </form>
+    </div>
+    </div>
+    <div class="bb-backrow"><button class="back-btn back-step" type="button" aria-label="Go back to the previous screen"><span class="ms" aria-hidden="true" style="font-size:18px;">arrow_back</span>Back</button></div>
+  </div>
 </section>
 
 <!-- ===== PROFILE ===== -->
@@ -1474,6 +1496,6 @@
 
   <script src="submission-missions.js?b=1"></script>
   <script src="content.js?b=3"></script>
-  <script src="controller.js?b=13"></script>
+  <script src="controller.js?b=15"></script>
 </body>
 </html>
