@@ -119,7 +119,7 @@ const Evoke = (() => {
     mcQuests: (campaignId) => apiGet(`/api/mc-quests${campaignId ? "?campaign_id=" + campaignId : ""}`),
     submitQuest: (questId, formData) => apiPostForm(`/api/mc-quests/${questId}/submit`, formData),
     billbotChat: (userId, message) => apiPostJSON(`/api/billbot/chat?user_id=${userId}&message=${encodeURIComponent(message)}`, {}),
-    devLogin: () => fetch("/api/dev-login", { method: "POST" }).then(r => r.json()),
+    devLogin: (email) => fetch(`/api/dev-login${email ? `?email=${encodeURIComponent(email)}` : ""}`, { method: "POST" }).then(r => r.json()),
     checkin: (userId) => fetch(`/api/checkin?user_id=${userId}`, { method: "POST" }).then(r => r.json()),
     activity: (limit) => apiGet(`/api/activity${limit ? "?limit=" + limit : ""}`),
     gallery: (missionId) => apiGet(`/api/gallery${missionId ? "?mission_id=" + missionId : ""}`),
@@ -203,6 +203,22 @@ const Evoke = (() => {
 
   // ---------- Auth (dev-login only; see CONCEPTS.md's known gaps) ----------
   async function ensureLoggedIn() {
+    // Playtest magic link: ?login=<email> always wins over whatever's in
+    // localStorage, so a shared/reused device or a stale prior session
+    // can't leave a tester logged in as the wrong person.
+    const params = new URLSearchParams(location.search);
+    const loginEmail = params.get("login");
+    if (loginEmail) {
+      const data = await api.devLogin(loginEmail);
+      state.userId = data.user_id;
+      state.displayName = data.display_name;
+      localStorage.setItem("evoke_user_id", state.userId);
+      localStorage.setItem("evoke_display_name", state.displayName);
+      const url = new URL(location.href);
+      url.searchParams.delete("login");
+      history.replaceState({}, "", url);
+      return;
+    }
     if (state.userId) return;
     const data = await api.devLogin();
     state.userId = data.user_id;

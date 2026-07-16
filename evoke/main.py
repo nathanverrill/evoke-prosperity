@@ -3193,6 +3193,51 @@ async def admin_remove_team_member(team_id: str, user_id: str):
         raise HTTPException(status_code=400, detail=str(e))
 
 
+@app.post("/api/admin/playtest-user")
+async def admin_create_playtest_user(
+    email: str = Form(...),
+    display_name: str = Form(...),
+    team_name: str = Form(...),
+):
+    """Direct playtester provisioning -- deliberately bypasses LTI/Brightspace
+    entirely (no evoke_identities row) for cohorts that are just testing the
+    player experience via a magic ?login= link, not the LMS integration.
+    Idempotent on (email, org_id); re-running for the same email just moves
+    them to team_name if it changed."""
+    try:
+        org_row = db_fetch_one("SELECT id FROM organizations LIMIT 1")
+        if not org_row:
+            raise HTTPException(status_code=500, detail="No organization configured")
+        org_id = org_row[0]
+
+        existing = db_fetch_one("SELECT id FROM users WHERE email = %s AND org_id = %s::uuid", (email, org_id))
+        if existing:
+            user_id = str(existing[0])
+            db_execute("UPDATE users SET display_name = %s WHERE id = %s::uuid", (display_name, user_id))
+        else:
+            user_id = str(uuid.uuid4())
+            db_execute(
+                "INSERT INTO users (id, org_id, display_name, email, role) VALUES (%s::uuid, %s::uuid, %s, %s, 'learner')",
+                (user_id, org_id, display_name, email)
+            )
+
+        team_row = db_fetch_one("SELECT id FROM teams WHERE name = %s AND org_id = %s::uuid", (team_name, org_id))
+        if team_row:
+            team_id = str(team_row[0])
+        else:
+            team_id = str(uuid.uuid4())
+            db_execute("INSERT INTO teams (id, org_id, name) VALUES (%s::uuid, %s::uuid, %s)", (team_id, org_id, team_name))
+
+        db_execute("DELETE FROM team_members WHERE user_id = %s::uuid", (user_id,))
+        db_execute("INSERT INTO team_members (team_id, user_id) VALUES (%s::uuid, %s::uuid)", (team_id, user_id))
+
+        return {"status": "ok", "user_id": user_id, "team_id": team_id, "login_param": f"login={email}"}
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
 # ========== Stages & the Campaign Map (BUILD_PLAN_2 §2-3) ==========
 TIER_RANK = {"common": 1, "epic": 2, "legendary": 3}
 STAGE_STARS = {1: "★", 2: "★★", 3: "★★★"}

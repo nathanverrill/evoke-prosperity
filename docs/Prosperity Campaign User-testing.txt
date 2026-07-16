@@ -1,0 +1,90 @@
+﻿EVOKE Prosperity — User Tester Guide
+Open this link in your browser: [LINK HERE]
+(Works on laptop or phone. No login needed — it drops you straight in.)
+
+
+As you go, jot down anything confusing, broken, slow, or that just feels off; plus what you like. There are no wrong answers; we want your honest reactions.
+________________
+
+
+1. First impressions (Home / "Learn")
+The page you land on is your dashboard.
+* Does it feel welcoming and clear? Do you know what to do first?
+* Look at the week timeline, XP bar, weekly streak, and Superpowers (the badge rings).
+* Try: click the little B1llbot in the bottom-left corner (desktop) — does its tip make sense?
+
+
+2. Navigate around
+On Home, use the left menu (Learn · Operations Hub · Progress · Vault · B1llbot · Profile). The EVOKE logo always brings you back Home.
+* Visit each section. Does anything look misaligned, cut off, or overlapping?
+* Resize your browser window (or try it on your phone) — does everything still look good?
+
+
+3. Start a mission (the main flow)
+From Home, click Week 1 → Begin, then walk the whole path:
+* Welcome → Graphic Novel — read the comic. Tap/click a page to zoom in. Does the reader feel good? Are pages clear?
+* Transmission — the message from Alex. Does the character/story land?
+* Mission Dashboard — read your briefing and objectives. Is it clear what you're being asked to do?
+* Operations Hub — your mission home base. Read the "?" help (top of the page). Check the Alex quote at the bottom — does it feel encouraging?
+
+
+4. Submit your work (the big one — please test thoroughly)
+From the Operations Hub, click "Submit My Findings." You'll see up to 3 steps:
+* Individual Task — upload a file + write a reflection.
+* Team Discussion — post a message in the thread.
+* Team Product — upload your team's shared file. Watch the roster show who's turned it in.
+* Questions: Is it clear which parts are yours vs the team's? Does the "everyone submits the same team file" idea make sense? If teammates are ahead of you, is the nudge banner motivating (not naggy)?
+
+
+5. Progress & badges
+Go to Progress.
+* Look at the Badge Collection — 4 Superpowers, each with 4 Powers. As you complete missions, they light up green.
+* Is it clear how you earn badges? Does the layout read well?
+
+
+6. B1llbot (AI assistant)
+Go to B1llbot and chat with it.
+* Ask it things like "What's my next mission?" or "Tell me about Keel."
+* Do the replies feel helpful and in-character? (Note: if answers seem canned, that's the AI model being offline — flag it and move on.)
+
+
+7. Minecraft (optional practice space)
+From the Operations Hub, find the "Go to Minecraft · Optional" card and click "Go to Minecraft to talk with B1llbot." A popup opens — check each piece:
+* Server address + Copy button — does it copy?
+* Link Your Minecraft Account — type a username, hit Link. Does it confirm ("Linked as…")?
+* Open your Field Kit on your phone — the QR code. (On phone: scan it with your camera — it should open the Field Kit. On laptop: just confirm the code shows.)
+* Read the numbered join steps — are they clear enough that you'd know how to join in Minecraft?
+* Click Enter Companion Mode — this is the docked view (B1llbot chat + Notebook) meant to sit beside your Minecraft window.
+   * Try both tabs (B1llbot / Notebook), type a note, and hit Exit Companion — does it return you cleanly to the Ops Hub?
+
+
+8. Profile & settings
+Go to Profile.
+* Change your avatar and agent name.
+* Toggle the settings (High Contrast, Reduce Motion, Reminders) — do they actually change anything?
+
+
+________________
+
+
+📝 What to report back
+For anything you flag, note: where it happened, what device/browser, and what you expected vs. what you got. Screenshots are gold.
+⚠️ Please know (for this test build)
+* Everyone shares one demo account. All testers are the same "Player One," so you'll see each other's progress and submissions — that's expected in this build, not a bug.
+* The app only works while the host machine is running — if the link goes dead, it's just been turned off.
+* B1llbot's AI may fall back to simple canned replies if the model's offline.
+
+
+📝 Feedback/Suggestions
+
+
+1) First impressions (Home / "Learn")
+	* 	2) Navigate around
+	* 	3) Start a mission (the main flow)
+	* 	4) Submit your work (the big one — please test thoroughly)
+	* 	5) Progress & badges
+	* 	6) B1llbot (AI assistant)
+	* 	7) Minecraft (optional practice space)
+	* 	8) Profile & settings
+	* 	Extra Notes:
+	*
