@@ -250,9 +250,9 @@
     var box = on
       ? 'background:radial-gradient(circle at 50% 35%,rgba(0,212,146,0.28),rgba(0,150,137,0.10));box-shadow:inset 0 0 0 1.5px var(--green-400),0 0 18px -4px rgba(0,212,146,0.55);color:var(--green-400);'
       : 'box-shadow:inset 0 0 0 1px var(--border-ui);color:var(--text-faint);';
-    return '<div style="display:flex;flex-direction:column;align-items:center;gap:7px;text-align:center;opacity:'+(on?'1':'0.72')+';">'
-      +'<span style="width:'+s+'px;height:'+s+'px;border-radius:16px;display:flex;align-items:center;justify-content:center;'+box+'"><span class="ms'+(on?' fill':'')+'" aria-hidden="true" style="font-size:'+Math.round(s*0.46)+'px;">'+(on?p.icon:'lock')+'</span></span>'
-      +'<span style="font-family:var(--font-display);font-weight:600;font-size:11.5px;line-height:1.15;color:'+(on?'var(--teal-050)':'var(--text-faint)')+';">'+p.name+'</span></div>';
+    return '<div style="display:flex;flex-direction:column;align-items:center;gap:7px;text-align:center;min-width:0;opacity:'+(on?'1':'0.72')+';">'
+      +'<span style="width:min(100%,'+s+'px);aspect-ratio:1;border-radius:14px;display:flex;align-items:center;justify-content:center;'+box+'"><span class="ms'+(on?' fill':'')+'" aria-hidden="true" style="font-size:'+Math.round(s*0.46)+'px;">'+(on?p.icon:'lock')+'</span></span>'
+      +'<span style="font-family:var(--font-display);font-weight:600;font-size:10.5px;line-height:1.15;overflow-wrap:anywhere;hyphens:auto;color:'+(on?'var(--teal-050)':'var(--text-faint)')+';">'+p.name+'</span></div>';
   }
   window.powerGroups=powerGroups; window.totalPowersEarned=totalPowersEarned;
 
@@ -910,14 +910,14 @@
     });
     // The 16 Powers grouped under their 4 Superpowers (the app's badge collection).
     var ba=document.getElementById('pg-badges-all');
-    ba.style.display='grid'; ba.style.gridTemplateColumns='repeat(auto-fit,minmax(min(100%,290px),1fr))'; ba.style.gap='16px';
+    ba.style.display='grid'; ba.style.gridTemplateColumns='repeat(4,minmax(0,1fr))'; ba.style.gap='14px';
     ba.innerHTML = powerGroups().map(function(g){
       var e=g.powers.filter(function(p){return p.earned;}).length;
-      var tiles=g.powers.map(function(p){ return powerTile(p,54); }).join('');
-      return '<div class="glass" style="padding:20px 22px;">'
-        +'<div style="display:flex;align-items:center;gap:12px;margin-bottom:16px;"><span class="mtile" style="width:42px;height:42px;flex:none;border-radius:12px;display:flex;align-items:center;justify-content:center;"><span class="ms fill" aria-hidden="true" style="font-size:22px;">'+g.icon+'</span></span>'
-        +'<div><div style="font-family:var(--font-display);font-weight:800;font-size:15px;color:var(--text-heading);text-transform:uppercase;">'+g.quality+'</div><div class="hud" style="font-size:10px;color:var(--cyan-300);">'+e+' of 4 powers</div></div></div>'
-        +'<div style="display:grid;grid-template-columns:repeat(4,1fr);gap:12px;">'+tiles+'</div></div>';
+      var tiles=g.powers.map(function(p){ return powerTile(p,52); }).join('');
+      return '<div class="glass" style="padding:18px 16px;">'
+        +'<div style="display:flex;align-items:center;gap:10px;margin-bottom:16px;"><span class="mtile" style="width:38px;height:38px;flex:none;border-radius:11px;display:flex;align-items:center;justify-content:center;"><span class="ms fill" aria-hidden="true" style="font-size:20px;">'+g.icon+'</span></span>'
+        +'<div style="min-width:0;"><div style="font-family:var(--font-display);font-weight:800;font-size:13.5px;color:var(--text-heading);text-transform:uppercase;line-height:1.1;">'+g.quality+'</div><div class="hud" style="font-size:10px;color:var(--cyan-300);margin-top:2px;">'+e+' of 4 powers</div></div></div>'
+        +'<div style="display:grid;grid-template-columns:repeat(4,1fr);gap:8px;">'+tiles+'</div></div>';
     }).join('');
     document.getElementById('pg-badge-count').textContent=totalPowersEarned()+' of 16 powers';
     if(window.renderStreaks) window.renderStreaks();
