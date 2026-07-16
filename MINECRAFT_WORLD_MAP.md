@@ -417,3 +417,80 @@ exercised — no player was online to drive it. Worth a live walk-through
 before calling this launch-ready. Verified so far: the structure placed
 identically to source (20/20 targeted block samples matched exactly
 against the original NBT), and all functions run with no syntax errors.
+
+---
+
+## 13. The Halyard Crafting Factory (found and partially ported, 2026-07-16)
+
+`~/evoke-prosperity-files/cu-internship/All NPC and World Prompts/halyard-minigames.txt`
+describes it exactly: "The Crafting Factory game: allows for players to
+collect crafting ingredients, and craft certain items which are then able
+to be sold in the shop within the factory" — bookshelves, powered rails,
+cake, sticky pistons, beacons, end rods, each with a specific (non-vanilla)
+recipe, ingredients not obtainable in-world traded from villagers using
+emeralds. This was never in the live `basin` lineage at all — found in
+`wil_unmodded` (same snapshot the Mob Gauntlet came from), `r.0.-1.mca`,
+~`(295-333, 118-134, -154 to -111)`:
+
+- **4 material summoners** (`auto=0` command blocks — one-shot, not
+  always-active) delivering red_sand, obsidian, oak_log, and cobblestone to
+  a single drop point (`306.89, 127, -134.04`) — the "conveyor."
+- **3 named trading villagers** — Overworld (farmer): 6 emerald → rabbit
+  hide, 3 emerald → slime ball. Nether (mason): 5 emerald → blaze rod, 10
+  emerald → nether star. Ender (butcher): 4 emerald → ender pearl, 4
+  emerald + 1 cobblestone → chorus fruit. Exactly the ingredients the
+  recipes need that the conveyor doesn't supply.
+- **6 "[Admin Shop]" sell signs** (Bookshelf $5, Activator Rail $2, Beacon
+  $200, End Rod $14, Sticky Piston $8, Cake $20) — traced these and found
+  **zero command-block logic behind any of them**. `Savs-Common-Economy`
+  (referenced in `billbot_and_lore/`) is a confirmed-empty, never-fetched
+  git submodule — these signs were almost certainly wired to that mod and
+  never actually worked, distinct from the mines' coal-buying shop nearby,
+  which genuinely is command-block-driven and confirmed working.
+- Also present: a creative-mode-gated timed-eviction mechanism (non-creative
+  players get an XP-level countdown — "Time to go!" then "I warned you!" —
+  then get teleported out; creative-mode players are exempt) around
+  `(300s, 118, -150s)`, and a "Plots for Oasis" teleport-hub destination
+  (`(576, 74, 123)` → `(756, 131, -367)`) that doesn't exist in the live
+  hub's 5 entries at all — undeveloped land, no plot-boundary structures,
+  but a real, distinct sixth destination. Both match the "can't build until
+  the very end, then get your own plot" design intent described outside
+  this doc — real, was being built, never finished, never made it live.
+
+**Ported 2026-07-16, live on Apex, verified**:
+`evoke-infra/minecraft/datapacks/crafting_factory/` — the 3 villagers
+(exact trade offers confirmed live via `data get entity ... Offers` after
+manually invoking `function crafting_factory:load`) and the material
+conveyor (timer-gated, one drop per 60 ticks, explicitly capped at 40
+uncollected items near the drop point so it can't repeat this same
+session's coal-block flood incident, which was caused by exactly this
+pattern — an always-active, uncapped item-append command block). The sell
+shops were **not** ported — no real logic to recover, and guessing at a
+shop mechanism live, overnight, unsupervised, isn't a reasonable risk to
+take; the mines' working coal-shop pattern is the template for a real
+follow-up pass. One mechanical note: like `#minecraft:load`, the
+`#minecraft:tick` tag doesn't auto-engage on `/reload` — only a genuine
+server boot. The conveyor function itself is confirmed correct (manually
+invoked several times, worked every time); it'll start firing on its own
+at the next real restart, no action needed beyond that.
+
+**Also found, not chased down:** a "CEO OFFICE | Alex | Dynamic" hanging
+sign in the same snapshot, and a single stray, incomplete command ("Is
+this the Alpha Dynamics headquarters?"). The Alpha HQ / CEO-reveal ending
+`GAME_DESIGN.md`'s Billbot canon prompt describes (Alex regains his memory
+as the former CEO, an "Alpha Efficient Factories Plan" control begins
+reform) was apparently being built too, but nothing resembling a finished
+area exists anywhere in this snapshot — this would be new construction
+from the design docs, not recovery, and is real, scoped future work.
+
+**Separately investigated and ruled out tonight:** whether the missing
+in-Minecraft NPC chat (Jim, Beth, Benjamin, Craig, Billbot as in-world
+characters, not just the web B1llbot) could be restored via a different
+mod than the blocked custom `billbot-1.0.1.jar`. Found the actual
+mechanism used in the source build — a generic NPC-creation mod called
+ThirdBrain (`/thirdbrain` command, configurable LLM backend pointed at the
+same OpenWebUI already running) — mistakenly removed from Apex's `mods/`
+folder earlier this session as unidentified bundled cruft. Checked
+Modrinth directly: its upstream project is `secondbrain`, latest published
+builds top out at Minecraft `1.21.11` — no `26.2` support yet, same
+external blocker as the custom mod. Not fixable until that changes either.
