@@ -10,6 +10,7 @@
   <link rel="stylesheet" href="tokens.css">
   <link rel="stylesheet" href="layout.css">
   <link rel="stylesheet" href="theme.css">
+  <link rel="stylesheet" href="showcase.css">
 </head>
 <body>
   <div class="companion-page stack" id="companion-root">
@@ -96,8 +97,13 @@
     let displayName = null;
 
     async function init() {
+      // Service worker intentionally disabled: it cached the app shell and
+      // could serve a stale (old) build. Proactively unregister any copy a
+      // returning device still has so the UI can't flip between versions.
       if ("serviceWorker" in navigator) {
-        navigator.serviceWorker.register("sw.js").catch(() => {});
+        navigator.serviceWorker.getRegistrations().then((regs) => {
+          regs.forEach((r) => r.unregister());
+        }).catch(() => {});
       }
       // Pairing (BUILD_PLAN_2 §7): a ?pair= token from the Hub QR registers
       // this phone as the scanning user — no login. Falls back to a stored

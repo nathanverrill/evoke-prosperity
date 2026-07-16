@@ -1,25 +1,27 @@
-/* Field Kit service worker — network-first with cache fallback for the app
-   shell, so the Companion opens instantly on a phone and survives flaky
-   school Wi-Fi. APIs and the live WebSocket are never cached: stale quest/
-   award/presence data presented as fresh would be worse than an error. */
-const CACHE = "fieldkit-v1";
+/* Field Kit service worker — DISABLED / kill-switch.
 
+   An earlier build shipped a shell-caching SW here, which could serve a
+   stale (old) copy of index.html and make the UI flip between the old and
+   new versions. This replacement caches nothing; on activation it clears
+   every cache, unregisters itself, and reloads open pages so they pick up
+   the current build straight from the network. Browsers re-fetch sw.js on
+   navigation, so any client that still has the old SW upgrades to this one
+   and self-cleans automatically. */
 self.addEventListener("install", () => self.skipWaiting());
-self.addEventListener("activate", (e) => e.waitUntil(self.clients.claim()));
 
-self.addEventListener("fetch", (e) => {
-  const url = new URL(e.request.url);
-  if (e.request.method !== "GET" || url.pathname.startsWith("/api/") || url.pathname === "/ws") return;
-  e.respondWith(
-    caches.open(CACHE).then(async (cache) => {
-      try {
-        const fresh = await fetch(e.request);
-        cache.put(e.request, fresh.clone());
-        return fresh;
-      } catch {
-        const cached = await cache.match(e.request);
-        return cached || Response.error();
-      }
-    })
-  );
+self.addEventListener("activate", (event) => {
+  event.waitUntil((async () => {
+    try {
+      const keys = await caches.keys();
+      await Promise.all(keys.map((k) => caches.delete(k)));
+    } catch (e) {}
+    try { await self.clients.claim(); } catch (e) {}
+    try { await self.registration.unregister(); } catch (e) {}
+    try {
+      const clients = await self.clients.matchAll({ type: "window" });
+      clients.forEach((c) => { try { c.navigate(c.url); } catch (e) {} });
+    } catch (e) {}
+  })());
 });
+
+// Never intercept fetches — everything goes straight to the network.

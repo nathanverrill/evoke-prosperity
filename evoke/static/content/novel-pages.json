@@ -1,0 +1,48 @@
+[
+  {
+    "chapter": "Chapter 1 \u00b7 The Thirst of Keel",
+    "pages": [
+      "novel/ch1-p1.jpg",
+      "novel/ch1-p2.jpg",
+      "novel/ch1-p3.jpg",
+      "novel/ch1-p4.jpg"
+    ]
+  },
+  {
+    "chapter": "Chapter 2 \u00b7 The View From the Mountain",
+    "pages": [
+      "novel/ch2-p1.jpg",
+      "novel/ch2-p2.jpg",
+      "novel/ch2-p3.jpg",
+      "novel/ch2-p4.jpg"
+    ]
+  },
+  {
+    "chapter": "Chapter 3 \u00b7 From the Ground Up",
+    "pages": [
+      "novel/ch3-p1.jpg",
+      "novel/ch3-p2.jpg"
+    ]
+  },
+  {
+    "chapter": "Chapter 4 \u00b7 The Mountain Thrives",
+    "pages": [
+      "novel/ch4-p1.jpg",
+      "novel/ch4-p2.jpg"
+    ]
+  },
+  {
+    "chapter": "Chapter 5 \u00b7 The Evoke Network",
+    "pages": [
+      "novel/ch5-p1.jpg",
+      "novel/ch5-p2.jpg"
+    ]
+  },
+  {
+    "chapter": "Chapter 6 \u00b7 Global Solutions",
+    "pages": [
+      "novel/ch6-p1.jpg",
+      "novel/ch6-p2.jpg"
+    ]
+  }
+]

@@ -57,7 +57,7 @@ h1 {
 .section-title {
   font-size: var(--text-xl);
   margin: 0 0 var(--space-3);
-  text-shadow: 0 0 26px rgba(0, 211, 243, 0.25);
+  text-shadow: 0 0 26px rgba(0, 150, 136, 0.25);
 }
 
 button, .btn {
@@ -101,7 +101,7 @@ input::placeholder, textarea::placeholder { color: var(--color-locked-text); }
 input:focus, textarea:focus, select:focus {
   outline: none;
   border-color: var(--color-accent);
-  box-shadow: 0 0 0 2px rgba(0, 211, 243, 0.25);
+  box-shadow: 0 0 0 2px rgba(0, 150, 136, 0.25);
 }
 
 /* Controller-grammar nav (console-UX gap #5): a visible focus ring on every
@@ -111,7 +111,7 @@ input:focus, textarea:focus, select:focus {
    was invisible. :focus-visible (not :focus) so mouse clicks stay clean. */
 a:focus-visible, button:focus-visible, [tabindex]:focus-visible {
   outline: none;
-  box-shadow: 0 0 0 3px rgba(0, 211, 243, 0.55), var(--glow-md);
+  box-shadow: 0 0 0 3px rgba(0, 150, 136, 0.55), var(--glow-md);
   border-radius: var(--radius);
 }
 
@@ -469,7 +469,7 @@ a.objectives-list__label:hover { color: var(--cyan-300); }
   background: var(--color-surface-dim);
 }
 .chapter-chip[data-state="locked"] { background: var(--state-locked-bg); color: var(--color-locked-text); box-shadow: inset 0 0 0 1px var(--color-border); }
-.chapter-chip.is-current { color: var(--cyan-300); box-shadow: inset 0 0 0 1px var(--cyan-500), 0 0 12px rgba(0, 211, 243, 0.25); font-weight: 700; }
+.chapter-chip.is-current { color: var(--cyan-300); box-shadow: inset 0 0 0 1px var(--cyan-500), 0 0 12px rgba(0, 150, 136, 0.25); font-weight: 700; }
 
 /* Quest card */
 .quest-card {
@@ -667,7 +667,7 @@ a.objectives-list__label:hover { color: var(--cyan-300); }
   position: absolute;
   inset: 0 auto 0 0;
   background: var(--grad-water);
-  box-shadow: 0 0 14px rgba(0, 211, 243, 0.6);
+  box-shadow: 0 0 14px rgba(0, 150, 136, 0.6);
   transition: width 1.2s var(--ease-out);
 }
 .world-meter__tick {
@@ -711,7 +711,7 @@ a.objectives-list__label:hover { color: var(--cyan-300); }
 .flow-gauge { margin-bottom: var(--space-3); }
 .flow-gauge__track { height: var(--space-2); }
 .flow-gauge .world-meter__fill { background: var(--grad-xp); box-shadow: 0 0 10px rgba(232, 132, 47, 0.5); }
-.flow-gauge .world-meter__fill.is-water { background: var(--grad-water); box-shadow: 0 0 10px rgba(0, 211, 243, 0.5); }
+.flow-gauge .world-meter__fill.is-water { background: var(--grad-water); box-shadow: 0 0 10px rgba(0, 150, 136, 0.5); }
 .flow-stepper {
   display: flex; align-items: center; justify-content: space-between; gap: var(--space-3);
   padding: var(--space-2) 0;
@@ -758,7 +758,7 @@ a.objectives-list__label:hover { color: var(--cyan-300); }
   position: absolute;
   inset: 0;
   pointer-events: none;
-  background: repeating-linear-gradient(0deg, rgba(0, 211, 243, 0.05) 0 1px, transparent 1px 3px);
+  background: repeating-linear-gradient(0deg, rgba(0, 150, 136, 0.05) 0 1px, transparent 1px 3px);
 }
 .crt-flicker { animation: crt-flicker 3.2s infinite; }
 @keyframes crt-flicker {
@@ -813,7 +813,7 @@ a.objectives-list__label:hover { color: var(--cyan-300); }
 }
 .stat-tile::before { content: ""; position: absolute; top: 0; left: 0; right: 0; height: 3px; background: var(--cyan-500); box-shadow: 0 0 12px var(--cyan-500); }
 .stat-tile .ms { font-size: 22px; display: block; margin-bottom: var(--space-1); color: var(--cyan-300); filter: drop-shadow(0 0 7px var(--cyan-300)); }
-.stat-tile__n { font-family: var(--font-display); font-weight: 800; font-size: var(--text-xl); color: var(--color-text-heading); text-shadow: 0 0 16px rgba(0, 211, 243, 0.4); }
+.stat-tile__n { font-family: var(--font-display); font-weight: 800; font-size: var(--text-xl); color: var(--color-text-heading); text-shadow: 0 0 16px rgba(0, 150, 136, 0.4); }
 .stat-tile__l { font-family: var(--font-mono); font-size: var(--text-xs); letter-spacing: 0.08em; color: var(--color-text-muted); margin-top: var(--space-1); text-transform: uppercase; }
 @media (max-width: 560px) { .stat-tiles { grid-template-columns: repeat(2, 1fr); } }
 .world-meter__fill.is-xp { background: var(--grad-xp); box-shadow: 0 0 14px rgba(232, 132, 47, 0.6); }
@@ -843,7 +843,7 @@ a.objectives-list__label:hover { color: var(--cyan-300); }
   background: var(--color-surface-dim);
 }
 .skill-node__dot { width: 6px; height: 6px; border-radius: 50%; background: var(--color-locked-text); }
-.skill-node.is-earned { color: var(--teal-050); box-shadow: inset 0 0 0 1px var(--color-border-strong), 0 0 10px rgba(0, 211, 243, 0.2); }
+.skill-node.is-earned { color: var(--teal-050); box-shadow: inset 0 0 0 1px var(--color-border-strong), 0 0 10px rgba(0, 150, 136, 0.2); }
 .skill-node.is-earned .skill-node__dot { background: var(--green-400); box-shadow: var(--glow-green); }
 .skill-node__how { color: var(--teal-400); }
 
@@ -853,7 +853,7 @@ a.objectives-list__label:hover { color: var(--cyan-300); }
   border-radius: var(--radius-pill);
   box-shadow: inset 0 0 0 1px var(--color-border-strong);
 }
-.mission-pip.is-done { background: var(--grad-water); box-shadow: 0 0 8px rgba(0, 211, 243, 0.5); }
+.mission-pip.is-done { background: var(--grad-water); box-shadow: 0 0 8px rgba(0, 150, 136, 0.5); }
 .mission-pip.is-locked { opacity: 0.35; }
 
 /* ---- Identity: avatars & Agent Sigils ---- */
@@ -896,7 +896,7 @@ a.objectives-list__label:hover { color: var(--cyan-300); }
 .gear-item.is-unlocked[data-rarity="epic"] { box-shadow: inset 0 0 0 1px var(--tier-epic), 0 0 16px rgba(43, 127, 255, 0.25); }
 .gear-item.is-unlocked[data-rarity="legendary"] { box-shadow: inset 0 0 0 1px var(--tier-legendary), 0 0 24px rgba(217, 164, 65, 0.35); }
 .gear-item__icon { font-size: var(--text-2xl); line-height: 1.2; }
-.gear-item.is-unlocked .gear-item__icon { text-shadow: 0 0 16px rgba(0, 211, 243, 0.6); }
+.gear-item.is-unlocked .gear-item__icon { text-shadow: 0 0 16px rgba(0, 150, 136, 0.6); }
 .gear-item__name { font-family: var(--font-display); font-weight: 700; font-size: var(--text-sm); margin-top: var(--space-1); color: var(--color-text-heading); }
 .gear-item.is-locked .gear-item__name { color: var(--color-locked-text); }
 .gear-item__slot { font-family: var(--font-mono); font-size: var(--text-xs); letter-spacing: 0.12em; text-transform: uppercase; color: var(--teal-400); margin: var(--space-1) 0; }
@@ -932,7 +932,7 @@ a.objectives-list__label:hover { color: var(--cyan-300); }
   transform: rotate(-45deg);
   box-shadow: inset 0 0 0 1px var(--color-border-strong);
 }
-.wheel-wedge.is-filled { background: var(--grad-water); box-shadow: 0 0 8px rgba(0, 211, 243, 0.5); }
+.wheel-wedge.is-filled { background: var(--grad-water); box-shadow: 0 0 8px rgba(0, 150, 136, 0.5); }
 .wheel-row.is-complete .wheel-wedge.is-filled { background: var(--green-400); box-shadow: var(--glow-green); }
 
 /* ---- Instructor cohort table ---- */
@@ -983,7 +983,7 @@ a.objectives-list__label:hover { color: var(--cyan-300); }
   box-shadow: inset 0 0 0 1px var(--color-border-strong);
 }
 .map-strip__node.is-partial { color: var(--cyan-300); }
-.map-strip__node.is-complete { background: var(--grad-water); color: var(--color-text-inverse); box-shadow: 0 0 10px rgba(0,211,243,0.5); }
+.map-strip__node.is-complete { background: var(--grad-water); color: var(--color-text-inverse); box-shadow: 0 0 10px rgba(0,150,136,0.5); }
 
 .pipeline { display: flex; flex-direction: column; gap: var(--space-3); }
 .pipeline__segment {
@@ -1002,7 +1002,7 @@ a.objectives-list__label:hover { color: var(--cyan-300); }
 .stage-node { position: relative; width: 52px; height: 52px; }
 .stage-ring { width: 52px; height: 52px; }
 .stage-ring__bg { fill: none; stroke: var(--color-border); stroke-width: 4; }
-.stage-ring__fill { fill: none; stroke: var(--cyan-500); stroke-width: 4; stroke-linecap: round; filter: drop-shadow(0 0 4px rgba(0,211,243,0.7)); transition: stroke-dasharray 1s var(--ease-out); }
+.stage-ring__fill { fill: none; stroke: var(--cyan-500); stroke-width: 4; stroke-linecap: round; filter: drop-shadow(0 0 4px rgba(0,150,136,0.7)); transition: stroke-dasharray 1s var(--ease-out); }
 .stage-node.is-complete .stage-ring__fill { stroke: var(--green-400); filter: drop-shadow(0 0 5px rgba(0,212,146,0.7)); }
 .stage-node__num {
   position: absolute; inset: 0;
@@ -1035,7 +1035,7 @@ a.objectives-list__label:hover { color: var(--cyan-300); }
   box-shadow: inset 0 0 0 1px var(--color-border);
   color: var(--color-locked-text);
 }
-.kit-piece.is-found { color: var(--cyan-300); box-shadow: inset 0 0 0 1px var(--color-border-strong), 0 0 8px rgba(0,211,243,0.3); }
+.kit-piece.is-found { color: var(--cyan-300); box-shadow: inset 0 0 0 1px var(--color-border-strong), 0 0 8px rgba(0,150,136,0.3); }
 
 .aqueduct.is-assembled { text-align: center; box-shadow: inset 0 0 0 1px var(--teal-500), var(--glow-md); }
 .aqueduct__art { position: relative; height: 56px; margin: var(--space-3) 0; overflow: hidden; border-radius: var(--radius); background: var(--color-surface-dim); }
@@ -1044,7 +1044,7 @@ a.objectives-list__label:hover { color: var(--cyan-300); }
   position: absolute; left: 5%; top: 50%; height: 6px; width: 20%;
   transform: translateY(-50%); border-radius: var(--radius-pill);
   background: var(--grad-water);
-  box-shadow: 0 0 12px rgba(0,211,243,0.7);
+  box-shadow: 0 0 12px rgba(0,150,136,0.7);
   animation: aqueduct-flow 3s linear infinite;
 }
 @keyframes aqueduct-flow { from { left: 5%; } to { left: 75%; } }
@@ -1100,11 +1100,11 @@ a.objectives-list__label:hover { color: var(--cyan-300); }
    shadow) outranks the generic a:focus-visible rule's specificity, which
    silently ate the focus ring here -- needs its own equal-footing override. */
 .rail .nav:focus-visible {
-  box-shadow: 0 0 0 3px rgba(0, 211, 243, 0.55), var(--glow-md);
+  box-shadow: 0 0 0 3px rgba(0, 150, 136, 0.55), var(--glow-md);
 }
 .rail .nav:hover { background: rgba(255, 255, 255, 0.04); color: var(--teal-100); filter: none; transform: none; }
-.rail .nav.on { color: var(--cyan-100); background: rgba(0, 211, 243, 0.10); }
-.rail .nav.on .ms { filter: drop-shadow(0 0 10px rgba(0, 211, 243, 0.6)); }
+.rail .nav.on { color: var(--cyan-100); background: rgba(0, 150, 136, 0.10); }
+.rail .nav.on .ms { filter: drop-shadow(0 0 10px rgba(0, 150, 136, 0.6)); }
 .rail .nav .ms { flex: none; }
 .rail .nav__lbl { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 
