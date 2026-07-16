@@ -65,17 +65,26 @@ curl -s http://localhost:8001/health | grep -q "ok" && echo "✓ Brightspace Sim
 # .env -- off by default, since it exposes this instance, including the
 # unprotected /api/admin/* routes, to the public internet). Requires the
 # ngrok CLI to already be installed and authenticated (`ngrok config add-authtoken`).
+# NGROK_STATIC_DOMAIN (optional): a free reserved domain from your ngrok
+# account -- when set, the tunnel URL stays constant across restarts instead
+# of getting a new random one each time, so PUBLIC_WEB_URL never goes stale.
 ENABLE_NGROK=$(grep -E '^ENABLE_NGROK=' ../.env 2>/dev/null | cut -d= -f2)
+NGROK_STATIC_DOMAIN=$(grep -E '^NGROK_STATIC_DOMAIN=' ../.env 2>/dev/null | cut -d= -f2)
 NGROK_URL=""
 if [ "$ENABLE_NGROK" = "true" ]; then
     if ! command -v ngrok &> /dev/null; then
         echo "⚠️  ENABLE_NGROK=true but ngrok isn't installed -- skipping tunnel."
     else
         echo ""
-        echo "🌐 Starting ngrok tunnel for remote access..."
         pkill -f "ngrok http 8000" 2>/dev/null || true
         sleep 1
-        nohup ngrok http 8000 --log=stdout > /tmp/evoke-ngrok.log 2>&1 &
+        if [ -n "$NGROK_STATIC_DOMAIN" ]; then
+            echo "🌐 Starting ngrok tunnel on reserved domain $NGROK_STATIC_DOMAIN..."
+            nohup ngrok http 8000 --domain="$NGROK_STATIC_DOMAIN" --log=stdout > /tmp/evoke-ngrok.log 2>&1 &
+        else
+            echo "🌐 Starting ngrok tunnel for remote access..."
+            nohup ngrok http 8000 --log=stdout > /tmp/evoke-ngrok.log 2>&1 &
+        fi
         disown
         for i in $(seq 1 15); do
             NGROK_URL=$(curl -s http://127.0.0.1:4040/api/tunnels 2>/dev/null \
