@@ -128,6 +128,23 @@ You don't need to know how any of this works — just follow these steps. If any
    ```
    (Your data isn't lost — running `./quick-start.sh` again picks up where you left off, unless you also add `-v` to those `down` commands, which wipes it for a clean slate.)
 
+**Optional — getting a public link (so you can test on your phone, or send a link to someone else):**
+By default the app only runs on your own machine (`localhost:8000`). To get a real public URL:
+1. Go to **[ngrok.com](https://ngrok.com)** and sign up for a free account (no credit card needed).
+2. On their dashboard, go to **Your Authtoken**, copy it, then run once on your machine:
+   ```
+   ngrok config add-authtoken <paste your token here>
+   ```
+3. Still on the ngrok dashboard, go to **Universe → Domains** and click to claim a free static domain (something like `your-name.ngrok-free.app`) — this keeps your link the same every time instead of changing on every restart.
+4. In your local `.env` file (in the repo root — ask your Claude to open it if you're not sure how), set:
+   ```
+   ENABLE_NGROK=true
+   NGROK_STATIC_DOMAIN=your-name.ngrok-free.app
+   ```
+5. Run `./quick-start.sh` again — it'll print your public URL at the end. Anyone with that link can now open the app, same as `localhost:8000`, from any device.
+
+This is entirely per-person — your authtoken and domain are tied to your own free ngrok account, nothing shared or committed to the repo.
+
 ---
 
 ## 3. For your Claude
