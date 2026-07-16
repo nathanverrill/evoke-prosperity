@@ -45,7 +45,7 @@ AI_ENABLED = os.getenv("AI_ENABLED", "false").lower() == "true"
 # separately configurable since it has to be a real public host once this
 # runs on a cohort instance (see HOSTING_COST_MODEL.md's domain scheme:
 # {cohort-slug}.mc.<root-domain>). Defaults assume same-machine local dev.
-MINECRAFT_PUBLIC_HOST = os.getenv("MINECRAFT_PUBLIC_HOST", "localhost")
+MINECRAFT_PUBLIC_HOST = os.getenv("MINECRAFT_PUBLIC_HOST", "prosperity.apexmc.co")
 MINECRAFT_PUBLIC_PORT_JAVA = os.getenv("MINECRAFT_PUBLIC_PORT_JAVA", "25565")
 MINECRAFT_PUBLIC_PORT_BEDROCK = os.getenv("MINECRAFT_PUBLIC_PORT_BEDROCK", "19132")
 
@@ -249,6 +249,16 @@ async def startup():
             id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
             team_id UUID NOT NULL REFERENCES teams(id),
             mission_id UUID NOT NULL REFERENCES missions(id),
+            user_id UUID NOT NULL REFERENCES users(id),
+            message TEXT NOT NULL,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )""")
+        # Team page (nav): a team-wide message board (not mission-scoped) plus an
+        # editable team motto for the team identity from Mission 2.
+        db_execute("ALTER TABLE teams ADD COLUMN IF NOT EXISTS motto TEXT")
+        db_execute("""CREATE TABLE IF NOT EXISTS team_messages (
+            id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+            team_id UUID NOT NULL REFERENCES teams(id),
             user_id UUID NOT NULL REFERENCES users(id),
             message TEXT NOT NULL,
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
@@ -1659,6 +1669,93 @@ async def get_team_discussion(user_id: str, mission_id: str):
         } for r in rows]}
     except Exception as e:
         logger.error(f"team-discussion get error: {e}")
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@app.get("/api/team/{user_id}")
+async def get_team(user_id: str):
+    """The Team page: team name/motto + each member with their mission progress."""
+    try:
+        team_id = _get_user_team(user_id)
+        if not team_id:
+            return {"team_id": None, "name": None, "motto": None, "members": []}
+        row = db_fetch_one("SELECT name, motto FROM teams WHERE id = %s::uuid", (team_id,))
+        name = row[0] if row else "Your Team"
+        motto = row[1] if row else None
+        member_rows = db_fetch_all(
+            """SELECT u.id, u.display_name FROM team_members tm
+               JOIN users u ON u.id = tm.user_id
+               WHERE tm.team_id = %s::uuid ORDER BY u.display_name""",
+            (team_id,)
+        )
+        members = []
+        for mid, dname in member_rows:
+            mid = str(mid)
+            done, lvl = 0, 1
+            try:
+                prof = os_client.get(index="player-profile", id=mid)["_source"]
+                done = len(prof.get("missions_completed", []))
+                lvl = prof.get("level", 1)
+            except Exception:
+                pass
+            members.append({
+                "user_id": mid, "display_name": dname, "initials": _initials(dname),
+                "missions_completed": done, "level": lvl, "is_you": mid == user_id,
+            })
+        return {"team_id": team_id, "name": name, "motto": motto, "members": members}
+    except Exception as e:
+        logger.error(f"get-team error: {e}")
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+class TeamMessagePost(BaseModel):
+    user_id: str
+    message: str
+
+
+@app.post("/api/team-message")
+async def post_team_message(body: TeamMessagePost):
+    """Post to the team-wide message board (not tied to a mission)."""
+    try:
+        msg = (body.message or "").strip()
+        if not msg:
+            raise HTTPException(status_code=400, detail="Message can't be empty")
+        team_id = _get_user_team(body.user_id)
+        if not team_id:
+            raise HTTPException(status_code=400, detail="You're not on a team yet")
+        mid = str(uuid.uuid4())
+        db_execute(
+            "INSERT INTO team_messages (id, team_id, user_id, message) VALUES (%s::uuid, %s::uuid, %s::uuid, %s)",
+            (mid, team_id, body.user_id, msg[:4000])
+        )
+        return {"status": "success", "id": mid}
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"team-message post error: {e}")
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@app.get("/api/team-messages/{user_id}")
+async def get_team_messages(user_id: str):
+    """The team-wide message board thread."""
+    try:
+        team_id = _get_user_team(user_id)
+        if not team_id:
+            return {"team_id": None, "messages": []}
+        rows = db_fetch_all(
+            """SELECT m.user_id, u.display_name, m.message, m.created_at
+               FROM team_messages m JOIN users u ON u.id = m.user_id
+               WHERE m.team_id = %s::uuid ORDER BY m.created_at ASC LIMIT 200""",
+            (team_id,)
+        )
+        return {"team_id": team_id, "messages": [{
+            "user_id": str(r[0]), "display_name": r[1], "initials": _initials(r[1]),
+            "message": r[2], "created_at": r[3].isoformat() if r[3] else None,
+            "is_you": str(r[0]) == user_id,
+        } for r in rows]}
+    except Exception as e:
+        logger.error(f"team-messages get error: {e}")
         raise HTTPException(status_code=400, detail=str(e))
 
 

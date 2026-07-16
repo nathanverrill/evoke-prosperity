@@ -9,6 +9,7 @@ window.EVOKE_CONTENT = {
       { id:"progress",icon:"shield",      label:"Progress" },
       { id:"vault",   icon:"inventory_2", label:"Vault" },
       { id:"billbot", icon:"smart_toy",   label:"B1llbot" },
+      { id:"team",    icon:"diversity_3", label:"Team" },
       { id:"profile", icon:"person",      label:"Profile",  fill:true }
     ],
     greeting: { kicker:"Hello, Agent", title:"Ready for your next mission?", sub:"Let's get started!" },

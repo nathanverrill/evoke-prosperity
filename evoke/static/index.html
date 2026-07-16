@@ -264,9 +264,25 @@
   .pf-toggle[aria-checked="true"]::after{transform:translateX(21px);background:var(--cyan-100);}
   .pf-toggle:focus-visible{outline:2px solid var(--cyan-300);outline-offset:2px;}
   /* High Contrast setting */
-  body.hc{--text-faint:#c8e6e6;--text-body:#ecffff;}
-  body.hc .hud{color:var(--cyan-200) !important;}
-  body.hc .glass,body.hc .mtile{box-shadow:var(--elev-glass),inset 0 0 0 1px rgba(0,150,136,0.6) !important;}
+  /* High-contrast mode: brighten every text token, strengthen every border,
+     darken/solidify panel backgrounds, and drop dim glows for max legibility. */
+  body.hc{
+    --text-heading:#ffffff; --text-body:#f6ffff; --text-label:#eafdff; --text-muted:#d6f2f2; --text-faint:#c6ebeb;
+    --teal-050:#f4ffff; --teal-100:#e2ffff; --teal-200:#d3fcff;
+    --cyan-100:#d0fbff; --cyan-200:#a8f1ff; --cyan-300:#84e8ff;
+    --green-400:#4dffb8;
+    --border-ui:rgba(180,236,236,0.6); --border-glass:rgba(180,236,236,0.65); --border-faint:rgba(180,236,236,0.45);
+    --surface-glass:rgba(8,17,32,0.9);
+  }
+  body.hc .glass,body.hc .panel,body.hc .mtile,body.hc .brackets{box-shadow:var(--elev-glass),inset 0 0 0 1.6px rgba(150,222,222,0.75) !important;background:rgba(8,17,32,0.88) !important;}
+  body.hc .hud{color:#c9ecec !important;}
+  body.hc .btn{box-shadow:inset 0 0 0 1.6px rgba(165,238,238,0.85),var(--elev-glass) !important;color:#f2ffff !important;}
+  body.hc .btn.sec{background:rgba(8,17,32,0.9) !important;}
+  body.hc .chip{box-shadow:inset 0 0 0 1.6px rgba(165,238,238,0.7) !important;}
+  body.hc .rail .nav{color:#e6fcff !important;}
+  body.hc .rail .nav.on{background:rgba(0,150,136,0.32) !important;box-shadow:inset 0 0 0 1.5px rgba(160,238,238,0.7) !important;}
+  body.hc .ms{filter:none !important;}
+  body.hc .ev-drop,body.hc .track,body.hc .day{box-shadow:inset 0 0 0 1.5px rgba(160,230,230,0.7) !important;}
   /* Reduce Motion setting */
   body.reduce-motion *,body.reduce-motion *::before,body.reduce-motion *::after{
     animation-duration:0.001ms !important;animation-iteration-count:1 !important;transition-duration:0.001ms !important;}
@@ -816,6 +832,12 @@
     <p class="hud" id="mc-subtitle" style="font-size:clamp(13px,2vw,18px);margin-bottom:24px;">/// Select your assignment and deploy ///</p>
     <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(300px,1fr));gap:20px;text-align:left;" id="missions"></div>
   </main>
+</section>
+
+<!-- ===== TEAM (info + communication) ===== -->
+<section class="screen" data-screen="team" aria-label="Your Team" style="flex-direction:column;">
+  <header class="topbar"><div class="lockup brand-static"></div></header>
+  <main id="team-main" style="flex:1;padding:28px clamp(20px,4vw,48px) 90px;max-width:1180px;margin:0 auto;width:100%;"></main>
 </section>
 
 <!-- ===== PROFILE ===== -->
@@ -1451,7 +1473,7 @@
 
 
   <script src="submission-missions.js?b=1"></script>
-  <script src="content.js?b=2"></script>
-  <script src="controller.js?b=12"></script>
+  <script src="content.js?b=3"></script>
+  <script src="controller.js?b=13"></script>
 </body>
 </html>

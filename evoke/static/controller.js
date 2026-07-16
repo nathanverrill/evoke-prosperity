@@ -88,10 +88,11 @@
           localStorage.setItem('evoke-agent-name', STATE.displayName);
         }
       }catch(e){}
-      // real Minecraft server address, if provided
+      // real Minecraft server address — only override the design default when
+      // the backend gives a genuine public host (ignore dev's localhost).
       getJSON('/api/minecraft/connect-info').then(function(ci){
         var host = ci && (ci.server || ci.host || ci.address);
-        if(host){ var el2=document.getElementById('mc-server'); if(el2) el2.textContent = host; }
+        if(host && !/^(localhost|127\.|0\.0\.0\.0)/.test(host)){ var el2=document.getElementById('mc-server'); if(el2) el2.textContent = host; }
       }).catch(function(){});
     }).catch(function(e){ console.warn('backend seed failed; using local demo state', e); });
   }
@@ -1198,6 +1199,7 @@
     if(name==='missions') renderMissions(currentWeek);
     if(name==='ops' && window.renderOps) window.renderOps(curMission());
     if(name==='submission' && window.renderSubmission) window.renderSubmission();
+    if(name==='team' && window.renderTeam) window.renderTeam();
     if(name==='ops' && window.openOpsGuide){ var seen; try{ seen=localStorage.getItem('evoke-ops-guide-seen')==='1'; }catch(e){ seen=false; } if(!seen) setTimeout(window.openOpsGuide, 350); }
     if((name==='minecraft' || name==='companion') && window.renderMinecraftWeek) window.renderMinecraftWeek();
     if(name==='profile' && window.renderProfile2) window.renderProfile2();
@@ -1541,6 +1543,58 @@
     }
 
     window.renderSubmission = function(){ refresh(missionNo()); };
+  })();
+
+  // ===== Team page (info + communication) =====
+  (function(){
+    var host = document.getElementById('team-main');
+    if(!host) return;
+    var e3 = function(s){ return String(s==null?'':s).replace(/[&<>"]/g,function(c){return ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'})[c];}); };
+    var teamData=null, msgs=[];
+    function avatar(initials, you){
+      return '<span class="mtile" style="width:'+(you?52:46)+'px;height:'+(you?52:46)+'px;flex:none;border-radius:50%;display:flex;align-items:center;justify-content:center;font-family:var(--font-display);font-weight:800;font-size:'+(you?18:16)+'px;color:var(--cyan-100);'+(you?'box-shadow:inset 0 0 0 1.5px var(--cyan-500),var(--glow-md);':'')+'">'+e3(initials)+'</span>';
+    }
+    function render(){
+      var t=teamData||{}, members=t.members||[], MT=12;
+      var head = '<div style="display:flex;align-items:flex-start;justify-content:space-between;gap:20px;flex-wrap:wrap;margin-bottom:26px;">'
+        +'<div><h1 class="glow-h" style="font-size:clamp(30px,5vw,52px);margin:0 0 6px -3px;">'+e3(t.name||'Your Team')+'</h1>'
+        +'<p style="font-family:var(--font-body);font-size:15px;color:var(--text-faint);margin:0;max-width:560px;">'+(t.motto?('“'+e3(t.motto)+'”'):'Your crew’s home base — see where everyone’s at and talk it out.')+'</p></div>'
+        +'<span class="chip green"><span class="dot" aria-hidden="true"></span>'+members.length+' member'+(members.length===1?'':'s')+'</span></div>';
+      var roster = '<div class="glass" style="padding:clamp(18px,2.5vw,24px);margin-bottom:22px;">'
+        +'<h2 class="hud" style="font-size:12px;color:var(--cyan-300);margin:0 0 16px;">Squad</h2>'
+        +'<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,240px),1fr));gap:14px;">'
+        + members.map(function(m){
+            var pct=Math.round((m.missions_completed||0)/MT*100);
+            return '<div style="display:flex;align-items:center;gap:14px;padding:14px 16px;border-radius:14px;box-shadow:inset 0 0 0 1px '+(m.is_you?'var(--cyan-500)':'var(--border-ui)')+';background:'+(m.is_you?'rgba(0,150,136,0.06)':'transparent')+';">'
+              +avatar(m.initials, m.is_you)
+              +'<div style="flex:1;min-width:0;"><div style="font-family:var(--font-display);font-weight:700;font-size:15px;color:var(--text-heading);">'+e3(m.display_name)+(m.is_you?' <span class="hud" style="font-weight:400;font-size:10px;color:var(--cyan-300);">you</span>':'')+'</div>'
+              +'<div class="hud" style="font-size:10px;color:var(--text-faint);margin:5px 0;">Level '+(m.level||1)+' · '+(m.missions_completed||0)+'/'+MT+' missions</div>'
+              +'<span style="display:block;width:100%;height:6px;border-radius:999px;background:rgba(255,255,255,0.08);overflow:hidden;"><span style="display:block;height:100%;width:'+pct+'%;background:linear-gradient(90deg,var(--cyan-500),var(--green-400));"></span></span></div></div>';
+          }).join('')
+        +'</div></div>';
+      var msgHtml = (msgs||[]).map(function(mm){
+        var mine=mm.is_you;
+        return '<div style="display:flex;gap:12px;align-items:flex-start;'+(mine?'flex-direction:row-reverse;':'')+'">'+avatar(mm.initials,false)
+          +'<div style="flex:1;min-width:0;'+(mine?'text-align:right;':'')+'"><div style="font-family:var(--font-display);font-weight:700;font-size:12.5px;color:var(--cyan-200);margin-bottom:3px;">'+e3(mm.display_name)+'</div>'
+          +'<div style="display:inline-block;text-align:left;font-family:var(--font-body);font-size:14px;line-height:1.5;color:var(--teal-050);padding:10px 14px;border-radius:'+(mine?'12px 0 12px 12px':'0 12px 12px 12px')+';box-shadow:inset 0 0 0 1px '+(mine?'rgba(0,150,136,0.4)':'var(--border-ui)')+';background:'+(mine?'rgba(0,150,136,0.08)':'transparent')+';max-width:88%;">'+e3(mm.message)+'</div></div></div>';
+      }).join('') || '<p class="hud" style="font-size:12px;color:var(--text-faint);margin:0 0 14px;">No messages yet — say hi to your team below.</p>';
+      var board = '<div class="glass" style="padding:clamp(18px,2.5vw,24px);">'
+        +'<h2 class="hud" style="font-size:12px;color:var(--cyan-300);margin:0 0 16px;">Team Chat</h2>'
+        +'<div id="team-chat-log" style="display:flex;flex-direction:column;gap:14px;margin-bottom:16px;max-height:46vh;overflow:auto;padding-right:2px;">'+msgHtml+'</div>'
+        +'<form id="team-chat-form" style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;"><input id="team-chat-input" type="text" autocomplete="off" placeholder="Message your team…" style="flex:1 1 160px;min-width:0;padding:12px 14px;border-radius:12px;border:none;background:rgba(0,150,136,0.06);box-shadow:inset 0 0 0 1px var(--border-ui);color:var(--text-heading);font-family:var(--font-body);font-size:14px;"><button class="btn sec" type="submit" style="flex:none;width:auto;min-width:96px;">Send</button></form></div>';
+      host.innerHTML = head + roster + board;
+      var f=document.getElementById('team-chat-form');
+      if(f) f.addEventListener('submit', function(e){ e.preventDefault(); var inp=document.getElementById('team-chat-input'); var m=(inp.value||'').trim(); if(!m||!STATE.userId) return; inp.value=''; postJSON('/api/team-message',{user_id:STATE.userId,message:m}).then(function(){ refresh(); }).catch(function(){}); });
+      var box=document.getElementById('team-chat-log'); if(box) box.scrollTop=box.scrollHeight;
+    }
+    function refresh(){
+      if(!STATE.userId){ teamData=null; msgs=[]; render(); return; }
+      Promise.all([
+        getJSON('/api/team/'+STATE.userId).catch(function(){return null;}),
+        getJSON('/api/team-messages/'+STATE.userId).catch(function(){return {messages:[]};})
+      ]).then(function(r){ teamData=r[0]||{}; msgs=(r[1]&&r[1].messages)||[]; render(); });
+    }
+    window.renderTeam=function(){ refresh(); };
   })();
 
   });
