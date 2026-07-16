@@ -4,14 +4,13 @@ import datetime
 import asyncio
 import random
 import re
-import secrets
 import uuid
+import hashlib
 from typing import Optional, List
-from fastapi import FastAPI, APIRouter, HTTPException, File, UploadFile, Form, Depends, Response, Request, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI, HTTPException, File, UploadFile, Form, Depends, Response, Request, WebSocket, WebSocketDisconnect
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse, JSONResponse, RedirectResponse
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.security import HTTPBasic, HTTPBasicCredentials
 from pydantic import BaseModel
 import psycopg2
 from psycopg2.pool import SimpleConnectionPool
@@ -50,14 +49,6 @@ MINECRAFT_PUBLIC_HOST = os.getenv("MINECRAFT_PUBLIC_HOST", "localhost")
 MINECRAFT_PUBLIC_PORT_JAVA = os.getenv("MINECRAFT_PUBLIC_PORT_JAVA", "25565")
 MINECRAFT_PUBLIC_PORT_BEDROCK = os.getenv("MINECRAFT_PUBLIC_PORT_BEDROCK", "19132")
 
-# /api/admin/* gate -- was completely unauthenticated (see GAPS.md: "Auth is
-# dev-grade"). Deliberately simple (HTTP Basic, one shared username/password,
-# no per-instructor accounts) rather than building out real admin auth --
-# matches what was actually asked for once this app became internet-reachable
-# via ngrok, not a general-purpose auth system.
-ADMIN_USERNAME = os.getenv("ADMIN_USERNAME", "admin")
-ADMIN_PASSWORD = os.getenv("ADMIN_PASSWORD", "devsecret123")
-
 # Brightspace integration (adapter or simulator)
 BRIGHTSPACE_SIMULATOR_MODE = os.getenv("BRIGHTSPACE_SIMULATOR_MODE", "true").lower() == "true"
 BRIGHTSPACE_TENANT_URL = os.getenv("BRIGHTSPACE_TENANT_URL")
@@ -87,28 +78,6 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
-
-# ========== Admin auth (HTTP Basic) ==========
-_admin_basic = HTTPBasic()
-
-def require_admin_auth(credentials: HTTPBasicCredentials = Depends(_admin_basic)):
-    """Gate for every /api/admin/* route. Uses secrets.compare_digest for
-    both fields so a wrong-length guess can't be timed against the real
-    value char-by-char."""
-    user_ok = secrets.compare_digest(credentials.username, ADMIN_USERNAME)
-    pass_ok = secrets.compare_digest(credentials.password, ADMIN_PASSWORD)
-    if not (user_ok and pass_ok):
-        raise HTTPException(
-            status_code=401,
-            detail="Invalid admin credentials",
-            headers={"WWW-Authenticate": "Basic"},
-        )
-    return credentials.username
-
-# All /api/admin/* routes attach to this router instead of `app` directly, so
-# the auth dependency applies once here rather than needing to remember it on
-# every individual endpoint (and on every future one added later).
-admin_router = APIRouter(dependencies=[Depends(require_admin_auth)])
 
 # ========== Mission Catalog Sync ==========
 async def sync_missions_from_lms():
@@ -265,6 +234,24 @@ async def startup():
             reflection TEXT NOT NULL,
             submitted_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
             UNIQUE(user_id, mission_id)
+        )""")
+        # Submission redesign (Mission Submission Redesign doc): each mission
+        # can carry a per-learner Individual Task and a Team Product that every
+        # member turns in (Option A -- each uploads their own copy, hash-checked
+        # so a divergent file is flagged, never blocked). `kind` distinguishes
+        # the two; existing rows are team products. `content_hash` is the sha256
+        # of the uploaded file, used to detect who turned in the same file.
+        db_execute("ALTER TABLE submissions ADD COLUMN IF NOT EXISTS kind VARCHAR(32) NOT NULL DEFAULT 'team_product'")
+        db_execute("ALTER TABLE submissions ADD COLUMN IF NOT EXISTS content_hash TEXT")
+        # In-app Team Discussion thread (one per team per mission): the
+        # collaboration step, captured as evidence a facilitator can review.
+        db_execute("""CREATE TABLE IF NOT EXISTS team_discussion (
+            id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+            team_id UUID NOT NULL REFERENCES teams(id),
+            mission_id UUID NOT NULL REFERENCES missions(id),
+            user_id UUID NOT NULL REFERENCES users(id),
+            message TEXT NOT NULL,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         )""")
         # Identity customization: uploaded avatar (MinIO object key), the
         # procedural Agent Sigil config (small JSON: glyph + hue), and the
@@ -1098,7 +1085,7 @@ async def list_missions(user_id: str):
 # outside LTI" gap). Not a new gap introduced here, just inheriting the
 # existing one; real deployment needs an instructor-role check before this
 # ships to a real classroom.
-@admin_router.get("/api/admin/missions")
+@app.get("/api/admin/missions")
 async def admin_list_missions(user_id: str):
     """All missions for the caller's campaign, including release state --
     the admin-facing counterpart to GET /api/missions, which only shows
@@ -1128,7 +1115,7 @@ async def admin_list_missions(user_id: str):
         raise HTTPException(status_code=400, detail=str(e))
 
 
-@admin_router.post("/api/admin/missions/{mission_id}/release")
+@app.post("/api/admin/missions/{mission_id}/release")
 async def admin_release_mission(mission_id: str):
     """Console-player feedback (BUILD_PLAN_2's "season drops" gap): a
     stage/mission release is already this campaign's real content-drop
@@ -1159,7 +1146,7 @@ async def admin_release_mission(mission_id: str):
         raise HTTPException(status_code=400, detail=str(e))
 
 
-@admin_router.post("/api/admin/missions/{mission_id}/unrelease")
+@app.post("/api/admin/missions/{mission_id}/unrelease")
 async def admin_unrelease_mission(mission_id: str):
     """Puts a mission back behind the gate. Deliberately doesn't touch
     submissions/awards already granted while it was open -- unreleasing is
@@ -1205,7 +1192,7 @@ async def _complete_mission_for_user(user_id: str, mission_id: str, team_id: str
         return
 
     evidence = db_fetch_one(
-        "SELECT 1 FROM submissions WHERE team_id = %s::uuid AND mission_id = %s::uuid LIMIT 1",
+        "SELECT 1 FROM submissions WHERE team_id = %s::uuid AND mission_id = %s::uuid AND kind = 'team_product' LIMIT 1",
         (team_id, mission_id)
     )
     reflected = db_fetch_one(
@@ -1344,11 +1331,16 @@ async def submit_evidence(
     user_id: str = Form(...),
     mission_id: str = Form(...),
     file: UploadFile = File(...),
+    kind: str = Form("team_product"),
 ):
-    """Submit the TEAM's shared evidence for a mission -- any member can
-    call this. Closes the completion AND-gate (see
-    _complete_mission_for_user) for any teammate who already reflected;
-    everyone else's completion waits on their own reflection."""
+    """Submit evidence for a mission. `kind='team_product'` (default) is the
+    TEAM's shared artifact -- any member can call it, and it closes the
+    completion AND-gate (see _complete_mission_for_user) for any teammate who
+    already reflected. `kind='individual_task'` is a learner's own piece
+    (Submission Redesign doc, missions 1-4): stored + hash-recorded for the
+    roster/assessment, but it does not fire team-completion effects."""
+    if kind not in ("team_product", "individual_task"):
+        raise HTTPException(status_code=400, detail="kind must be 'team_product' or 'individual_task'")
     try:
         mission_release = db_fetch_one(
             "SELECT released_at FROM missions WHERE id = %s::uuid", (mission_id,)
@@ -1374,15 +1366,19 @@ async def submit_evidence(
         # XPGranted/BadgeAwarded and duplicate AwardGranted feed events,
         # which both spammed the feed and made resubmission an infinite
         # +100 XP faucet.
+        # Resubmission is scoped to the team's PRODUCT (the shared artifact that
+        # drives AI review + completion); individual-task and per-member product
+        # uploads don't count against the team-product first-submission guard.
         prior = db_fetch_one(
-            "SELECT 1 FROM submissions WHERE team_id = %s::uuid AND mission_id = %s::uuid LIMIT 1",
+            "SELECT 1 FROM submissions WHERE team_id = %s::uuid AND mission_id = %s::uuid AND kind = 'team_product' LIMIT 1",
             (team_id, mission_id)
         )
         is_resubmission = bool(prior)
 
         # Store file in MinIO
         file_bytes = await file.read()
-        object_key = f"evoke-evidence/{mission_id}/{user_id}_{file.filename}"
+        content_hash = hashlib.sha256(file_bytes).hexdigest()
+        object_key = f"evoke-evidence/{mission_id}/{kind}/{user_id}_{file.filename}"
         s3_client.put_object(
             Bucket="default-bucket",
             Key=object_key,
@@ -1390,13 +1386,18 @@ async def submit_evidence(
             ContentType=file.content_type or "application/octet-stream"
         )
 
-        # Create submission record -- team-owned; user_id here is
-        # submitted-by attribution only, not the completion key.
+        # Create submission record. content_hash lets the roster flag whether
+        # each member turned in the SAME team file (Option A hash-check).
         db_execute(
-            """INSERT INTO submissions (id, user_id, mission_id, team_id, file_path, status)
-               VALUES (%s::uuid, %s::uuid, %s::uuid, %s::uuid, %s, 'submitted')""",
-            (submission_id, user_id, mission_id, team_id, object_key)
+            """INSERT INTO submissions (id, user_id, mission_id, team_id, file_path, status, kind, content_hash)
+               VALUES (%s::uuid, %s::uuid, %s::uuid, %s::uuid, %s, 'submitted', %s, %s)""",
+            (submission_id, user_id, mission_id, team_id, object_key, kind, content_hash)
         )
+
+        # An individual task is a learner's own piece -- store it and stop.
+        # No Brightspace team sync, no AI team review, no completion effects.
+        if kind == "individual_task":
+            return {"status": "success", "submission_id": submission_id, "kind": kind}
 
         # Sync to Brightspace if adapter available
         if brightspace_lms:
@@ -1514,6 +1515,150 @@ async def submit_evidence(
         raise
     except Exception as e:
         logger.error(f"Submit evidence error: {e}")
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+def _initials(name: Optional[str]) -> str:
+    parts = [p for p in re.split(r"\s+", (name or "").strip()) if p]
+    if not parts:
+        return "?"
+    if len(parts) == 1:
+        return parts[0][:2].upper()
+    return (parts[0][0] + parts[-1][0]).upper()
+
+
+@app.get("/api/submission-state/{user_id}/{mission_id}")
+async def submission_state(user_id: str, mission_id: str):
+    """Per-member submission state for the requesting learner's team on one
+    mission -- drives the submission screen's roster strip, the motivational
+    banner, and completion status. Team-product files are hash-checked
+    (Option A): the most-common hash is 'canonical'; members matching it are
+    'matching', a different file is 'divergent', none is 'missing'."""
+    try:
+        team_id = _get_user_team(user_id)
+        if not team_id:
+            return {"team_id": None, "members": [], "you": None,
+                    "banner": {"show": False, "submitted": 0, "total": 0}, "canonical_hash": None}
+
+        members = db_fetch_all(
+            """SELECT u.id, u.display_name FROM team_members tm
+               JOIN users u ON u.id = tm.user_id
+               WHERE tm.team_id = %s::uuid ORDER BY u.display_name""",
+            (team_id,)
+        )
+        # team-product submissions (latest hash per member) for this mission
+        prod = db_fetch_all(
+            """SELECT DISTINCT ON (user_id) user_id, content_hash
+               FROM submissions
+               WHERE team_id = %s::uuid AND mission_id = %s::uuid AND kind = 'team_product'
+               ORDER BY user_id, submitted_at DESC""",
+            (team_id, mission_id)
+        )
+        product_hash = {str(r[0]): r[1] for r in prod}
+        indiv = {str(r[0]) for r in db_fetch_all(
+            "SELECT DISTINCT user_id FROM submissions WHERE team_id = %s::uuid AND mission_id = %s::uuid AND kind = 'individual_task'",
+            (team_id, mission_id))}
+        reflected = {str(r[0]) for r in db_fetch_all(
+            "SELECT user_id FROM mission_reflections WHERE mission_id = %s::uuid", (mission_id,))}
+        discussed = {str(r[0]) for r in db_fetch_all(
+            "SELECT DISTINCT user_id FROM team_discussion WHERE team_id = %s::uuid AND mission_id = %s::uuid",
+            (team_id, mission_id))}
+
+        # canonical = most common team-product hash
+        counts: dict = {}
+        for h in product_hash.values():
+            if h:
+                counts[h] = counts.get(h, 0) + 1
+        canonical = max(counts, key=counts.get) if counts else None
+
+        def product_status(uid: str) -> str:
+            if uid not in product_hash:
+                return "missing"
+            return "matching" if product_hash[uid] == canonical else "divergent"
+
+        out_members = []
+        for mid, name in members:
+            mid = str(mid)
+            out_members.append({
+                "user_id": mid,
+                "display_name": name,
+                "initials": _initials(name),
+                "is_you": mid == user_id,
+                "individual_task": mid in indiv,
+                "team_product": product_status(mid),
+                "reflected": mid in reflected,
+                "discussed": mid in discussed,
+            })
+
+        you = next((m for m in out_members if m["is_you"]), None)
+        submitted = sum(1 for m in out_members if m["team_product"] != "missing")
+        total = len(out_members)
+        banner_show = bool(you and you["team_product"] == "missing" and submitted >= 1)
+
+        return {
+            "team_id": team_id,
+            "mission_id": mission_id,
+            "canonical_hash": canonical,
+            "you": you,
+            "members": out_members,
+            "banner": {"show": banner_show, "submitted": submitted, "total": total},
+        }
+    except Exception as e:
+        logger.error(f"submission-state error: {e}")
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+class TeamDiscussionPost(BaseModel):
+    user_id: str
+    mission_id: str
+    message: str
+
+
+@app.post("/api/team-discussion")
+async def post_team_discussion(body: TeamDiscussionPost):
+    """Add a message to the team's in-app discussion thread for a mission."""
+    try:
+        msg = (body.message or "").strip()
+        if not msg:
+            raise HTTPException(status_code=400, detail="Message can't be empty")
+        team_id = _get_user_team(body.user_id)
+        if not team_id:
+            raise HTTPException(status_code=400, detail="You're not on a team yet")
+        mid = str(uuid.uuid4())
+        db_execute(
+            """INSERT INTO team_discussion (id, team_id, mission_id, user_id, message)
+               VALUES (%s::uuid, %s::uuid, %s::uuid, %s::uuid, %s)""",
+            (mid, team_id, body.mission_id, body.user_id, msg[:4000])
+        )
+        return {"status": "success", "id": mid}
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"team-discussion post error: {e}")
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@app.get("/api/team-discussion/{user_id}/{mission_id}")
+async def get_team_discussion(user_id: str, mission_id: str):
+    """The team's discussion thread for a mission (resolved via the caller's team)."""
+    try:
+        team_id = _get_user_team(user_id)
+        if not team_id:
+            return {"team_id": None, "messages": []}
+        rows = db_fetch_all(
+            """SELECT d.user_id, u.display_name, d.message, d.created_at
+               FROM team_discussion d JOIN users u ON u.id = d.user_id
+               WHERE d.team_id = %s::uuid AND d.mission_id = %s::uuid
+               ORDER BY d.created_at ASC""",
+            (team_id, mission_id)
+        )
+        return {"team_id": team_id, "messages": [{
+            "user_id": str(r[0]), "display_name": r[1], "initials": _initials(r[1]),
+            "message": r[2], "created_at": r[3].isoformat() if r[3] else None,
+            "is_you": str(r[0]) == user_id,
+        } for r in rows]}
+    except Exception as e:
+        logger.error(f"team-discussion get error: {e}")
         raise HTTPException(status_code=400, detail=str(e))
 
 
@@ -2723,7 +2868,7 @@ async def team_wheel(team_id: str):
 
 
 # ========== Instructor Ops Deck ==========
-@admin_router.get("/api/admin/cohort")
+@app.get("/api/admin/cohort")
 async def admin_cohort(user_id: str):
     """Per-learner overview for the instructor: level/XP, missions done,
     last activity, and what's waiting on the teacher. Same unprotected-dev
@@ -2817,7 +2962,7 @@ async def _fetch_classlist():
         return resp.json() if resp.status_code == 200 else None
 
 
-@admin_router.get("/api/admin/roster")
+@app.get("/api/admin/roster")
 async def admin_roster():
     """LMS classlist cross-referenced against evoke_identities and
     team_members -- who's already an EVOKE Player, and which team (if any)
@@ -2859,7 +3004,7 @@ async def admin_roster():
         raise HTTPException(status_code=400, detail=str(e))
 
 
-@admin_router.post("/api/admin/roster/{brightspace_user_id}/import")
+@app.post("/api/admin/roster/{brightspace_user_id}/import")
 async def admin_import_student(brightspace_user_id: int):
     """Provisions an EVOKE Player for this LMS student ahead of their first
     LTI launch, so an admin can assign them to a team right away.
@@ -2883,7 +3028,7 @@ async def admin_import_student(brightspace_user_id: int):
         raise HTTPException(status_code=400, detail=str(e))
 
 
-@admin_router.get("/api/admin/teams")
+@app.get("/api/admin/teams")
 async def admin_list_teams():
     try:
         teams = db_fetch_all("SELECT id, name FROM teams ORDER BY name")
@@ -2904,7 +3049,7 @@ async def admin_list_teams():
         raise HTTPException(status_code=400, detail=str(e))
 
 
-@admin_router.post("/api/admin/teams")
+@app.post("/api/admin/teams")
 async def admin_create_team(name: str = Form(...)):
     try:
         org_row = db_fetch_one("SELECT id FROM organizations LIMIT 1")
@@ -2922,7 +3067,7 @@ async def admin_create_team(name: str = Form(...)):
         raise HTTPException(status_code=400, detail=str(e))
 
 
-@admin_router.post("/api/admin/teams/{team_id}/members")
+@app.post("/api/admin/teams/{team_id}/members")
 async def admin_add_team_member(team_id: str, user_id: str = Form(...)):
     """A learner belongs to exactly one team (matching how the curriculum
     is actually run, and what the team-evidence-submission model assumes)
@@ -2939,7 +3084,7 @@ async def admin_add_team_member(team_id: str, user_id: str = Form(...)):
         raise HTTPException(status_code=400, detail=str(e))
 
 
-@admin_router.delete("/api/admin/teams/{team_id}/members/{user_id}")
+@app.delete("/api/admin/teams/{team_id}/members/{user_id}")
 async def admin_remove_team_member(team_id: str, user_id: str):
     try:
         db_execute(
@@ -2956,7 +3101,7 @@ TIER_RANK = {"common": 1, "epic": 2, "legendary": 3}
 STAGE_STARS = {1: "★", 2: "★★", 3: "★★★"}
 
 
-@admin_router.post("/api/admin/missions/{mission_id}/stage")
+@app.post("/api/admin/missions/{mission_id}/stage")
 async def admin_set_stage(mission_id: str, stage: int = Form(...)):
     """Stages are instructor pedagogy config (Nathan's decision: cadence
     must flex with classes/workshops), decoupled from the LMS week the
@@ -3483,8 +3628,6 @@ async def equip_gear(user_id: str, keys: str = Form(...)):
     return {"status": "equipped", "equipped": wanted}
 
 
-app.include_router(admin_router)
-
 # ========== Static Files ==========
 # Resolved relative to this file, not the process's working directory --
 # CWD is /app (so main.py can import itself as the evoke.* package, per the
@@ -3494,14 +3637,6 @@ app.include_router(admin_router)
 # and 2's Dockerfile fix for the package-import issue introduced this
 # regression without anyone noticing until the SPA was actually loaded).
 _static_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "static")
-# Hailey's pixel-exact redesign (see EVOKE-New-UI-Handoff.md), served
-# side-by-side with the current production UI rather than replacing it --
-# no backend changes either build needed. Must mount before "/" below:
-# Starlette matches mounts in registration order, and "/" is a catch-all
-# that would otherwise swallow every /v2/* request first.
-_v2_static_dir = os.path.join(_static_dir, "v2")
-if os.path.exists(_v2_static_dir):
-    app.mount("/v2", StaticFiles(directory=_v2_static_dir, html=True), name="static-v2")
 if os.path.exists(_static_dir):
     app.mount("/", StaticFiles(directory=_static_dir, html=True), name="static")
 

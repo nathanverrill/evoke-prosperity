@@ -39,36 +39,17 @@
   // Persist real evidence when the learner completes a mission. Best-effort:
   // never blocks the identical local flow if the backend rejects (no team, no
   // file, unreleased mission, etc.).
-  //
-  // Real mission completion is an AND-gate (main.py's _complete_mission_for_user):
-  // it needs BOTH the team's shared evidence (a file) AND this learner's own
-  // reflection to exist. The design only has one field (the statement), and
-  // its own file-upload UI is a visual mockup with nothing behind it yet --
-  // real completion-screen work is still coming. Stopgap in the meantime,
-  // "in the spirit of the design" rather than waiting: the same statement
-  // text is submitted to BOTH endpoints, as a synthesized .txt file for the
-  // evidence half. Swap this for a real file input once that lands, and
-  // this whole synthesized-file block goes away.
   window.evokeBackendSubmit = function(designMissionNo){
     try{
       var mid = STATE.missionIds[designMissionNo-1];
       if(!mid || !STATE.userId) return;
       var stmt = '';
       var os = document.getElementById('ev-statement'); if(os) stmt = os.value || '';
-      var text = stmt || 'Submitted via EVOKE.';
-
-      // Reflection half of the gate -- the design's statement, as-is.
-      var fdReflect = new FormData();
-      fdReflect.append('user_id', STATE.userId); fdReflect.append('mission_id', mid);
-      fdReflect.append('reflection', text);
-      fetch('/api/submit-reflection', {method:'POST', body:fdReflect}).catch(function(){});
-
-      // Evidence half -- same text, synthesized into the file the backend
-      // requires (team-shared; needs the learner to already be on a team).
-      var fdEvidence = new FormData();
-      fdEvidence.append('user_id', STATE.userId); fdEvidence.append('mission_id', mid);
-      fdEvidence.append('file', new Blob([text], {type:'text/plain'}), 'evidence.txt');
-      fetch('/api/submit-evidence', {method:'POST', body:fdEvidence}).catch(function(){});
+      // Reflection (no file required) — the design's statement maps to a reflection.
+      var fd = new FormData();
+      fd.append('user_id', STATE.userId); fd.append('mission_id', mid);
+      fd.append('reflection', stmt || 'Submitted via EVOKE.');
+      fetch('/api/submit-reflection', {method:'POST', body:fd}).catch(function(){});
     }catch(e){}
   };
 
@@ -224,35 +205,72 @@
   }
   window.renderStreaks=renderStreaks; renderStreaks();
 
-  /* ---- badges: the 4 SUPERPOWERS as ring tiles, leveling up in sync with Progress ---- */
+  /* ---- POWER BADGES: the app's 16 Powers grouped under the 4 Superpowers ----
+     A Power is earned by completing a mission tagged with its skill (mirrors the
+     backend's mission-tag -> Power mapping in skills_framework). Themed Material
+     Symbols icons; earned = green glow, locked = dim + lock. */
+  var POWER_META = {
+    "Empathy":["Empathetic Changemaker","favorite"],
+    "Curiosity":["Empathetic Changemaker","travel_explore"],
+    "Leadership":["Empathetic Changemaker","flag"],
+    "Transformation":["Empathetic Changemaker","change_circle"],
+    "Problem Solving":["Systems Thinker","extension"],
+    "Analysis":["Systems Thinker","analytics"],
+    "Aggregation":["Systems Thinker","hub"],
+    "Critical Reflection":["Systems Thinker","psychology"],
+    "Imagination":["Creative Visionary","lightbulb"],
+    "Ideation":["Creative Visionary","tips_and_updates"],
+    "Vision":["Creative Visionary","visibility"],
+    "Courage":["Creative Visionary","bolt"],
+    "Communication":["Deep Collaborator","forum"],
+    "Teamwork":["Deep Collaborator","groups"],
+    "Networking":["Deep Collaborator","share"],
+    "Generosity of Spirit":["Deep Collaborator","volunteer_activism"]
+  };
+  var QUALITY_META = { "Empathetic Changemaker":"volunteer_activism", "Systems Thinker":"account_tree", "Creative Visionary":"auto_awesome", "Deep Collaborator":"diversity_3" };
+  var QUALITY_ORDER = ["Empathetic Changemaker","Systems Thinker","Creative Visionary","Deep Collaborator"];
+  var POWER_ALIAS = { "Research & Analysis":"Aggregation", "Creativity":"Ideation", "Relationship Management":"Networking" };
+  function earnedPowerSet(){
+    var set={}, ms=window.EVOKE_SUBMISSION_MISSIONS||[];
+    ms.forEach(function(m){
+      if(missionState(m.n)!=='complete') return;
+      (m.skills||[]).forEach(function(sk){ var p=POWER_ALIAS[sk]||sk; if(POWER_META[p]) set[p]=true; });
+    });
+    return set;
+  }
+  function powerGroups(){
+    var earned=earnedPowerSet(), g={};
+    QUALITY_ORDER.forEach(function(q){ g[q]={quality:q,icon:QUALITY_META[q],powers:[]}; });
+    Object.keys(POWER_META).forEach(function(p){ var q=POWER_META[p][0]; g[q].powers.push({name:p,icon:POWER_META[p][1],earned:!!earned[p]}); });
+    return QUALITY_ORDER.map(function(q){return g[q];});
+  }
+  function totalPowersEarned(){ return Object.keys(earnedPowerSet()).length; }
+  function powerTile(p, s){
+    s=s||54; var on=p.earned;
+    var box = on
+      ? 'background:radial-gradient(circle at 50% 35%,rgba(0,212,146,0.28),rgba(0,150,137,0.10));box-shadow:inset 0 0 0 1.5px var(--green-400),0 0 18px -4px rgba(0,212,146,0.55);color:var(--green-400);'
+      : 'box-shadow:inset 0 0 0 1px var(--border-ui);color:var(--text-faint);';
+    return '<div style="display:flex;flex-direction:column;align-items:center;gap:7px;text-align:center;min-width:0;opacity:'+(on?'1':'0.72')+';">'
+      +'<span style="width:min(100%,'+s+'px);aspect-ratio:1;border-radius:14px;display:flex;align-items:center;justify-content:center;'+box+'"><span class="ms'+(on?' fill':'')+'" aria-hidden="true" style="font-size:'+Math.round(s*0.46)+'px;">'+(on?p.icon:'lock')+'</span></span>'
+      +'<span style="font-family:var(--font-display);font-weight:600;font-size:10.5px;line-height:1.15;overflow-wrap:anywhere;hyphens:auto;color:'+(on?'var(--teal-050)':'var(--text-faint)')+';">'+p.name+'</span></div>';
+  }
+  window.powerGroups=powerGroups; window.totalPowersEarned=totalPowersEarned;
+
+  /* ---- badges: the 4 Superpower rings on Home, each filled by its 4 Powers ---- */
   var badges = document.getElementById('badges');
   function renderHomeBadges(){
     if(!badges) return;
-    badges.innerHTML='';
-    var spOrder=[], spMap={};
-    CONTENT.weeks.forEach(function(wk,wi){ wk.missions.forEach(function(m,mi){
-      var gi=wi*2+mi+1, done=missionState(gi)==='complete';
-      if(!spMap[m.badge]){ spMap[m.badge]={name:m.badge,icon:m.badgeIcon||m.icon||'military_tech',max:0,level:0}; spOrder.push(m.badge); }
-      spMap[m.badge].max++; if(done) spMap[m.badge].level++;
-    }); });
-    var unlocked=0, C=175.9;
-    spOrder.forEach(function(name){
-      var s=spMap[name], on=s.level>0; if(on) unlocked++;
-      var off=(C*(1 - s.level/s.max)).toFixed(1);
-      var icon = on ? s.icon : 'lock';
-      var chip = on ? '<span class="lv">'+s.level+'</span>' : '';
-      var aria = on ? (name+', level '+s.level+' of '+s.max) : (name+', locked');
-      badges.appendChild(el(
-        '<div class="sp-tile'+(on?'':' locked')+'" role="img" aria-label="'+aria+'">'+
-          '<div class="sp-ring">'+
-            '<svg viewBox="0 0 64 64" aria-hidden="true"><circle class="bg" cx="32" cy="32" r="28"></circle>'+
-            '<circle class="fg" cx="32" cy="32" r="28" stroke-dasharray="'+C.toFixed(1)+'" stroke-dashoffset="'+off+'"></circle></svg>'+
-            '<span class="ic"><span class="ms" aria-hidden="true">'+icon+'</span></span>'+chip+
-          '</div>'+
-          '<div class="lbl">'+name+'</div>'+
-        '</div>'));
-    });
-    var hdr = document.getElementById('badges-week'); if(hdr) hdr.textContent=unlocked+' of '+spOrder.length;
+    var C=175.9;
+    badges.innerHTML = powerGroups().map(function(g){
+      var lvl=g.powers.filter(function(p){return p.earned;}).length, on=lvl>0;
+      var off=(C*(1 - lvl/4)).toFixed(1);
+      return '<div class="sp-tile'+(on?'':' locked')+'" role="img" aria-label="'+g.quality+', '+lvl+' of 4 powers">'
+        +'<div class="sp-ring"><svg viewBox="0 0 64 64" aria-hidden="true"><circle class="bg" cx="32" cy="32" r="28"></circle>'
+        +'<circle class="fg" cx="32" cy="32" r="28" stroke-dasharray="'+C.toFixed(1)+'" stroke-dashoffset="'+off+'"></circle></svg>'
+        +'<span class="ic"><span class="ms" aria-hidden="true">'+(on?g.icon:'lock')+'</span></span>'+(on?'<span class="lv">'+lvl+'</span>':'')
+        +'</div><div class="lbl">'+g.quality+'</div></div>';
+    }).join('');
+    var hdr = document.getElementById('badges-week'); if(hdr) hdr.textContent=totalPowersEarned()+' of 16 powers';
   }
   window.renderHomeBadges=renderHomeBadges; renderHomeBadges();
 
@@ -661,8 +679,22 @@
         var a = (n===1) ? CONTENT.assignment : CONTENT['assignment_m'+n];
         if(!a) continue;
         var nextLabel = n<12 ? ('Mission '+(n+1)+': '+opsTitleOf(n+1)) : 'The campaign is complete — outstanding work, Agent.';
-        var alexLine; try{ var tx=CONTENT['transmission_m'+n]||CONTENT.transmission; alexLine=(tx.emphasis&&tx.emphasis[0])||tx.lead||''; }catch(e){ alexLine=''; }
-        OPS[n] = opsFor(a, n, nextLabel, 'Grew your '+a.badge+' superpower.', alexLine || "Keep going, Agent. You're closer than you think.");
+        var ALEX_QUOTES = {
+          1:"You listened before you judged, Agent. That's where real change starts.",
+          2:"You found your 'why.' Hold onto it — it'll carry the whole team.",
+          3:"The wild ideas scared you and you chased them anyway. That's the work.",
+          4:"You saw a future worth building. Now other people can see it too.",
+          5:"Turning a dream into real numbers is brave. You did the honest math.",
+          6:"You found the resources others missed. Resourceful, Agent — I'm impressed.",
+          7:"You stopped imagining and started building. That takes real nerve.",
+          8:"You made the hard calls about what stays and what waits. That's leadership.",
+          9:"You put unfinished work in front of real people and listened. Courage.",
+          10:"You aligned the team around one shared bet. Not easy — well done.",
+          11:"You made people believe. That's how good ideas find their backers.",
+          12:"You stood up, told the truth, and owned it together. Proud of you, Agent."
+        };
+        var alexLine = ALEX_QUOTES[n] || "Keep going, Agent. You're closer than you think.";
+        OPS[n] = opsFor(a, n, nextLabel, 'Grew your '+a.badge+' superpower.', alexLine);
       }
     })();
     var MC_CONTENT = {
@@ -767,21 +799,17 @@
       // Superpowers tracker — 4 superpowers that level up across the journey
       (function(){
         var sp=document.getElementById('ops-superpowers'); if(!sp) return;
-        var order=[], map={};
-        CONTENT.weeks.forEach(function(wk,wi){ wk.missions.forEach(function(mm,mi){
-          var gi=wi*2+mi+1, dn=missionState(gi)==='complete';
-          if(!map[mm.badge]){ map[mm.badge]={name:mm.badge,icon:mm.badgeIcon||'military_tech',max:0,level:0}; order.push(mm.badge); }
-          map[mm.badge].max++; if(dn) map[mm.badge].level++;
-        }); });
-        sp.innerHTML='';
-        order.forEach(function(nm){
-          var s=map[nm], on=s.level>0, pips='';
-          for(var p=1;p<=s.max;p++){ pips+='<span style="width:13px;height:5px;border-radius:3px;display:inline-block;background:'+(p<=s.level?'var(--cyan-300)':'rgba(145,209,209,0.16)')+';"></span>'; }
-          sp.appendChild(el('<div style="display:flex;align-items:center;gap:12px;padding:10px 13px;border-radius:11px;box-shadow:inset 0 0 0 1px var(--border-ui);opacity:'+(on?'1':'0.5')+';">'
-            +'<span class="ms" aria-hidden="true" style="font-size:22px;flex:none;color:'+(on?'var(--cyan-300)':'var(--text-faint)')+';">'+(on?s.icon:'lock')+'</span>'
-            +'<div style="flex:1;min-width:0;"><div style="font-family:var(--font-display);font-weight:700;font-size:13px;color:var(--teal-050);line-height:1.15;">'+s.name+'</div><div style="display:flex;gap:4px;margin-top:6px;">'+pips+'</div></div>'
-            +'<span class="hud" style="font-size:10px;flex:none;color:'+(on?'var(--cyan-300)':'var(--text-faint)')+';">'+(on?('Lv.'+s.level):'Locked')+'</span></div>'));
-        });
+        sp.innerHTML = powerGroups().map(function(g){
+          var e=g.powers.filter(function(p){return p.earned;}).length, on=e>0;
+          var mini=g.powers.map(function(p){
+            var pon=p.earned;
+            return '<span title="'+p.name+'" style="width:26px;height:26px;flex:none;border-radius:8px;display:flex;align-items:center;justify-content:center;'+(pon?'color:var(--green-400);box-shadow:inset 0 0 0 1px rgba(0,212,146,0.5);background:rgba(0,212,146,0.08);':'color:var(--text-faint);box-shadow:inset 0 0 0 1px var(--border-ui);')+'"><span class="ms'+(pon?' fill':'')+'" aria-hidden="true" style="font-size:15px;">'+(pon?p.icon:'lock')+'</span></span>';
+          }).join('');
+          return '<div style="display:flex;align-items:center;gap:12px;padding:10px 12px;border-radius:11px;box-shadow:inset 0 0 0 1px var(--border-ui);opacity:'+(on?'1':'0.6')+';">'
+            +'<span class="ms" aria-hidden="true" style="font-size:20px;flex:none;color:'+(on?'var(--cyan-300)':'var(--text-faint)')+';">'+g.icon+'</span>'
+            +'<div style="flex:1;min-width:0;"><div style="font-family:var(--font-display);font-weight:700;font-size:12.5px;color:var(--teal-050);line-height:1.15;margin-bottom:6px;">'+g.quality+'</div><div style="display:flex;gap:5px;flex-wrap:wrap;">'+mini+'</div></div>'
+            +'<span class="hud" style="font-size:10px;flex:none;color:'+(on?'var(--cyan-300)':'var(--text-faint)')+';">'+e+'/4</span></div>';
+        }).join('');
       })();
       document.getElementById('ops-alex').textContent='\u201c'+m.alex+'\u201d';
       var cl=document.getElementById('ops-checklist'); cl.innerHTML='';
@@ -802,7 +830,7 @@
     renderOps(curMission()); window.renderOps=renderOps;
     window.opsMarkSubmitted=function(id){ try{localStorage.setItem('evoke-m'+id+'-submitted','1');}catch(e){} renderOps(current); if(window.syncAllXP) window.syncAllXP(); };
     document.getElementById('ops-brief').addEventListener('click',function(){ go('assignment'); });
-    document.getElementById('ops-submit').addEventListener('click',function(){ go('evidence'); });
+    document.getElementById('ops-submit').addEventListener('click',function(){ go('submission'); });
     // Operations Hub onboarding guide — auto-opens once, reopenable via the ? button
     (function(){
       var guide=document.getElementById('ops-guide');
@@ -880,26 +908,18 @@
       var val = statVals[s.id] != null ? statVals[s.id] : s.value;
       st.appendChild(el('<div class="pg-stat"><div class="pg-stat-ic"><span class="ms fill" aria-hidden="true">'+s.icon+'</span></div><div class="pg-stat-txt"><div class="pg-stat-num"'+(s.id?' id="'+s.id+'"':'')+'>'+val+'</div><div class="pg-stat-lbl">'+s.label+'</div></div></div>'));
     });
-    // journey track removed (badge collection covers it)
-    // SUPERPOWER badges that LEVEL UP — each Superpower is earned across several missions.
-    var spOrder=[], spMap={};
-    CONTENT.weeks.forEach(function(wk,wi){ wk.missions.forEach(function(m,mi){
-      var gi=wi*2+mi+1, done=missionState(gi)==='complete';
-      if(!spMap[m.badge]){ spMap[m.badge]={name:m.badge,icon:m.badgeIcon||'military_tech',max:0,level:0}; spOrder.push(m.badge); }
-      spMap[m.badge].max++; if(done) spMap[m.badge].level++;
-    }); });
-    var ba=document.getElementById('pg-badges-all'); ba.innerHTML='';
-    var unlocked=0;
-    spOrder.forEach(function(name){
-      var s=spMap[name], on=s.level>0; if(on) unlocked++;
-      var pips=''; for(var i=1;i<=s.max;i++){ pips+='<span class="pip'+(i<=s.level?' on':'')+'"></span>'; }
-      ba.appendChild(el('<div class="pg-badge'+(on?'':' locked')+'">'
-        +'<span class="pg-badge-ic"><span class="ms" aria-hidden="true">'+(on?s.icon:'lock')+'</span>'+(on?'<span class="pg-badge-chip">'+s.level+'</span>':'')+'</span>'
-        +'<div class="pg-badge-txt"><span class="pg-badge-name">'+s.name+'</span>'
-        +'<span class="pg-badge-lvl">'+(on?('Level '+s.level+' of '+s.max):('Locked \u00b7 '+s.max+' missions'))+'</span>'
-        +'<span class="pg-pips" aria-hidden="true">'+pips+'</span></div></div>'));
-    });
-    document.getElementById('pg-badge-count').textContent=unlocked+' of '+spOrder.length+' superpowers';
+    // The 16 Powers grouped under their 4 Superpowers (the app's badge collection).
+    var ba=document.getElementById('pg-badges-all');
+    ba.style.display='grid'; ba.style.gridTemplateColumns='repeat(4,minmax(0,1fr))'; ba.style.gap='14px';
+    ba.innerHTML = powerGroups().map(function(g){
+      var e=g.powers.filter(function(p){return p.earned;}).length;
+      var tiles=g.powers.map(function(p){ return powerTile(p,52); }).join('');
+      return '<div class="glass" style="padding:18px 16px;">'
+        +'<div style="display:flex;align-items:center;gap:10px;margin-bottom:16px;"><span class="mtile" style="width:38px;height:38px;flex:none;border-radius:11px;display:flex;align-items:center;justify-content:center;"><span class="ms fill" aria-hidden="true" style="font-size:20px;">'+g.icon+'</span></span>'
+        +'<div style="min-width:0;"><div style="font-family:var(--font-display);font-weight:800;font-size:13.5px;color:var(--text-heading);text-transform:uppercase;line-height:1.1;">'+g.quality+'</div><div class="hud" style="font-size:10px;color:var(--cyan-300);margin-top:2px;">'+e+' of 4 powers</div></div></div>'
+        +'<div style="display:grid;grid-template-columns:repeat(4,1fr);gap:8px;">'+tiles+'</div></div>';
+    }).join('');
+    document.getElementById('pg-badge-count').textContent=totalPowersEarned()+' of 16 powers';
     if(window.renderStreaks) window.renderStreaks();
   }
   window.renderProgress=renderProgress; renderProgress();
@@ -1177,6 +1197,7 @@
     if(name==='assignment') renderAssignment();
     if(name==='missions') renderMissions(currentWeek);
     if(name==='ops' && window.renderOps) window.renderOps(curMission());
+    if(name==='submission' && window.renderSubmission) window.renderSubmission();
     if(name==='ops' && window.openOpsGuide){ var seen; try{ seen=localStorage.getItem('evoke-ops-guide-seen')==='1'; }catch(e){ seen=false; } if(!seen) setTimeout(window.openOpsGuide, 350); }
     if((name==='minecraft' || name==='companion') && window.renderMinecraftWeek) window.renderMinecraftWeek();
     if(name==='profile' && window.renderProfile2) window.renderProfile2();
@@ -1337,6 +1358,167 @@
       img.onload = function(){ qrBox.innerHTML=''; qrBox.appendChild(img); };
       img.src = '/api/companion/qr.svg?user_id=' + encodeURIComponent(STATE.userId);
     }
+  })();
+
+  // ===== Mission Submission screen (individual task + team discussion + team product) =====
+  (function(){
+    var MISSIONS = window.EVOKE_SUBMISSION_MISSIONS || [];
+    var subMain = document.getElementById('sub-main');
+    if(!subMain) return;
+    var e2 = function(s){ return String(s==null?'':s).replace(/[&<>"]/g,function(c){return ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'})[c];}); };
+    var missionNo = function(){ try{ return (typeof curMission==='function') ? curMission() : 1; }catch(e){ return 1; } };
+    var missionData = function(no){ return MISSIONS.find(function(m){return m.n===no;}) || MISSIONS[0]; };
+    var backendId = function(no){ return STATE.missionIds && STATE.missionIds[no-1]; };
+
+    function statusChip(text, tone){
+      var c = tone==='done'?['green','check_circle']: tone==='todo'?['orange','pending']:['','schedule'];
+      return '<span class="chip '+c[0]+'" style="margin-left:auto;"><span class="ms" aria-hidden="true" style="font-size:14px;">'+c[1]+'</span>'+text+'</span>';
+    }
+    function reqList(items){
+      return '<div class="ev-reqs" style="margin-bottom:18px;">'+items.map(function(it){
+        return '<div style="display:flex;gap:12px;align-items:flex-start;margin-bottom:10px;"><span class="ms" aria-hidden="true" style="font-size:20px;color:var(--cyan-300);flex:none;">task_alt</span><span style="font-family:var(--font-body);font-size:14px;line-height:1.55;color:var(--teal-050);">'+e2(it)+'</span></div>';
+      }).join('')+'</div>';
+    }
+    function stepPill(num,label,state){
+      var cfg = state==='done'?['rgba(0,212,146,0.4)','rgba(0,212,146,0.07)','var(--green-400)','rgba(0,212,146,0.16)','check','Done']
+              : state==='todo'?['rgba(0,150,136,0.4)','rgba(0,150,136,0.06)','var(--cyan-300)','rgba(0,150,136,0.16)','upload_file','To do']
+              : ['var(--border-ui)','transparent','var(--text-faint)','rgba(145,209,209,0.1)','forum','Optional'];
+      return '<div style="flex:1;min-width:170px;display:flex;align-items:center;gap:12px;padding:14px 16px;border-radius:14px;box-shadow:inset 0 0 0 1px '+cfg[0]+';background:'+cfg[1]+';">'
+        +'<span style="width:34px;height:34px;flex:none;border-radius:50%;display:flex;align-items:center;justify-content:center;background:'+cfg[3]+';color:'+cfg[2]+';"><span class="ms" aria-hidden="true" style="font-size:20px;">'+cfg[4]+'</span></span>'
+        +'<div><div class="hud" style="font-size:9px;color:'+cfg[2]+';">'+cfg[5]+'</div><div style="font-family:var(--font-display);font-weight:700;font-size:14px;color:var(--text-heading);">'+label+'</div></div></div>';
+    }
+    function rosterChip(mem){
+      var st = mem.team_product; // matching | divergent | missing
+      var box = st==='matching'?['rgba(0,212,146,0.4)','rgba(0,212,146,0.07)','check_circle','var(--green-400)']
+              : st==='divergent'?['rgba(217,164,65,0.5)','rgba(217,164,65,0.08)','error','#e0a83f']
+              : ['var(--border-ui)','rgba(15,23,43,0.3)','radio_button_unchecked','var(--text-faint)'];
+      var ring = mem.is_you?'box-shadow:inset 0 0 0 1.5px var(--cyan-500);':'box-shadow:inset 0 0 0 1px '+box[0]+';';
+      var nm = mem.is_you?'<span style="font-family:var(--font-body);font-size:13px;color:var(--cyan-100);font-weight:700;">You</span>':'<span style="font-family:var(--font-body);font-size:13px;color:var(--teal-050);">'+e2(mem.display_name)+'</span>';
+      return '<span style="display:inline-flex;align-items:center;gap:8px;padding:8px 14px 8px 8px;border-radius:999px;'+ring+'background:'+box[1]+';"><span class="mtile" style="width:26px;height:26px;border-radius:50%;font-family:var(--font-display);font-weight:700;font-size:11px;display:flex;align-items:center;justify-content:center;color:var(--cyan-100);">'+e2(mem.initials)+'</span>'+nm+'<span class="ms" aria-hidden="true" style="font-size:16px;color:'+box[3]+';">'+box[2]+'</span></span>';
+    }
+
+    var currentState = null, currentMsgs = [];
+
+    function render(){
+      var no = missionNo();
+      var m = missionData(no);
+      var hasInd = !!m.individual;
+      var st = currentState || {};
+      var you = st.you || {};
+      var members = st.members || [];
+      var banner = (st.banner && st.banner.show) ? ('<div class="glass brackets" style="display:flex;gap:18px;align-items:center;flex-wrap:wrap;padding:18px 22px;margin-bottom:26px;box-shadow:inset 0 0 0 1px rgba(0,150,136,0.35),0 0 34px -12px rgba(0,150,136,0.5);">'
+        +'<span style="width:56px;height:60px;flex:none;"><img src="img/ui/3.png" alt="" style="width:100%;height:100%;object-fit:contain;filter:drop-shadow(0 5px 14px rgba(0,150,136,0.45));"></span>'
+        +'<div style="flex:1;min-width:240px;"><div class="hud" style="font-size:10px;color:var(--cyan-300);margin-bottom:5px;">B1llbot · Team Nudge</div>'
+        +'<div style="font-family:var(--font-body);font-size:15px;line-height:1.5;color:var(--teal-050);">Your team’s rolling, Agent — <strong style="color:var(--cyan-100);">'+st.banner.submitted+' of '+st.banner.total+'</strong> have turned in the Evokation and you’re the last piece. Drop yours in and finish it together. 🚀</div></div></div>') : '';
+
+      var indStatus = you.individual_task ? 'done' : 'todo';
+      var prodStatus = (you.team_product && you.team_product!=='missing') ? 'done' : 'todo';
+
+      var head = banner
+        + '<div style="display:flex;justify-content:center;gap:8px;flex-wrap:wrap;margin-bottom:14px;">'
+        + '<span class="chip"><span class="ms" aria-hidden="true" style="font-size:16px;">groups</span>'+e2(m.phase)+' · Week '+m.week+' · Mission '+m.n+'</span>'
+        + '<span class="chip teal"><span class="ms" aria-hidden="true" style="font-size:15px;">military_tech</span>'+e2(m.superpower)+'</span></div>'
+        + '<h1 style="font-family:var(--font-display);font-weight:700;font-size:clamp(28px,5vw,46px);text-transform:uppercase;color:var(--cyan-500);text-shadow:0 0 24px rgba(0,150,136,0.3);text-align:center;margin:0 0 8px;">'+e2(m.title)+'</h1>'
+        + '<p style="text-align:center;color:var(--teal-100);font-family:var(--font-body);font-size:15px;line-height:1.55;margin:0 auto 26px;max-width:640px;">'+(hasInd?'Complete your steps below. Your individual work feeds the team’s shared Evokation — everyone contributes.':'A team deliverable — talk it through, then everyone turns in your team’s shared product.')+'</p>';
+
+      var stepper = '<div style="display:flex;gap:12px;flex-wrap:wrap;margin-bottom:28px;">'
+        + (hasInd?stepPill(1,'Individual Task',indStatus):'')
+        + stepPill(hasInd?2:1,'Team Discussion', you.discussed?'done':'optional')
+        + stepPill(hasInd?3:2,'Team Product', prodStatus) + '</div>';
+
+      var indHtml = '';
+      if(hasInd){
+        indHtml = '<div class="glass" style="padding:clamp(22px,3.5vw,30px);margin-bottom:22px;">'
+          + '<div style="display:flex;align-items:center;gap:12px;margin-bottom:6px;flex-wrap:wrap;"><span class="ms" aria-hidden="true" style="font-size:24px;color:var(--cyan-300);">person</span><h2 class="hud" style="font-size:12px;margin:0;color:var(--cyan-300);">Step 1 · Your Individual Task</h2>'+statusChip(you.individual_task?'Submitted':'To do', you.individual_task?'done':'todo')+'</div>'
+          + '<p style="font-family:var(--font-body);font-size:14px;color:var(--teal-100);margin:0 0 14px;">Your own contribution — the piece only you are accountable for. Turn in:</p>'
+          + reqList(m.individual.items)
+          + '<div class="ev-drop" id="sub-ind-drop" role="button" tabindex="0" style="margin-bottom:16px;"><span class="ms" aria-hidden="true">cloud_upload</span><div class="ev-drop-title">Drop your individual work</div><div class="ev-drop-sub">or <span class="ev-browse">browse from your device</span></div></div>'
+          + '<input type="file" id="sub-ind-file" class="sr-only" aria-hidden="true">'
+          + '<label class="ev-label">Your reflection</label><textarea id="sub-reflect" class="ev-textarea" placeholder="What did you learn or notice…" style="min-height:90px;">'+e2(you.reflection_text||'')+'</textarea>'
+          + '<div style="text-align:right;margin-top:12px;"><button class="btn sec" id="sub-reflect-save" type="button">Save reflection</button></div></div>';
+      }
+
+      var msgsHtml = (currentMsgs||[]).map(function(mm){
+        return '<div style="display:flex;gap:12px;align-items:flex-start;"><span class="mtile" style="width:36px;height:36px;flex:none;border-radius:50%;font-family:var(--font-display);font-weight:700;font-size:14px;display:flex;align-items:center;justify-content:center;color:var(--cyan-100);">'+e2(mm.initials)+'</span><div style="flex:1;"><div style="font-family:var(--font-display);font-weight:700;font-size:13px;color:var(--cyan-200);margin-bottom:3px;">'+e2(mm.display_name)+(mm.is_you?' <span class="hud" style="font-weight:400;color:var(--text-faint);font-size:10px;">you</span>':'')+'</div><div style="font-family:var(--font-body);font-size:14px;line-height:1.5;color:var(--teal-050);padding:10px 14px;border-radius:0 12px 12px 12px;box-shadow:inset 0 0 0 1px var(--border-ui);">'+e2(mm.message)+'</div></div></div>';
+      }).join('') || '<p class="hud" style="font-size:12px;color:var(--text-faint);margin:0 0 14px;">No messages yet — start the conversation below.</p>';
+      var discHtml = '<div class="glass" style="padding:clamp(22px,3.5vw,30px);margin-bottom:22px;">'
+        + '<div style="display:flex;align-items:center;gap:12px;margin-bottom:6px;flex-wrap:wrap;"><span class="ms" aria-hidden="true" style="font-size:24px;color:var(--cyan-300);">forum</span><h2 class="hud" style="font-size:12px;margin:0;color:var(--cyan-300);">Step '+(hasInd?2:1)+' · Team Discussion</h2><span class="hud" style="margin-left:auto;font-size:11px;color:var(--text-faint);">'+(currentMsgs.length)+' message'+(currentMsgs.length===1?'':'s')+'</span></div>'
+        + '<p style="font-family:var(--font-body);font-size:14px;color:var(--teal-100);margin:0 0 16px;"><strong style="color:var(--cyan-100);">Prompt:</strong> '+e2(m.discussionPrompt)+'</p>'
+        + '<div style="display:flex;flex-direction:column;gap:12px;margin-bottom:16px;">'+msgsHtml+'</div>'
+        + '<form id="sub-disc-form" style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;"><input id="sub-disc-input" type="text" placeholder="Add to the discussion…" style="flex:1 1 160px;min-width:0;padding:12px 14px;border-radius:12px;border:none;background:rgba(0,150,136,0.06);box-shadow:inset 0 0 0 1px var(--border-ui);color:var(--text-heading);font-family:var(--font-body);font-size:14px;"><button class="btn sec" type="submit" style="flex:none;width:auto;min-width:96px;">Post</button></form></div>';
+
+      var chips = members.map(rosterChip).join('');
+      var diverge = members.filter(function(x){return x.team_product==='divergent';});
+      var divNote = diverge.length ? '<div style="display:flex;align-items:center;gap:8px;margin-top:14px;font-family:var(--font-mono);font-size:11px;color:var(--text-faint);"><span class="ms" aria-hidden="true" style="font-size:15px;color:#e0a83f;">info</span>'+e2(diverge.map(function(x){return x.display_name;}).join(', '))+' turned in a different file than the rest of the team — your facilitator will take a look. It won’t block anyone.</div>' : '';
+      var teamHtml = '<div class="glass brackets" style="padding:clamp(22px,3.5vw,30px);margin-bottom:22px;box-shadow:inset 0 0 0 1px rgba(0,150,136,0.32),var(--elev-glass);">'
+        + '<div style="display:flex;align-items:center;gap:12px;margin-bottom:6px;flex-wrap:wrap;"><span class="ms" aria-hidden="true" style="font-size:24px;color:var(--cyan-300);">groups</span><h2 class="hud" style="font-size:12px;margin:0;color:var(--cyan-300);">Step '+(hasInd?3:2)+' · Team Product</h2>'+statusChip(prodStatus==='done'?'Submitted':'Your turn', prodStatus)+'</div>'
+        + '<p style="font-family:var(--font-body);font-size:14px;color:var(--teal-100);margin:0 0 14px;">Your team’s shared deliverable. Everyone turns in the <strong style="color:var(--cyan-100);">same file</strong> — that’s how we know the whole team signed off. Include:</p>'
+        + reqList(m.teamProduct.items)
+        + '<div class="ev-drop" id="sub-team-drop" role="button" tabindex="0" style="margin-bottom:18px;"><span class="ms" aria-hidden="true">cloud_upload</span><div class="ev-drop-title">Drag &amp; drop your team’s Evokation</div><div class="ev-drop-sub">or <span class="ev-browse">browse from your device</span></div><div class="ev-drop-hint">Should match your teammates’ file</div></div>'
+        + '<input type="file" id="sub-team-file" class="sr-only" aria-hidden="true">'
+        + '<div class="hud" style="font-size:10px;color:var(--cyan-300);margin-bottom:10px;">Team Roster · who’s turned it in</div>'
+        + '<div style="display:flex;flex-wrap:wrap;gap:10px;">'+chips+'</div>'+divNote+'</div>';
+
+      var footer = '<div style="display:flex;align-items:center;justify-content:space-between;gap:14px;flex-wrap:wrap;"><button class="btn sec back-step" type="button">◀ Back</button><button class="btn" id="sub-complete" type="button">Back to Operations Hub ▶<span class="key" aria-hidden="true"></span></button></div>';
+
+      subMain.innerHTML = head + stepper + indHtml + discHtml + teamHtml + footer;
+      wire(no);
+    }
+
+    function wire(no){
+      var mid = backendId(no);
+      // uploads
+      function hookUpload(dropId, fileId, kind){
+        var drop = document.getElementById(dropId), file = document.getElementById(fileId);
+        if(!drop || !file) return;
+        drop.addEventListener('click', function(){ file.click(); });
+        drop.addEventListener('keydown', function(e){ if(e.key==='Enter'||e.key===' '){ e.preventDefault(); file.click(); } });
+        file.addEventListener('change', function(){
+          if(!file.files || !file.files[0] || !mid || !STATE.userId) return;
+          var fd = new FormData();
+          fd.append('user_id', STATE.userId); fd.append('mission_id', mid); fd.append('kind', kind); fd.append('file', file.files[0]);
+          drop.querySelector('.ev-drop-title').textContent = 'Uploading…';
+          fetch('/api/submit-evidence', {method:'POST', body:fd}).then(function(r){return r.json();})
+            .then(function(){ refresh(no); }).catch(function(){ drop.querySelector('.ev-drop-title').textContent = 'Upload failed — try again'; });
+        });
+      }
+      hookUpload('sub-ind-drop','sub-ind-file','individual_task');
+      hookUpload('sub-team-drop','sub-team-file','team_product');
+      // discussion
+      var df = document.getElementById('sub-disc-form');
+      if(df) df.addEventListener('submit', function(e){
+        e.preventDefault();
+        var inp = document.getElementById('sub-disc-input'); var msg = (inp.value||'').trim();
+        if(!msg || !mid) return; inp.value='';
+        fetch('/api/team-discussion', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({user_id:STATE.userId, mission_id:mid, message:msg})})
+          .then(function(){ refresh(no); }).catch(function(){});
+      });
+      // reflection
+      var rs = document.getElementById('sub-reflect-save');
+      if(rs) rs.addEventListener('click', function(){
+        var ta = document.getElementById('sub-reflect'); var val = (ta.value||'').trim();
+        if(!val || !mid) return; rs.disabled = true; rs.textContent = 'Saving…';
+        var fd = new FormData(); fd.append('user_id', STATE.userId); fd.append('mission_id', mid); fd.append('reflection', val);
+        fetch('/api/submit-reflection', {method:'POST', body:fd}).then(function(){ rs.textContent='Saved ✓'; setTimeout(function(){ refresh(no); }, 600); }).catch(function(){ rs.disabled=false; rs.textContent='Save reflection'; });
+      });
+      var comp = document.getElementById('sub-complete');
+      if(comp) comp.addEventListener('click', function(){ go('ops'); });
+    }
+
+    function refresh(no){
+      var mid = backendId(no);
+      if(!mid || !STATE.userId){ currentState=null; currentMsgs=[]; render(); return; }
+      Promise.all([
+        fetch('/api/submission-state/'+STATE.userId+'/'+mid).then(function(r){return r.ok?r.json():null;}).catch(function(){return null;}),
+        fetch('/api/team-discussion/'+STATE.userId+'/'+mid).then(function(r){return r.ok?r.json():null;}).catch(function(){return null;})
+      ]).then(function(res){
+        currentState = res[0] || {};
+        currentMsgs = (res[1] && res[1].messages) || [];
+        render();
+      });
+    }
+
+    window.renderSubmission = function(){ refresh(missionNo()); };
   })();
 
   });
