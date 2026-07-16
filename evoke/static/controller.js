@@ -205,35 +205,72 @@
   }
   window.renderStreaks=renderStreaks; renderStreaks();
 
-  /* ---- badges: the 4 SUPERPOWERS as ring tiles, leveling up in sync with Progress ---- */
+  /* ---- POWER BADGES: the app's 16 Powers grouped under the 4 Superpowers ----
+     A Power is earned by completing a mission tagged with its skill (mirrors the
+     backend's mission-tag -> Power mapping in skills_framework). Themed Material
+     Symbols icons; earned = green glow, locked = dim + lock. */
+  var POWER_META = {
+    "Empathy":["Empathetic Changemaker","favorite"],
+    "Curiosity":["Empathetic Changemaker","travel_explore"],
+    "Leadership":["Empathetic Changemaker","flag"],
+    "Transformation":["Empathetic Changemaker","change_circle"],
+    "Problem Solving":["Systems Thinker","extension"],
+    "Analysis":["Systems Thinker","analytics"],
+    "Aggregation":["Systems Thinker","hub"],
+    "Critical Reflection":["Systems Thinker","psychology"],
+    "Imagination":["Creative Visionary","lightbulb"],
+    "Ideation":["Creative Visionary","tips_and_updates"],
+    "Vision":["Creative Visionary","visibility"],
+    "Courage":["Creative Visionary","bolt"],
+    "Communication":["Deep Collaborator","forum"],
+    "Teamwork":["Deep Collaborator","groups"],
+    "Networking":["Deep Collaborator","share"],
+    "Generosity of Spirit":["Deep Collaborator","volunteer_activism"]
+  };
+  var QUALITY_META = { "Empathetic Changemaker":"volunteer_activism", "Systems Thinker":"account_tree", "Creative Visionary":"auto_awesome", "Deep Collaborator":"diversity_3" };
+  var QUALITY_ORDER = ["Empathetic Changemaker","Systems Thinker","Creative Visionary","Deep Collaborator"];
+  var POWER_ALIAS = { "Research & Analysis":"Aggregation", "Creativity":"Ideation", "Relationship Management":"Networking" };
+  function earnedPowerSet(){
+    var set={}, ms=window.EVOKE_SUBMISSION_MISSIONS||[];
+    ms.forEach(function(m){
+      if(missionState(m.n)!=='complete') return;
+      (m.skills||[]).forEach(function(sk){ var p=POWER_ALIAS[sk]||sk; if(POWER_META[p]) set[p]=true; });
+    });
+    return set;
+  }
+  function powerGroups(){
+    var earned=earnedPowerSet(), g={};
+    QUALITY_ORDER.forEach(function(q){ g[q]={quality:q,icon:QUALITY_META[q],powers:[]}; });
+    Object.keys(POWER_META).forEach(function(p){ var q=POWER_META[p][0]; g[q].powers.push({name:p,icon:POWER_META[p][1],earned:!!earned[p]}); });
+    return QUALITY_ORDER.map(function(q){return g[q];});
+  }
+  function totalPowersEarned(){ return Object.keys(earnedPowerSet()).length; }
+  function powerTile(p, s){
+    s=s||54; var on=p.earned;
+    var box = on
+      ? 'background:radial-gradient(circle at 50% 35%,rgba(0,212,146,0.28),rgba(0,150,137,0.10));box-shadow:inset 0 0 0 1.5px var(--green-400),0 0 18px -4px rgba(0,212,146,0.55);color:var(--green-400);'
+      : 'box-shadow:inset 0 0 0 1px var(--border-ui);color:var(--text-faint);';
+    return '<div style="display:flex;flex-direction:column;align-items:center;gap:7px;text-align:center;opacity:'+(on?'1':'0.72')+';">'
+      +'<span style="width:'+s+'px;height:'+s+'px;border-radius:16px;display:flex;align-items:center;justify-content:center;'+box+'"><span class="ms'+(on?' fill':'')+'" aria-hidden="true" style="font-size:'+Math.round(s*0.46)+'px;">'+(on?p.icon:'lock')+'</span></span>'
+      +'<span style="font-family:var(--font-display);font-weight:600;font-size:11.5px;line-height:1.15;color:'+(on?'var(--teal-050)':'var(--text-faint)')+';">'+p.name+'</span></div>';
+  }
+  window.powerGroups=powerGroups; window.totalPowersEarned=totalPowersEarned;
+
+  /* ---- badges: the 4 Superpower rings on Home, each filled by its 4 Powers ---- */
   var badges = document.getElementById('badges');
   function renderHomeBadges(){
     if(!badges) return;
-    badges.innerHTML='';
-    var spOrder=[], spMap={};
-    CONTENT.weeks.forEach(function(wk,wi){ wk.missions.forEach(function(m,mi){
-      var gi=wi*2+mi+1, done=missionState(gi)==='complete';
-      if(!spMap[m.badge]){ spMap[m.badge]={name:m.badge,icon:m.badgeIcon||m.icon||'military_tech',max:0,level:0}; spOrder.push(m.badge); }
-      spMap[m.badge].max++; if(done) spMap[m.badge].level++;
-    }); });
-    var unlocked=0, C=175.9;
-    spOrder.forEach(function(name){
-      var s=spMap[name], on=s.level>0; if(on) unlocked++;
-      var off=(C*(1 - s.level/s.max)).toFixed(1);
-      var icon = on ? s.icon : 'lock';
-      var chip = on ? '<span class="lv">'+s.level+'</span>' : '';
-      var aria = on ? (name+', level '+s.level+' of '+s.max) : (name+', locked');
-      badges.appendChild(el(
-        '<div class="sp-tile'+(on?'':' locked')+'" role="img" aria-label="'+aria+'">'+
-          '<div class="sp-ring">'+
-            '<svg viewBox="0 0 64 64" aria-hidden="true"><circle class="bg" cx="32" cy="32" r="28"></circle>'+
-            '<circle class="fg" cx="32" cy="32" r="28" stroke-dasharray="'+C.toFixed(1)+'" stroke-dashoffset="'+off+'"></circle></svg>'+
-            '<span class="ic"><span class="ms" aria-hidden="true">'+icon+'</span></span>'+chip+
-          '</div>'+
-          '<div class="lbl">'+name+'</div>'+
-        '</div>'));
-    });
-    var hdr = document.getElementById('badges-week'); if(hdr) hdr.textContent=unlocked+' of '+spOrder.length;
+    var C=175.9;
+    badges.innerHTML = powerGroups().map(function(g){
+      var lvl=g.powers.filter(function(p){return p.earned;}).length, on=lvl>0;
+      var off=(C*(1 - lvl/4)).toFixed(1);
+      return '<div class="sp-tile'+(on?'':' locked')+'" role="img" aria-label="'+g.quality+', '+lvl+' of 4 powers">'
+        +'<div class="sp-ring"><svg viewBox="0 0 64 64" aria-hidden="true"><circle class="bg" cx="32" cy="32" r="28"></circle>'
+        +'<circle class="fg" cx="32" cy="32" r="28" stroke-dasharray="'+C.toFixed(1)+'" stroke-dashoffset="'+off+'"></circle></svg>'
+        +'<span class="ic"><span class="ms" aria-hidden="true">'+(on?g.icon:'lock')+'</span></span>'+(on?'<span class="lv">'+lvl+'</span>':'')
+        +'</div><div class="lbl">'+g.quality+'</div></div>';
+    }).join('');
+    var hdr = document.getElementById('badges-week'); if(hdr) hdr.textContent=totalPowersEarned()+' of 16 powers';
   }
   window.renderHomeBadges=renderHomeBadges; renderHomeBadges();
 
@@ -642,8 +679,22 @@
         var a = (n===1) ? CONTENT.assignment : CONTENT['assignment_m'+n];
         if(!a) continue;
         var nextLabel = n<12 ? ('Mission '+(n+1)+': '+opsTitleOf(n+1)) : 'The campaign is complete — outstanding work, Agent.';
-        var alexLine; try{ var tx=CONTENT['transmission_m'+n]||CONTENT.transmission; alexLine=(tx.emphasis&&tx.emphasis[0])||tx.lead||''; }catch(e){ alexLine=''; }
-        OPS[n] = opsFor(a, n, nextLabel, 'Grew your '+a.badge+' superpower.', alexLine || "Keep going, Agent. You're closer than you think.");
+        var ALEX_QUOTES = {
+          1:"You listened before you judged, Agent. That's where real change starts.",
+          2:"You found your 'why.' Hold onto it — it'll carry the whole team.",
+          3:"The wild ideas scared you and you chased them anyway. That's the work.",
+          4:"You saw a future worth building. Now other people can see it too.",
+          5:"Turning a dream into real numbers is brave. You did the honest math.",
+          6:"You found the resources others missed. Resourceful, Agent — I'm impressed.",
+          7:"You stopped imagining and started building. That takes real nerve.",
+          8:"You made the hard calls about what stays and what waits. That's leadership.",
+          9:"You put unfinished work in front of real people and listened. Courage.",
+          10:"You aligned the team around one shared bet. Not easy — well done.",
+          11:"You made people believe. That's how good ideas find their backers.",
+          12:"You stood up, told the truth, and owned it together. Proud of you, Agent."
+        };
+        var alexLine = ALEX_QUOTES[n] || "Keep going, Agent. You're closer than you think.";
+        OPS[n] = opsFor(a, n, nextLabel, 'Grew your '+a.badge+' superpower.', alexLine);
       }
     })();
     var MC_CONTENT = {
@@ -748,21 +799,17 @@
       // Superpowers tracker — 4 superpowers that level up across the journey
       (function(){
         var sp=document.getElementById('ops-superpowers'); if(!sp) return;
-        var order=[], map={};
-        CONTENT.weeks.forEach(function(wk,wi){ wk.missions.forEach(function(mm,mi){
-          var gi=wi*2+mi+1, dn=missionState(gi)==='complete';
-          if(!map[mm.badge]){ map[mm.badge]={name:mm.badge,icon:mm.badgeIcon||'military_tech',max:0,level:0}; order.push(mm.badge); }
-          map[mm.badge].max++; if(dn) map[mm.badge].level++;
-        }); });
-        sp.innerHTML='';
-        order.forEach(function(nm){
-          var s=map[nm], on=s.level>0, pips='';
-          for(var p=1;p<=s.max;p++){ pips+='<span style="width:13px;height:5px;border-radius:3px;display:inline-block;background:'+(p<=s.level?'var(--cyan-300)':'rgba(145,209,209,0.16)')+';"></span>'; }
-          sp.appendChild(el('<div style="display:flex;align-items:center;gap:12px;padding:10px 13px;border-radius:11px;box-shadow:inset 0 0 0 1px var(--border-ui);opacity:'+(on?'1':'0.5')+';">'
-            +'<span class="ms" aria-hidden="true" style="font-size:22px;flex:none;color:'+(on?'var(--cyan-300)':'var(--text-faint)')+';">'+(on?s.icon:'lock')+'</span>'
-            +'<div style="flex:1;min-width:0;"><div style="font-family:var(--font-display);font-weight:700;font-size:13px;color:var(--teal-050);line-height:1.15;">'+s.name+'</div><div style="display:flex;gap:4px;margin-top:6px;">'+pips+'</div></div>'
-            +'<span class="hud" style="font-size:10px;flex:none;color:'+(on?'var(--cyan-300)':'var(--text-faint)')+';">'+(on?('Lv.'+s.level):'Locked')+'</span></div>'));
-        });
+        sp.innerHTML = powerGroups().map(function(g){
+          var e=g.powers.filter(function(p){return p.earned;}).length, on=e>0;
+          var mini=g.powers.map(function(p){
+            var pon=p.earned;
+            return '<span title="'+p.name+'" style="width:26px;height:26px;flex:none;border-radius:8px;display:flex;align-items:center;justify-content:center;'+(pon?'color:var(--green-400);box-shadow:inset 0 0 0 1px rgba(0,212,146,0.5);background:rgba(0,212,146,0.08);':'color:var(--text-faint);box-shadow:inset 0 0 0 1px var(--border-ui);')+'"><span class="ms'+(pon?' fill':'')+'" aria-hidden="true" style="font-size:15px;">'+(pon?p.icon:'lock')+'</span></span>';
+          }).join('');
+          return '<div style="display:flex;align-items:center;gap:12px;padding:10px 12px;border-radius:11px;box-shadow:inset 0 0 0 1px var(--border-ui);opacity:'+(on?'1':'0.6')+';">'
+            +'<span class="ms" aria-hidden="true" style="font-size:20px;flex:none;color:'+(on?'var(--cyan-300)':'var(--text-faint)')+';">'+g.icon+'</span>'
+            +'<div style="flex:1;min-width:0;"><div style="font-family:var(--font-display);font-weight:700;font-size:12.5px;color:var(--teal-050);line-height:1.15;margin-bottom:6px;">'+g.quality+'</div><div style="display:flex;gap:5px;flex-wrap:wrap;">'+mini+'</div></div>'
+            +'<span class="hud" style="font-size:10px;flex:none;color:'+(on?'var(--cyan-300)':'var(--text-faint)')+';">'+e+'/4</span></div>';
+        }).join('');
       })();
       document.getElementById('ops-alex').textContent='\u201c'+m.alex+'\u201d';
       var cl=document.getElementById('ops-checklist'); cl.innerHTML='';
@@ -861,26 +908,18 @@
       var val = statVals[s.id] != null ? statVals[s.id] : s.value;
       st.appendChild(el('<div class="pg-stat"><div class="pg-stat-ic"><span class="ms fill" aria-hidden="true">'+s.icon+'</span></div><div class="pg-stat-txt"><div class="pg-stat-num"'+(s.id?' id="'+s.id+'"':'')+'>'+val+'</div><div class="pg-stat-lbl">'+s.label+'</div></div></div>'));
     });
-    // journey track removed (badge collection covers it)
-    // SUPERPOWER badges that LEVEL UP — each Superpower is earned across several missions.
-    var spOrder=[], spMap={};
-    CONTENT.weeks.forEach(function(wk,wi){ wk.missions.forEach(function(m,mi){
-      var gi=wi*2+mi+1, done=missionState(gi)==='complete';
-      if(!spMap[m.badge]){ spMap[m.badge]={name:m.badge,icon:m.badgeIcon||'military_tech',max:0,level:0}; spOrder.push(m.badge); }
-      spMap[m.badge].max++; if(done) spMap[m.badge].level++;
-    }); });
-    var ba=document.getElementById('pg-badges-all'); ba.innerHTML='';
-    var unlocked=0;
-    spOrder.forEach(function(name){
-      var s=spMap[name], on=s.level>0; if(on) unlocked++;
-      var pips=''; for(var i=1;i<=s.max;i++){ pips+='<span class="pip'+(i<=s.level?' on':'')+'"></span>'; }
-      ba.appendChild(el('<div class="pg-badge'+(on?'':' locked')+'">'
-        +'<span class="pg-badge-ic"><span class="ms" aria-hidden="true">'+(on?s.icon:'lock')+'</span>'+(on?'<span class="pg-badge-chip">'+s.level+'</span>':'')+'</span>'
-        +'<div class="pg-badge-txt"><span class="pg-badge-name">'+s.name+'</span>'
-        +'<span class="pg-badge-lvl">'+(on?('Level '+s.level+' of '+s.max):('Locked \u00b7 '+s.max+' missions'))+'</span>'
-        +'<span class="pg-pips" aria-hidden="true">'+pips+'</span></div></div>'));
-    });
-    document.getElementById('pg-badge-count').textContent=unlocked+' of '+spOrder.length+' superpowers';
+    // The 16 Powers grouped under their 4 Superpowers (the app's badge collection).
+    var ba=document.getElementById('pg-badges-all');
+    ba.style.display='grid'; ba.style.gridTemplateColumns='repeat(auto-fit,minmax(min(100%,290px),1fr))'; ba.style.gap='16px';
+    ba.innerHTML = powerGroups().map(function(g){
+      var e=g.powers.filter(function(p){return p.earned;}).length;
+      var tiles=g.powers.map(function(p){ return powerTile(p,54); }).join('');
+      return '<div class="glass" style="padding:20px 22px;">'
+        +'<div style="display:flex;align-items:center;gap:12px;margin-bottom:16px;"><span class="mtile" style="width:42px;height:42px;flex:none;border-radius:12px;display:flex;align-items:center;justify-content:center;"><span class="ms fill" aria-hidden="true" style="font-size:22px;">'+g.icon+'</span></span>'
+        +'<div><div style="font-family:var(--font-display);font-weight:800;font-size:15px;color:var(--text-heading);text-transform:uppercase;">'+g.quality+'</div><div class="hud" style="font-size:10px;color:var(--cyan-300);">'+e+' of 4 powers</div></div></div>'
+        +'<div style="display:grid;grid-template-columns:repeat(4,1fr);gap:12px;">'+tiles+'</div></div>';
+    }).join('');
+    document.getElementById('pg-badge-count').textContent=totalPowersEarned()+' of 16 powers';
     if(window.renderStreaks) window.renderStreaks();
   }
   window.renderProgress=renderProgress; renderProgress();
