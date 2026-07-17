@@ -15,16 +15,24 @@ MINIO_ROOT_PASSWORD = os.getenv("MINIO_ROOT_PASSWORD", "devsecret123")
 
 AI_ENABLED = os.getenv("AI_ENABLED", "false").lower() == "true"
 
-AI_MODEL = os.getenv("OLLAMA_MODEL", "qwen2.5vl:7b")
-OLLAMA_BASE_URL = os.getenv("OLLAMA_BASE_URL", "http://host.docker.internal:11434/v1")
-OLLAMA_API_KEY = os.getenv("OLLAMA_API_KEY", "local-dev-key")
+# Routed through the same OpenWebUI "billbot" custom model as everywhere
+# else in the app (main.py's trigger_ai_review/billbot_chat/post_reflection)
+# and the Minecraft mod -- this used to hit raw Ollama directly with a
+# generic "empathetic learning coach" persona and a vision model
+# (qwen2.5vl:7b) picked for no reason tied to this text-only task. Same
+# backend everywhere means one place to fix reasoning-mode timeouts, one
+# RAG knowledge base, one voice. OpenWebUI exposes an OpenAI-compatible API
+# at /api, so the same OpenAI SDK client just needs pointing at it.
+AI_MODEL = "billbot"
+OPENWEBUI_URL = os.getenv("OPENWEBUI_URL", "http://open-webui:8080")
+OPENWEBUI_API_KEY = os.getenv("OPENWEBUI_API_KEY", "")
 
 ai_client = None
 
 if AI_ENABLED:
     ai_client = OpenAI(
-        base_url=OLLAMA_BASE_URL,
-        api_key=OLLAMA_API_KEY,
+        base_url=f"{OPENWEBUI_URL}/api",
+        api_key=OPENWEBUI_API_KEY,
     )
 
 # --- Infrastructure Clients ---
@@ -37,11 +45,6 @@ s3_client = boto3.client(
 )
 
 os_client = OpenSearch(hosts=[OPENSEARCH_NODE], use_ssl=False, verify_certs=False)
-
-ai_client = OpenAI(
-    base_url=OLLAMA_BASE_URL,
-    api_key=OLLAMA_API_KEY
-)
 
 def get_producer():
     return KafkaProducer(

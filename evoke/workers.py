@@ -55,15 +55,14 @@ def generate_ai_insight(preview_text: str) -> str:
         )
 
     try:
+        # No system message here on purpose -- same as main.py's other
+        # "billbot" calls (billbot_chat, post_reflection): the model itself
+        # already carries B1llBot's real configured voice/RAG in OpenWebUI.
+        # A generic "empathetic learning coach" system message here would
+        # fight that instead of using it.
         response = ai_client.chat.completions.create(
             model=AI_MODEL,
             messages=[
-                {
-                    "role": "system",
-                    "content": (
-                        "You are an empathetic learning coach..."
-                    ),
-                },
                 {
                     "role": "user",
                     "content": f"Student submission:\n{preview_text}",
