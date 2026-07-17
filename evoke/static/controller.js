@@ -362,31 +362,58 @@
   /* ---- vault ---- */
   var vault = document.getElementById('vault');
   var vEsc = function(s){ return String(s==null?'':s).replace(/[&<>"]/g,function(c){return ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'})[c];}); };
-  // The exact files this learner turned in for a mission, with download links.
+  // Everything the learner produced for a mission: reflection, files, discussion.
+  function vaultSubhead(txt){ return el('<div class="hud" style="font-size:10px;color:var(--cyan-300);letter-spacing:.14em;margin:0 0 10px;">'+vEsc(txt)+'</div>'); }
   function loadVaultSubs(host, missionNo){
     var mid = STATE.missionIds && STATE.missionIds[missionNo-1];
     if(!mid || !STATE.userId) return;
-    fetch('/api/my-submissions/'+encodeURIComponent(STATE.userId)+'?mission_id='+encodeURIComponent(mid))
+    fetch('/api/my-archive/'+encodeURIComponent(STATE.userId)+'/'+encodeURIComponent(mid))
       .then(function(r){ return r.ok?r.json():null; })
       .then(function(d){
-        var subs = (d && d.submissions) || [];
-        if(!subs.length) return;
+        if(!d) return;
+        var files = d.files || [], disc = d.discussion || [], refl = d.reflection;
+        if(!files.length && !disc.length && !refl) return;
         var wrap = el('<div style="padding:0 24px 22px;"></div>');
         wrap.appendChild(el('<div style="height:1px;background:var(--border-ui);margin:0 0 16px;"></div>'));
-        wrap.appendChild(el('<div class="hud" style="font-size:10px;color:var(--cyan-300);letter-spacing:.14em;margin-bottom:10px;">Your submitted work</div>'));
-        subs.forEach(function(s){
-          var label = s.kind==='individual_task' ? 'Individual task' : 'Team product';
-          var icon = s.kind==='individual_task' ? 'person' : 'groups';
-          var href = '/api/submission-file/'+encodeURIComponent(s.submission_id)+'?user_id='+encodeURIComponent(STATE.userId);
-          var row = el('<a href="'+vEsc(href)+'" download style="display:flex;align-items:center;gap:11px;padding:10px 12px;margin-bottom:8px;border-radius:11px;text-decoration:none;color:inherit;background:rgba(0,150,136,0.06);box-shadow:inset 0 0 0 1px var(--border-ui);"></a>');
-          row.addEventListener('click', function(e){ e.stopPropagation(); });
-          row.innerHTML =
-            '<span class="ms" aria-hidden="true" style="font-size:20px;flex:none;color:var(--cyan-300);">'+icon+'</span>'+
-            '<span style="flex:1;min-width:0;"><span style="display:block;font-family:var(--font-display);font-weight:600;font-size:13.5px;color:var(--teal-050);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">'+vEsc(s.filename)+'</span>'+
-            '<span class="hud" style="font-size:9.5px;color:var(--text-faint);">'+label+'</span></span>'+
-            '<span class="ms" aria-hidden="true" style="font-size:19px;flex:none;color:var(--cyan-300);">download</span>';
-          wrap.appendChild(row);
-        });
+
+        // Reflection
+        if(refl && refl.text){
+          wrap.appendChild(vaultSubhead('Your reflection'));
+          var rb = el('<div style="padding:12px 14px;margin-bottom:16px;border-radius:11px;background:rgba(0,150,136,0.06);box-shadow:inset 0 0 0 1px var(--border-ui);"></div>');
+          rb.appendChild(el('<div style="font-family:var(--font-body);font-size:13.5px;line-height:1.55;color:var(--teal-050);white-space:pre-wrap;">'+vEsc(refl.text)+'</div>'));
+          wrap.appendChild(rb);
+        }
+
+        // Files
+        if(files.length){
+          wrap.appendChild(vaultSubhead('Your submitted files'));
+          files.forEach(function(s){
+            var label = s.kind==='individual_task' ? 'Individual task' : 'Team product';
+            var icon = s.kind==='individual_task' ? 'person' : 'groups';
+            var href = '/api/submission-file/'+encodeURIComponent(s.submission_id)+'?user_id='+encodeURIComponent(STATE.userId);
+            var row = el('<a href="'+vEsc(href)+'" download style="display:flex;align-items:center;gap:11px;padding:10px 12px;margin-bottom:8px;border-radius:11px;text-decoration:none;color:inherit;background:rgba(0,150,136,0.06);box-shadow:inset 0 0 0 1px var(--border-ui);"></a>');
+            row.addEventListener('click', function(e){ e.stopPropagation(); });
+            row.innerHTML =
+              '<span class="ms" aria-hidden="true" style="font-size:20px;flex:none;color:var(--cyan-300);">'+icon+'</span>'+
+              '<span style="flex:1;min-width:0;"><span style="display:block;font-family:var(--font-display);font-weight:600;font-size:13.5px;color:var(--teal-050);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">'+vEsc(s.filename)+'</span>'+
+              '<span class="hud" style="font-size:9.5px;color:var(--text-faint);">'+label+'</span></span>'+
+              '<span class="ms" aria-hidden="true" style="font-size:19px;flex:none;color:var(--cyan-300);">download</span>';
+            wrap.appendChild(row);
+          });
+        }
+
+        // Discussion posts
+        if(disc.length){
+          wrap.appendChild(vaultSubhead('Your discussion posts'));
+          disc.forEach(function(m){
+            var b = el('<div style="display:flex;gap:10px;padding:10px 12px;margin-bottom:8px;border-radius:11px;background:rgba(0,150,136,0.06);box-shadow:inset 0 0 0 1px var(--border-ui);"></div>');
+            b.innerHTML =
+              '<span class="ms" aria-hidden="true" style="font-size:18px;flex:none;color:var(--cyan-300);">forum</span>'+
+              '<span style="flex:1;min-width:0;font-family:var(--font-body);font-size:13px;line-height:1.5;color:var(--teal-050);white-space:pre-wrap;">'+vEsc(m.message)+'</span>';
+            wrap.appendChild(b);
+          });
+        }
+
         host.appendChild(wrap);
       }).catch(function(){});
   }

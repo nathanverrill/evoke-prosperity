@@ -2353,6 +2353,47 @@ async def submission_file(submission_id: str, user_id: str):
     )
 
 
+@app.get("/api/my-archive/{user_id}/{mission_id}")
+async def my_archive(user_id: str, mission_id: str):
+    """Everything THIS learner produced for one mission, for the Vault archive:
+    their uploaded files, their personal reflection, and their own discussion
+    posts. The Vault promises a permanent record of what a learner completed --
+    not just the team artifact, but their individual contribution too."""
+    files = [
+        {
+            "submission_id": str(r[0]),
+            "kind": r[1],
+            "filename": _filename_from_key(r[2], user_id),
+            "submitted_at": r[3].isoformat() if r[3] else None,
+        }
+        for r in db_fetch_all(
+            """SELECT id, kind, file_path, submitted_at FROM submissions
+               WHERE user_id = %s::uuid AND mission_id = %s::uuid
+               ORDER BY submitted_at DESC""",
+            (user_id, mission_id),
+        )
+    ]
+    rrow = db_fetch_one(
+        """SELECT reflection, submitted_at FROM mission_reflections
+           WHERE user_id = %s::uuid AND mission_id = %s::uuid""",
+        (user_id, mission_id),
+    )
+    reflection = (
+        {"text": rrow[0], "submitted_at": rrow[1].isoformat() if rrow[1] else None}
+        if rrow else None
+    )
+    discussion = [
+        {"message": r[0], "created_at": r[1].isoformat() if r[1] else None}
+        for r in db_fetch_all(
+            """SELECT message, created_at FROM team_discussion
+               WHERE user_id = %s::uuid AND mission_id = %s::uuid
+               ORDER BY created_at ASC""",
+            (user_id, mission_id),
+        )
+    ]
+    return {"files": files, "reflection": reflection, "discussion": discussion}
+
+
 # ========== Timeline ==========
 @app.get("/api/timeline/{user_id}/{mission_id}")
 async def get_timeline(user_id: str, mission_id: str):
