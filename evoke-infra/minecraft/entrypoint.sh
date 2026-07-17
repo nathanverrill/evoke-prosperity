@@ -35,6 +35,10 @@ fi
 
 # Datapacks are project content (this repo), not world state — sync fresh on
 # every boot so a datapack fix ships without touching the world itself.
+# rm -rf + cp (not a plain additive cp -r) so a datapack removed from the
+# repo (e.g. replaced by a rewrite) actually disappears from the world
+# too, instead of the stale copy silently staying active forever.
+rm -rf "$LEVEL_NAME/datapacks"
 mkdir -p "$LEVEL_NAME/datapacks"
 cp -r /server/world-datapacks/. "$LEVEL_NAME/datapacks/"
 
@@ -42,6 +46,10 @@ cp -r /server/world-datapacks/. "$LEVEL_NAME/datapacks/"
 # content, not world state -- Fabric reads config/ relative to this working
 # directory ($WORLD_DATA), not /server/config where the image bakes it in,
 # so it has to be synced here the same way datapacks are, every boot.
+# Geyser's config.yml (generated further below, persists across boots) and
+# Floodgate's key.pem live under config/ too -- only remove what the image
+# actually ships (billbot/), not the whole directory.
+rm -rf config/billbot
 mkdir -p config
 cp -r /server/config/. config/
 
