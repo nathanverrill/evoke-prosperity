@@ -292,7 +292,6 @@
   }
   function renderFinancialBadges(){
     var host=document.getElementById('pg-financial'); if(!host) return;
-    host.style.display='grid'; host.style.gridTemplateColumns='repeat(auto-fit,minmax(min(100%,300px),1fr))'; host.style.gap='14px';
     var earnedN=0;
     host.innerHTML = FIN_BADGES.map(function(b){
       var total=b.missions.length, done=b.missions.filter(function(n){return missionState(n)==='complete';}).length;
@@ -311,7 +310,6 @@
   }
   function renderAchievements(){
     var host=document.getElementById('pg-achievements'); if(!host) return;
-    host.style.display='grid'; host.style.gridTemplateColumns='repeat(auto-fit,minmax(min(100%,120px),1fr))'; host.style.gap='14px';
     var earnedN=0;
     host.innerHTML = ACHV.map(function(a){
       var on=false; try{ on=!!a.earned(); }catch(e){}
