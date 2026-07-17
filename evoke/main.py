@@ -18,7 +18,7 @@ import httpx
 import asyncpg
 import logging
 
-from evoke.clients import s3_client, os_client, get_producer
+from evoke.clients import s3_client, os_client, get_producer, topic_for_event
 from evoke.workers import evoke_workers_loop
 from evoke.lms import get_brightspace_lms
 from evoke.lti import BrightspaceLTIProvider
@@ -435,7 +435,7 @@ async def publish_event(event_type: str, data: dict):
         "timestamp": datetime.datetime.now().isoformat(),
         "data": data
     }
-    producer.send('evoke-events', value=event)
+    producer.send(topic_for_event(event_type), value=event)
     producer.flush()
     return event
 

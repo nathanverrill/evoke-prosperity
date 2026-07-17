@@ -7,7 +7,7 @@ from pypdf import PdfReader
 from kafka import KafkaConsumer
 import psycopg2
 from psycopg2.pool import SimpleConnectionPool
-from evoke.clients import s3_client, os_client, ai_client, get_producer, REDPANDA_BROKER, AI_ENABLED, AI_MODEL
+from evoke.clients import s3_client, os_client, ai_client, get_producer, REDPANDA_BROKER, AI_ENABLED, AI_MODEL, topic_for_event
 from evoke import skills_framework, progression, world_state
 from evoke.live import live_hub
 
@@ -137,7 +137,7 @@ def _process_event(event: dict, producer):
                     }
                 }
             }
-            producer.send('evoke-events', value=feedback_event)
+            producer.send(topic_for_event(feedback_event["event_type"]), value=feedback_event)
 
         producer.flush()
         print(f"[AI WORKER] Dispatched AI Insights for {len(learners_to_update)} learners.")
@@ -270,7 +270,7 @@ def _process_event(event: dict, producer):
                 title = progression.level_title(profile["level"])
                 name_row = _db_fetch_one("SELECT display_name FROM users WHERE id = %s", (user_id,))
                 display_name = name_row[0] if name_row else "An agent"
-                producer.send('evoke-events', value={
+                producer.send(topic_for_event("LevelUpped"), value={
                     "event_type": "LevelUpped",
                     "version": "1.0.0",
                     "timestamp": now_str,
@@ -419,7 +419,7 @@ def _process_event(event: dict, producer):
                 world.setdefault("history", []).append(
                     {"stage": new_stage, "title": meta["title"], "at": now_str}
                 )
-                producer.send('evoke-events', value={
+                producer.send(topic_for_event("WorldStateAdvanced"), value={
                     "event_type": "WorldStateAdvanced",
                     "version": "1.0.0",
                     "timestamp": now_str,
@@ -478,7 +478,7 @@ def _process_event(event: dict, producer):
                 mission_row = _db_fetch_one("SELECT title FROM missions WHERE id = %s::uuid", (mission_id,))
                 team_name = team_name_row[0] if team_name_row else "A team"
                 mission_title = mission_row[0] if mission_row else "a mission"
-                producer.send('evoke-events', value={
+                producer.send(topic_for_event("TeamWheelCompleted"), value={
                     "event_type": "TeamWheelCompleted",
                     "version": "1.0.0",
                     "timestamp": now_str,
@@ -596,7 +596,7 @@ async def evoke_workers_loop():
 
     try:
         consumer = KafkaConsumer(
-            'evoke-events',
+            'evoke-events', 'minecraft-events',
             bootstrap_servers=[REDPANDA_BROKER],
             auto_offset_reset='latest',
             value_deserializer=lambda x: json.loads(x.decode('utf-8'))

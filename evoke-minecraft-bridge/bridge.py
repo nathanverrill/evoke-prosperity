@@ -85,6 +85,19 @@ def get_producer():
         )
     return _producer
 
+# Mirrors evoke/clients.py's MINECRAFT_EVENT_TYPES exactly -- this process
+# can't import the evoke package (separate service, separate deployment),
+# so the two copies have to be kept in sync by hand if this list changes.
+MINECRAFT_EVENT_TYPES = {
+    "MinecraftPresence",
+    "MinecraftLinkRequested",
+    "MinecraftLinked",
+    "ArenaWaveReached",
+    "GauntletWaveReached",
+    "RewardCollected",
+}
+
+
 def publish_event(event_type: str, data: dict):
     # Matches main.py's publish_event() envelope exactly -- workers.py
     # doesn't care which service published an event, only that the shape
@@ -95,7 +108,8 @@ def publish_event(event_type: str, data: dict):
         "timestamp": datetime.now().isoformat(),
         "data": data,
     }
-    get_producer().send("evoke-events", value=event)
+    topic = "minecraft-events" if event_type in MINECRAFT_EVENT_TYPES else "evoke-events"
+    get_producer().send(topic, value=event)
     get_producer().flush()
 
 # RCON client — implements the actual Source RCON wire protocol
@@ -383,7 +397,7 @@ async def offline_delivery_loop():
 async def event_consumer_loop():
     """Consume events from Redpanda"""
     consumer = KafkaConsumer(
-        'evoke-events',
+        'evoke-events', 'minecraft-events',
         bootstrap_servers=[REDPANDA_BROKER],
         value_deserializer=lambda m: json.loads(m.decode('utf-8')),
         group_id='minecraft-reward-bridge',

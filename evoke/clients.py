@@ -51,3 +51,26 @@ def get_producer():
         bootstrap_servers=[REDPANDA_BROKER],
         value_serializer=lambda v: json.dumps(v).encode('utf-8')
     )
+
+# Two topics, split by signal-to-noise, not by "where did this originate."
+# minecraft-events is high-frequency telemetry (presence pings every 15-60s,
+# in-game minigame progress, reward-delivery confirmations, the link flow) --
+# minecraft-*originated* things a learner cares about, like a finished
+# in-game Quest, still route to evoke-events alongside MissionCompleted and
+# everything else, since they feed the same XP/badge/profile pipeline and
+# are genuinely rare milestones, not noise. Kept as a set here (not in
+# main.py) so evoke-minecraft-bridge/bridge.py -- a separate process that
+# can't import the evoke package -- can mirror it exactly; the two copies
+# must be kept in sync by hand if this list changes.
+MINECRAFT_EVENT_TYPES = {
+    "MinecraftPresence",
+    "MinecraftLinkRequested",
+    "MinecraftLinked",
+    "ArenaWaveReached",
+    "GauntletWaveReached",
+    "RewardCollected",
+}
+
+
+def topic_for_event(event_type: str) -> str:
+    return "minecraft-events" if event_type in MINECRAFT_EVENT_TYPES else "evoke-events"
