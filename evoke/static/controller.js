@@ -932,9 +932,8 @@
     function renderProfile2(){
       var X=evokeXP();
       document.getElementById('pf-name').textContent=pfGet('evoke-agent-name', p.codename);
-      var avPhoto=pfGet('evoke-avatar-photo',''), avIc=document.getElementById('pf-avatar-ic'), avImg=document.getElementById('pf-avatar-img');
-      if(avPhoto){ avImg.src=avPhoto; avImg.style.display='block'; avIc.style.display='none'; }
-      else{ avImg.style.display='none'; avImg.removeAttribute('src'); avIc.style.display=''; avIc.textContent=pfGet('evoke-avatar','person'); }
+      var avIc=document.getElementById('pf-avatar-ic');
+      avIc.style.display=''; avIc.textContent=pfGet('evoke-avatar','person');
       document.getElementById('pf-rank').textContent=PF_RANKS[Math.min(X.missions,PF_RANKS.length-1)]+' · Keel Network';
       var pct=Math.round(X.xp/X.max*100);
       var ring=document.getElementById('pf-ring'); if(ring) ring.style.setProperty('--pct',pct);
@@ -952,48 +951,18 @@
       if(v&&v.trim()){ pfSet('evoke-agent-name',v.trim().slice(0,24)); renderProfile2(); }
     });
     var pfPicker=document.getElementById('pf-avatar-picker');
-    var pfFile=document.getElementById('pf-avatar-file');
+    // Clear any previously uploaded photo — avatars are icon-only now.
+    try{ localStorage.removeItem('evoke-avatar-photo'); }catch(_){ }
     function buildPicker(){
       pfPicker.innerHTML='';
-      var hasPhoto=!!pfGet('evoke-avatar-photo','');
-      // Upload-a-photo action
-      var up=el('<button type="button" role="menuitem" class="pf-pick-photo" aria-label="Upload a photo"><span class="ms" aria-hidden="true">add_a_photo</span></button>');
-      up.addEventListener('click',function(e){ e.stopPropagation(); pfFile.click(); });
-      pfPicker.appendChild(up);
-      // Remove-photo action (only when a photo is set) — returns to icon avatars
-      if(hasPhoto){
-        var rm=el('<button type="button" role="menuitem" class="pf-pick-rm" aria-label="Remove photo, use an icon"><span class="ms" aria-hidden="true">do_not_disturb_on</span></button>');
-        rm.addEventListener('click',function(e){ e.stopPropagation(); try{ localStorage.removeItem('evoke-avatar-photo'); }catch(_){ } pfPicker.hidden=true; renderProfile2(); });
-        pfPicker.appendChild(rm);
-      }
       // Built-in icon avatars
       PF_AVATARS.forEach(function(ic){
-        var sel=(!hasPhoto && pfGet('evoke-avatar','person')===ic)?' class="sel"':'';
+        var sel=(pfGet('evoke-avatar','person')===ic)?' class="sel"':'';
         var b=el('<button type="button" role="menuitem"'+sel+' aria-label="Avatar '+ic+'"><span class="ms" aria-hidden="true">'+ic+'</span></button>');
-        b.addEventListener('click',function(e){ e.stopPropagation(); try{ localStorage.removeItem('evoke-avatar-photo'); }catch(_){ } pfSet('evoke-avatar',ic); pfPicker.hidden=true; renderProfile2(); });
+        b.addEventListener('click',function(e){ e.stopPropagation(); pfSet('evoke-avatar',ic); pfPicker.hidden=true; renderProfile2(); });
         pfPicker.appendChild(b);
       });
     }
-    // Read a chosen photo, downscale to a 256px square (so it fits localStorage), store + show it.
-    pfFile.addEventListener('change',function(){
-      var f=pfFile.files&&pfFile.files[0]; if(!f) return;
-      var rd=new FileReader();
-      rd.onload=function(){
-        var img=new Image();
-        img.onload=function(){
-          var S=256, c=document.createElement('canvas'); c.width=S; c.height=S;
-          var ctx=c.getContext('2d');
-          var sc=Math.max(S/img.width,S/img.height), dw=img.width*sc, dh=img.height*sc;
-          ctx.drawImage(img,(S-dw)/2,(S-dh)/2,dw,dh);
-          var data; try{ data=c.toDataURL('image/jpeg',0.82); }catch(_){ data=rd.result; }
-          pfSet('evoke-avatar-photo',data); pfPicker.hidden=true; renderProfile2();
-        };
-        img.onerror=function(){ pfSet('evoke-avatar-photo',rd.result); pfPicker.hidden=true; renderProfile2(); };
-        img.src=rd.result;
-      };
-      rd.readAsDataURL(f);
-      pfFile.value='';
-    });
     document.getElementById('pf-avatar-btn').addEventListener('click',function(e){ e.stopPropagation(); pfPicker.hidden=!pfPicker.hidden;
       if(!pfPicker.hidden) buildPicker();
     });
