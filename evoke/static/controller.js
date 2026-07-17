@@ -1483,7 +1483,7 @@
         + '<div class="hud" style="font-size:10px;color:var(--cyan-300);margin-bottom:10px;">Team Roster · who’s turned it in</div>'
         + '<div style="display:flex;flex-wrap:wrap;gap:10px;">'+chips+'</div>'+divNote+'</div>';
 
-      var footer = '<div style="display:flex;align-items:center;justify-content:space-between;gap:14px;flex-wrap:wrap;"><button class="btn sec back-step" type="button">◀ Back</button><button class="btn" id="sub-complete" type="button">Back to Operations Hub ▶<span class="key" aria-hidden="true"></span></button></div>';
+      var footer = '<div style="display:flex;align-items:center;justify-content:flex-end;gap:14px;flex-wrap:wrap;"><button class="btn" id="sub-complete" type="button">Back to Operations Hub ▶<span class="key" aria-hidden="true"></span></button></div>';
 
       subMain.innerHTML = head + stepper + indHtml + discHtml + teamHtml + footer;
       wire(no);
