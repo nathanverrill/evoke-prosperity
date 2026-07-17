@@ -372,7 +372,7 @@
     font-size:24px;background:linear-gradient(135deg,rgba(0,150,136,0.26),rgba(0,150,137,0.18));color:var(--cyan-100);box-shadow:var(--glow-md);}
   .tl-ic.complete{background:linear-gradient(135deg,rgba(255,167,89,0.3),rgba(255,122,69,0.18));color:var(--orange-300,#ffb877);}
   .tl-ic.locked{background:rgba(15,23,43,0.6);color:var(--text-locked);box-shadow:inset 0 0 0 1px rgba(145,209,209,0.12);}
-  /* sidebar B1llbot companion */
+  /* sidebar B1llBot companion */
   .billbot-card{display:flex;align-items:center;gap:14px;}
   .billbot-card img{width:62px;height:68px;object-fit:contain;flex:none;filter:drop-shadow(0 5px 14px rgba(0,150,136,0.4));}
   /* ===== Evidence Cache submission mockup ===== */
@@ -495,6 +495,12 @@
      !important overrides the inline repeat(4) the renderer sets. */
   @media (max-width:1040px){ #pg-badges-all{grid-template-columns:repeat(2,minmax(0,1fr)) !important;} }
   @media (max-width:560px){ #pg-badges-all{grid-template-columns:1fr !important;} }
+  /* Money Skills 2x2 · Achievements 4x2 — perfect rows, no orphans */
+  #pg-financial{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:14px;}
+  @media (max-width:640px){ #pg-financial{grid-template-columns:1fr;} }
+  #pg-achievements{display:grid;grid-template-columns:repeat(8,minmax(0,1fr));gap:14px;}
+  @media (max-width:1080px){ #pg-achievements{grid-template-columns:repeat(4,minmax(0,1fr));} }
+  @media (max-width:560px){ #pg-achievements{grid-template-columns:repeat(2,minmax(0,1fr));} }
   .pg-badge{position:relative;display:flex;align-items:center;gap:13px;padding:14px 16px;border-radius:13px;background:rgba(0,150,136,0.06);box-shadow:inset 0 0 0 1px var(--border-ui);overflow:hidden;}
   .pg-badge::before{content:"";position:absolute;left:0;top:0;bottom:0;width:4px;background:linear-gradient(180deg,var(--cyan-300),rgba(0,150,136,0.25));}
   .pg-badge-ic{position:relative;width:48px;height:48px;border-radius:12px;flex:none;display:flex;align-items:center;justify-content:center;background:linear-gradient(135deg,rgba(0,150,136,0.26),rgba(0,150,137,0.15));box-shadow:inset 0 0 0 1px var(--border-ui),0 0 18px -6px rgba(0,150,136,0.6);color:var(--cyan-200);}
@@ -711,8 +717,8 @@
   @keyframes buddyPop{from{opacity:0;transform:translateY(8px) scale(.96);}to{opacity:1;transform:none;}}
   @media (prefers-reduced-motion:reduce){.buddy-face{animation:none;}.buddy-pop .buddy-bubble{animation:none;}}
   @media (max-width:560px){.buddy-face{width:48px;height:48px;}.buddy-bubble p{font-size:13px;}.buddy{max-width:74vw;}}
-  /* On tablet/phone the floating B1llbot overlaps content -- hide it there
-     (B1llbot is still reachable from the nav). Shows only on roomy desktops. */
+  /* On tablet/phone the floating B1llBot overlaps content -- hide it there
+     (B1llBot is still reachable from the nav). Shows only on roomy desktops. */
   @media (max-width:900px){ .buddy{display:none !important;} }
 
   .anim{animation:up .42s var(--ease-out) both;}
@@ -777,11 +783,11 @@
       <div id="timeline" aria-label="Mission timeline"></div>
     </main>
     <aside class="home-aside" aria-label="Your progress">
-      <!-- HOME-GFX: crisp B1llbot companion (remove this block to disable) -->
+      <!-- HOME-GFX: crisp B1llBot companion (remove this block to disable) -->
       <div class="glass billbot-card" style="padding:18px 20px;">
-        <img src="img/ui/3.png" alt="B1llbot, your AI companion">
+        <img src="img/ui/3.png" alt="B1llBot, your AI companion">
         <div>
-          <p class="hud" style="font-size:12px;margin:0 0 5px;color:var(--cyan-300);font-weight:700;letter-spacing:.14em;">B1llbot</p>
+          <p class="hud" style="font-size:12px;margin:0 0 5px;color:var(--cyan-300);font-weight:700;letter-spacing:.14em;">B1llBot</p>
           <p id="home-xp-line" style="font-size:14px;margin:0;color:var(--text-muted);line-height:1.45;">Submit your first mission to start earning XP.</p>
         </div>
       </div>
@@ -834,7 +840,7 @@
   </main>
 </section>
 
-<!-- ===== TEAM (info + communication) — B1llbot "holo-comms" layout ===== -->
+<!-- ===== TEAM (info + communication) — B1llBot "holo-comms" layout ===== -->
 <section class="screen bb-room" data-screen="team" aria-label="Your Team">
   <header class="topbar">
     <div class="topbar-left"><div class="lockup brand-static"></div></div>
@@ -932,6 +938,26 @@
       <div id="pg-badges-all"></div>
     </div>
 
+    <!-- Financial Literacy badges -->
+    <div class="glass" style="padding:clamp(12px,1.6vw,18px);margin-bottom:12px;">
+      <div style="display:flex;justify-content:space-between;align-items:flex-end;margin-bottom:14px;gap:14px;flex-wrap:wrap;">
+        <div><div class="hud" style="font-size:10px;color:var(--cyan-300);letter-spacing:.16em;margin-bottom:5px;">Personal Financial Literacy</div>
+        <h2 style="font-family:var(--font-display);font-weight:800;font-size:clamp(16px,2.1vw,21px);color:var(--text-heading);margin:0;text-transform:uppercase;">Money Skills</h2></div>
+        <span class="hud" id="pg-fin-count" style="font-size:12px;color:var(--text-muted);"></span>
+      </div>
+      <div id="pg-financial"></div>
+    </div>
+
+    <!-- Achievements / narrative badges -->
+    <div class="glass" style="padding:clamp(12px,1.6vw,18px);margin-bottom:12px;">
+      <div style="display:flex;justify-content:space-between;align-items:flex-end;margin-bottom:14px;gap:14px;flex-wrap:wrap;">
+        <div><div class="hud" style="font-size:10px;color:var(--cyan-300);letter-spacing:.16em;margin-bottom:5px;">Milestones</div>
+        <h2 style="font-family:var(--font-display);font-weight:800;font-size:clamp(16px,2.1vw,21px);color:var(--text-heading);margin:0;text-transform:uppercase;">Agent Achievements</h2></div>
+        <span class="hud" id="pg-ach-count" style="font-size:12px;color:var(--text-muted);"></span>
+      </div>
+      <div id="pg-achievements"></div>
+    </div>
+
     <!-- Level hero -->
     <div class="glass" style="padding:clamp(12px,1.6vw,18px);margin-bottom:12px;position:relative;overflow:hidden;">
       <img src="img/ui/5.jpg" alt="" aria-hidden="true" style="position:absolute;inset:0;width:100%;height:100%;object-fit:cover;object-position:75% 40%;z-index:0;opacity:0.5;">
@@ -995,7 +1021,7 @@
 </section>
 
 <!-- ===== BILLBOT (HOLO-COMMS) ===== -->
-<section class="screen bb-room" data-screen="billbot" aria-label="B1llbot — AI assistant">
+<section class="screen bb-room" data-screen="billbot" aria-label="B1llBot — AI assistant">
   <header class="topbar">
     <div class="topbar-left"><div class="lockup brand-static"></div></div>
     <span class="chip green"><span class="dot" aria-hidden="true"></span>Live Transmission</span>
@@ -1014,7 +1040,7 @@
       <span class="mote" style="left:54%;animation-delay:1.3s;" aria-hidden="true"></span>
       <span class="mote" style="left:48%;animation-delay:2.6s;" aria-hidden="true"></span>
       <span class="mote" style="left:60%;animation-delay:3.4s;" aria-hidden="true"></span>
-      <img class="figure" src="img/ui/7.png" alt="B1llbot, projected as a hologram">
+      <img class="figure" src="img/ui/7.png" alt="B1llBot, projected as a hologram">
       <span class="dais" aria-hidden="true"></span>
       <span class="proj" aria-hidden="true"></span>
     </div>
@@ -1026,12 +1052,12 @@
     </div>
     <div class="bb-chat-col brackets">
     <div class="chat-hdr"><span>// TRANSMISSION LOG</span><span class="hdots" aria-hidden="true"><i></i><i></i><i></i></span></div>
-    <div class="chat-log" id="chat-log" role="log" aria-live="polite" aria-label="Transmission with B1llbot"></div>
+    <div class="chat-log" id="chat-log" role="log" aria-live="polite" aria-label="Transmission with B1llBot"></div>
     <div class="suggest" id="chat-suggest" aria-label="Suggested questions"></div>
       <form class="chat-input" id="chat-form">
-      <label class="sr-only" for="chat-field">Message B1llbot</label>
+      <label class="sr-only" for="chat-field">Message B1llBot</label>
       <span class="ms" aria-hidden="true" style="font-size:22px;color:var(--cyan-300);flex:none;">graphic_eq</span>
-      <input id="chat-field" type="text" autocomplete="off" placeholder="Ask B1llbot anything…">
+      <input id="chat-field" type="text" autocomplete="off" placeholder="Ask B1llBot anything…">
       <button class="send" type="submit" aria-label="Send message"><span class="ms" aria-hidden="true" style="font-size:24px;">send</span></button>
       </form>
     </div>
@@ -1139,7 +1165,7 @@
         <p style="font-family:var(--font-body);font-size:16px;line-height:1.6;color:var(--teal-100);margin:0 0 18px;max-width:520px;">Investigate the challenge in the real world, gather evidence, and uncover deeper truths about the system.</p>
         <div style="display:flex;gap:12px;align-items:flex-start;padding:16px 18px;border-radius:12px;background:rgba(0,150,136,0.06);box-shadow:inset 0 0 0 1px var(--border-ui);max-width:520px;">
           <span class="ms" aria-hidden="true" style="font-size:22px;color:var(--cyan-300);flex:none;">event</span>
-          <span style="font-family:var(--font-body);font-size:14px;line-height:1.5;color:var(--teal-050);"><strong style="color:var(--cyan-100);font-weight:700;">Head to the Operations Hub.</strong> Your real-world mission has begun, but there are more clues waiting in the Prosperity Simulation. Meet B1llbot, explore Keel, and return when you're ready to report your findings.</span>
+          <span style="font-family:var(--font-body);font-size:14px;line-height:1.5;color:var(--teal-050);"><strong style="color:var(--cyan-100);font-weight:700;">Head to the Operations Hub.</strong> Your real-world mission has begun, but there are more clues waiting in the Prosperity Simulation. Meet B1llBot, explore Keel, and return when you're ready to report your findings.</span>
         </div>
         <div style="display:flex;gap:10px;flex-wrap:wrap;margin-top:18px;">
           <span class="chip orange"><span class="ms" aria-hidden="true" style="font-size:16px;">bolt</span><span id="as-xp"></span></span>
@@ -1211,10 +1237,10 @@
       <div class="glass" style="padding:clamp(18px,2.5vw,24px);display:flex;flex-direction:column;">
         <h3 class="hud" style="font-size:12px;color:var(--cyan-300);margin:0 0 14px;">Go to Minecraft <span style="color:var(--text-faint);">· Optional</span></h3>
         <div class="ops-photo" style="border-radius:12px;box-shadow:inset 0 0 0 1px var(--border-ui);flex:1;min-height:150px;margin-bottom:14px;background:#0e2236;">
-          <img src="img/ui/10.jpg" alt="B1llbot waving in the Prosperity Minecraft world" style="position:absolute;inset:0;width:100%;height:100%;object-fit:cover;object-position:center top;">
+          <img src="img/ui/10.jpg" alt="B1llBot waving in the Prosperity Minecraft world" style="position:absolute;inset:0;width:100%;height:100%;object-fit:cover;object-position:center top;">
         </div>
         <p style="font-family:var(--font-body);font-size:13px;line-height:1.5;color:var(--teal-100);margin:0 0 14px;">Optional practice space — explore the Prosperity Simulation of Keel. Your real-world fieldwork is what completes the mission.</p>
-        <button id="ops-mc" class="btn sec" type="button" style="margin-top:auto;width:100%;">Go to Minecraft to talk with B1llbot&nbsp;<span class="ms" aria-hidden="true" style="font-size:16px;vertical-align:middle;">open_in_new</span></button>
+        <button id="ops-mc" class="btn sec" type="button" style="margin-top:auto;width:100%;">Go to Minecraft to talk with B1llBot&nbsp;<span class="ms" aria-hidden="true" style="font-size:16px;vertical-align:middle;">open_in_new</span></button>
       </div>
       <div class="glass" style="padding:clamp(18px,2.5vw,24px);">
         <h3 class="hud" style="font-size:12px;color:var(--cyan-300);margin:0 0 14px;">Superpowers</h3>
@@ -1225,6 +1251,16 @@
         <div class="hud" style="font-size:10px;color:var(--text-faint);margin-bottom:10px;display:none;">Superpowers</div>
         <div id="ops-superpowers" style="display:flex;flex-direction:column;gap:10px;flex:1;justify-content:space-evenly;"></div>
       </div>
+    </div>
+
+    <div class="glass brackets" style="display:flex;align-items:center;gap:20px;flex-wrap:wrap;padding:clamp(18px,2.5vw,26px);margin-top:22px;box-shadow:inset 0 0 0 1px rgba(0,150,136,0.32),var(--elev-glass);">
+      <div id="mc-fieldkit-qr" style="width:104px;height:104px;flex:none;border-radius:12px;background:#fff;padding:9px;display:flex;align-items:center;justify-content:center;"><span class="ms" aria-hidden="true" style="font-size:32px;color:#0b1220;">qr_code_2</span></div>
+      <div style="flex:1;min-width:240px;">
+        <div class="hud" style="font-size:10px;color:var(--cyan-300);margin-bottom:6px;">Take It With You</div>
+        <div style="font-family:var(--font-display);font-weight:800;font-size:clamp(18px,2.4vw,22px);color:var(--text-heading);margin-bottom:6px;">Heading into the field? Take B1llBot with you.</div>
+        <p style="font-family:var(--font-body);font-size:14px;line-height:1.55;color:var(--teal-050);margin:0;max-width:520px;">Interviewing people, exploring your community, gathering evidence — scan with your phone camera to keep your <strong style="color:var(--cyan-100);">mission, B1llBot, and your Field Notebook</strong> right in your pocket.</p>
+      </div>
+      <button id="ops-fieldkit-open" class="btn sec" type="button" style="flex:none;">Open Field Kit&nbsp;<span class="ms" aria-hidden="true" style="font-size:16px;vertical-align:middle;">open_in_new</span></button>
     </div>
 
     <div class="glass" style="display:flex;align-items:center;justify-content:space-between;gap:24px;flex-wrap:wrap;padding:clamp(20px,3vw,30px);margin-top:22px;">
@@ -1286,7 +1322,7 @@
   <div class="sheet">
     <div style="display:flex;align-items:flex-start;gap:14px;margin-bottom:18px;">
       <span style="width:46px;height:46px;flex:none;display:flex;align-items:center;justify-content:center;"><img src="img/ui/12.png" alt="" aria-hidden="true" style="width:42px;height:42px;object-fit:contain;"></span>
-      <h2 id="mc-modal-title" style="font-family:var(--font-display);font-weight:700;font-size:22px;color:var(--text-heading);margin:0;flex:1;line-height:1.15;">Go to Minecraft to talk with B1llbot</h2>
+      <h2 id="mc-modal-title" style="font-family:var(--font-display);font-weight:700;font-size:22px;color:var(--text-heading);margin:0;flex:1;line-height:1.15;">Go to Minecraft to talk with B1llBot</h2>
       <button id="mc-modal-x" type="button" aria-label="Close" style="border:none;background:none;color:var(--text-faint);cursor:pointer;flex:none;"><span class="ms" aria-hidden="true" style="font-size:24px;">close</span></button>
     </div>
     <p id="mc-modal-intro" style="font-family:var(--font-body);font-size:14px;line-height:1.55;color:var(--teal-100);margin:0 0 16px;">This step is <strong style="color:var(--cyan-100);">optional</strong> — your mission is completed with real-world fieldwork. If you'd like to practice in the simulation, then follow the steps below to enter Keel.</p>
@@ -1303,10 +1339,6 @@
         <button class="btn sec" id="mc-link-btn" type="button" style="flex:none;padding:9px 16px;font-size:13px;">Link</button>
       </div>
       <div id="mc-link-status" class="hud" style="font-size:11px;margin-top:9px;color:var(--text-faint);">Not linked yet.</div>
-    </div>
-    <div style="display:flex;gap:14px;align-items:center;padding:13px 14px;border-radius:12px;box-shadow:inset 0 0 0 1px var(--border-ui);margin-bottom:18px;">
-      <div id="mc-fieldkit-qr" style="width:88px;height:88px;flex:none;border-radius:10px;background:#fff;padding:7px;display:flex;align-items:center;justify-content:center;"><span class="ms" aria-hidden="true" style="font-size:26px;color:#0b1220;">qr_code_2</span></div>
-      <div style="flex:1;min-width:150px;"><div style="font-family:var(--font-display);font-weight:700;font-size:14px;color:var(--cyan-300);margin-bottom:3px;">Open your Field Kit on your phone</div><div style="font-family:var(--font-body);font-size:13px;line-height:1.5;color:var(--teal-100);">Scan with your phone camera to bring B1llbot and your Explorer's Notebook along while you play.</div></div>
     </div>
     <div id="mc-modal-steps" style="margin-bottom:18px;"></div>
     <div style="display:flex;gap:12px;align-items:flex-start;padding:14px 16px;border-radius:12px;box-shadow:inset 0 0 0 1px var(--border-ui);background:rgba(0,150,136,0.05);margin-bottom:18px;">
@@ -1364,7 +1396,7 @@
       <span class="ms" aria-hidden="true" style="font-size:34px;color:var(--cyan-300);flex:none;">dock_to_left</span>
       <div style="flex:1;min-width:220px;">
         <div style="font-family:var(--font-display);font-weight:800;font-size:19px;color:var(--text-heading);margin-bottom:3px;">Play alongside EVOKE</div>
-        <div style="font-family:var(--font-body);font-size:14px;line-height:1.5;color:var(--teal-050);">Dock EVOKE beside your Minecraft window so B1llbot and your Explorer's Notebook stay with you while you play.</div>
+        <div style="font-family:var(--font-body);font-size:14px;line-height:1.5;color:var(--teal-050);">Dock EVOKE beside your Minecraft window so B1llBot and your Explorer's Notebook stay with you while you play.</div>
       </div>
       <button class="btn" id="mc-companion" type="button" style="flex:none;">Enter Companion Mode&nbsp;<span class="ms" aria-hidden="true" style="font-size:16px;vertical-align:middle;">open_in_new</span></button>
     </div>
@@ -1414,16 +1446,16 @@
       </ul>
     </div>
     <div class="comp-tabs" role="tablist" aria-label="Companion tools">
-      <button class="comp-tab on" id="comp-tab-chat" data-ctab="chat" role="tab" aria-selected="true" type="button"><span class="ms" aria-hidden="true" style="font-size:17px;">smart_toy</span>B1llbot</button>
+      <button class="comp-tab on" id="comp-tab-chat" data-ctab="chat" role="tab" aria-selected="true" type="button"><span class="ms" aria-hidden="true" style="font-size:17px;">smart_toy</span>B1llBot</button>
       <button class="comp-tab" id="comp-tab-note" data-ctab="note" role="tab" aria-selected="false" type="button"><span class="ms" aria-hidden="true" style="font-size:17px;">history_edu</span>Notebook</button>
     </div>
 
     <div class="comp-pane" data-cpane="chat" role="tabpanel" aria-labelledby="comp-tab-chat">
-      <div id="comp-log" role="log" aria-live="polite" aria-label="Chat with B1llbot"></div>
+      <div id="comp-log" role="log" aria-live="polite" aria-label="Chat with B1llBot"></div>
       <div id="comp-suggest" aria-label="Suggested questions"></div>
       <form id="comp-form">
-        <label class="sr-only" for="comp-field">Message B1llbot</label>
-        <input id="comp-field" type="text" autocomplete="off" placeholder="Ask B1llbot anything…">
+        <label class="sr-only" for="comp-field">Message B1llBot</label>
+        <input id="comp-field" type="text" autocomplete="off" placeholder="Ask B1llBot anything…">
         <button class="send" type="submit" aria-label="Send message"><span class="ms" aria-hidden="true" style="font-size:22px;">send</span></button>
       </form>
     </div>
@@ -1467,7 +1499,7 @@
       <button id="recap-x" type="button" aria-label="Close" style="border:none;background:none;color:var(--text-faint);cursor:pointer;flex:none;"><span class="ms" aria-hidden="true" style="font-size:24px;">close</span></button>
     </div>
     <div style="height:1px;background:linear-gradient(90deg,transparent,rgba(0,150,136,0.4),transparent);margin:0 0 16px;"></div>
-    <div style="margin-bottom:14px;"><span style="display:inline-flex;align-items:center;gap:7px;padding:5px 13px;border-radius:999px;background:rgba(0,150,136,0.08);box-shadow:inset 0 0 0 1px var(--border-ui);"><span class="ms" aria-hidden="true" style="font-size:16px;color:var(--cyan-300);">auto_awesome</span><span class="hud" style="font-size:10.5px;color:var(--cyan-300);letter-spacing:.12em;white-space:nowrap;">B1llbot's Summary</span></span></div>
+    <div style="margin-bottom:14px;"><span style="display:inline-flex;align-items:center;gap:7px;padding:5px 13px;border-radius:999px;background:rgba(0,150,136,0.08);box-shadow:inset 0 0 0 1px var(--border-ui);"><span class="ms" aria-hidden="true" style="font-size:16px;color:var(--cyan-300);">auto_awesome</span><span class="hud" style="font-size:10.5px;color:var(--cyan-300);letter-spacing:.12em;white-space:nowrap;">B1llBot's Summary</span></span></div>
     <div id="recap-summary" aria-live="polite" style="font-family:var(--font-body);font-size:15px;line-height:1.65;color:var(--teal-050);margin-bottom:18px;min-height:96px;"></div>
     <div style="display:flex;align-items:center;justify-content:space-between;height:52px;padding:0 16px;border-radius:12px;box-shadow:inset 0 0 0 1px var(--border-ui);background:rgba(0,150,136,0.05);margin-bottom:18px;gap:12px;">
       <span style="display:flex;align-items:center;gap:10px;color:var(--text-muted);font-family:var(--font-body);font-size:14px;"><span class="ms" aria-hidden="true" style="font-size:20px;color:var(--accent-energy,#ffa759);">military_tech</span>Badge Earned</span>
@@ -1480,12 +1512,12 @@
   </div>
 </div>
 
-<!-- B1llbot companion (travels the whole journey) -->
+<!-- B1llBot companion (travels the whole journey) -->
 <div class="buddy" id="buddy" aria-live="polite">
-  <button class="buddy-face" id="buddy-face" aria-label="Talk to B1llbot"><img src="img/ui/15.png" alt=""></button>
+  <button class="buddy-face" id="buddy-face" aria-label="Talk to B1llBot"><img src="img/ui/15.png" alt=""></button>
   <div class="buddy-bubble">
-    <button class="buddy-close" id="buddy-close" aria-label="Hide B1llbot's tip"><span class="ms" aria-hidden="true" style="font-size:14px;">close</span></button>
-    <div class="buddy-name">B1llbot</div>
+    <button class="buddy-close" id="buddy-close" aria-label="Hide B1llBot's tip"><span class="ms" aria-hidden="true" style="font-size:14px;">close</span></button>
+    <div class="buddy-name">B1llBot</div>
     <p id="buddy-text"></p>
   </div>
 </div>
@@ -1494,8 +1526,8 @@
 <nav class="flow" id="flow" aria-label="Demo screen switcher" style="display:none !important;"></nav>
 
 
-  <script src="submission-missions.js?b=1"></script>
-  <script src="content.js?b=3"></script>
-  <script src="controller.js?b=15"></script>
+  <script src="submission-missions.js?b=4"></script>
+  <script src="content.js?b=4"></script>
+  <script src="controller.js?b=20"></script>
 </body>
 </html>

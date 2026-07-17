@@ -16,7 +16,7 @@
   <div class="companion-page stack" id="companion-root">
     <h1 class="card__title">EVOKE Field Kit</h1>
     <p class="empty-state" id="agent-line"></p>
-    <p class="empty-state">Your pocket companion — keep this open on your phone next to Minecraft, or check in here anytime for your Daily Field Report, pending awards, and B1llbot.</p>
+    <p class="empty-state">Your pocket companion — keep this open on your phone next to Minecraft, or check in here anytime for your Daily Field Report, pending awards, and B1llBot.</p>
 
     <section class="card" id="pair-confirm" hidden>
       <div class="card__eyebrow">Pairing</div>
@@ -78,11 +78,10 @@
     </section>
 
     <section class="card">
-      <div class="card__eyebrow">B1llbot</div>
-      <p class="empty-state" style="margin-top:-4px">Your guide to the Basin. Try "What's my next mission?" or "Tell me about Keel."</p>
+      <div class="card__eyebrow">B1llBot</div>
       <div class="billbot-drawer__log" id="chat"></div>
       <form id="chat-form" class="row">
-        <input type="text" id="chat-input" placeholder="Ask B1llbot..." style="flex:1" autocomplete="off">
+        <input type="text" id="chat-input" placeholder="Ask B1llBot..." style="flex:1" autocomplete="off">
         <button type="submit">→</button>
       </form>
     </section>
@@ -163,7 +162,7 @@
         const r = await fetch(`/api/reflections/${userId}`).then(r => r.json());
         if (r.filed_today) {
           const latest = (r.journal || [])[0];
-          body.innerHTML = `<p>Filed today ✓</p>${latest && latest.wisdom ? `<p class="empty-state">"${escapeHtml(latest.wisdom)}" — B1llbot</p>` : ""}`;
+          body.innerHTML = `<p>Filed today ✓</p>${latest && latest.wisdom ? `<p class="empty-state">"${escapeHtml(latest.wisdom)}" — B1llBot</p>` : ""}`;
           return;
         }
       } catch (e) {}
@@ -177,12 +176,12 @@
         e.preventDefault();
         const text = document.getElementById("reflect-text").value.trim();
         if (!text) return;
-        document.getElementById("reflect-status").textContent = "Filing… B1llbot is thinking (~20s).";
+        document.getElementById("reflect-status").textContent = "Filing… B1llBot is thinking (~20s).";
         try {
           const fd = new FormData();
           fd.append("text", text);
           const res = await fetch(`/api/reflection?user_id=${userId}`, { method: "POST", body: fd }).then(r => r.json());
-          body.innerHTML = `<p>Filed ✓</p><p class="empty-state">"${escapeHtml(res.wisdom)}" — B1llbot</p>`;
+          body.innerHTML = `<p>Filed ✓</p><p class="empty-state">"${escapeHtml(res.wisdom)}" — B1llBot</p>`;
         } catch (err) {
           document.getElementById("reflect-status").textContent = "Couldn't file that — try again.";
         }
@@ -202,7 +201,7 @@
           return;
         }
         body.innerHTML = `
-          <p class="empty-state">Optional — never graded. Play the same world in Minecraft: fly over Keel, Halyard, and the Oasis, and talk to B1llbot and the people of Keel yourself.</p>
+          <p class="empty-state">Optional — never graded. Play the same world in Minecraft: fly over Keel, Halyard, and the Oasis, and talk to B1llBot and the people of Keel yourself.</p>
           <button class="btn btn-primary" id="connect-start">Connect to Basin Simulation</button>
           <div id="connect-steps" hidden style="margin-top:8px">
             <p><strong>1.</strong> In Minecraft, add a multiplayer server:</p>
@@ -210,7 +209,7 @@
               <button class="btn" data-copy="${escapeHtml(info.java_address)}" style="padding:2px 8px;font-size:0.85em">Copy</button></p>
             <p style="display:flex;align-items:center;gap:6px">Bedrock: <code>${escapeHtml(info.bedrock_address)}</code>
               <button class="btn" data-copy="${escapeHtml(info.bedrock_address)}" style="padding:2px 8px;font-size:0.85em">Copy</button></p>
-            <p><strong>2.</strong> You'll spawn on the mountain, above Keel — it's a real walk down, not a quick hop. Head downhill and outward from spawn; Keel is the hot, cramped mining town at the base, and that's where B1llbot's kiosk is. If you get turned around, open your coordinates (F3 on Java, the settings menu on Bedrock) — Keel is roughly <code>-50, 65, 210</code>.</p>
+            <p><strong>2.</strong> You'll spawn on the mountain, above Keel — it's a real walk down, not a quick hop. Head downhill and outward from spawn; Keel is the hot, cramped mining town at the base, and that's where B1llBot's kiosk is. If you get turned around, open your coordinates (F3 on Java, the settings menu on Bedrock) — Keel is roughly <code>-50, 65, 210</code>.</p>
             <p><strong>3.</strong> Once you're at the kiosk, he'll whisper hello on his own. Type in chat:</p>
             <p><code id="connect-cmd" style="font-size:1.05em"></code></p>
             <p><strong>4.</strong> Come back here — you'll get a confirmation to tap once the game hears you.</p>

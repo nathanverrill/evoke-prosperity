@@ -5,7 +5,7 @@
    every screen, flow, spacing, and animation is identical to the design file.
    Only the *data source* is rewired: instead of the demo's leaked-key LLM and
    pure-localStorage state, we log in for real, seed mission progress from the
-   backend, and route B1llbot chat through /api/billbot/chat. */
+   backend, and route B1llBot chat through /api/billbot/chat. */
 (function(){
   "use strict";
   var CONTENT = window.EVOKE_CONTENT;
@@ -16,7 +16,7 @@
   function getJSON(p){ return fetch(p).then(function(r){ if(!r.ok) throw new Error(p+' '+r.status); return r.json(); }); }
   function postJSON(p,b){ return fetch(p,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(b||{})}).then(function(r){ return r.json(); }); }
 
-  // B1llbot: the design calls llmComplete() when LLM.endpoint+apiKey are set,
+  // B1llBot: the design calls llmComplete() when LLM.endpoint+apiKey are set,
   // else falls back to canned keyword replies. Point it at the real endpoint.
   var LLM = { endpoint:'/api/billbot/chat', apiKey:'backend' };
   function llmComplete(q, history){
@@ -100,7 +100,7 @@
   // ----- the designer's screen logic, verbatim, booted after seeding -----
   seedFromBackend().then(function(){
 
-  var SCREENS = [["home","Learn"],["ops","Ops Hub"],["progress","Progress"],["vault","Vault"],["billbot","B1llbot"],["profile","Profile"],["welcome","Intro"],["novel","Novel"],["story","Transmission"],["assignment","Assignment"],["evidence","Evidence"],["minecraft","Minecraft"],["companion","Companion"],["reward","Complete"]];
+  var SCREENS = [["home","Learn"],["ops","Ops Hub"],["progress","Progress"],["vault","Vault"],["billbot","B1llBot"],["profile","Profile"],["welcome","Intro"],["novel","Novel"],["story","Transmission"],["assignment","Assignment"],["evidence","Evidence"],["minecraft","Minecraft"],["companion","Companion"],["reward","Complete"]];
 
   /* ---- helpers ---- */
   function el(html){var d=document.createElement('div');d.innerHTML=html.trim();return d.firstChild;}
@@ -256,6 +256,69 @@
       +'<span style="font-family:var(--font-display);font-weight:600;font-size:10.5px;line-height:1.15;overflow-wrap:anywhere;hyphens:auto;color:'+(on?'var(--teal-050)':'var(--text-faint)')+';">'+p.name+'</span></div>';
   }
   window.powerGroups=powerGroups; window.totalPowersEarned=totalPowersEarned;
+
+  // ---- extra badge families: Financial Literacy (PFL) + narrative Achievements ----
+  function missionsDoneCount(){ var c=0; for(var i=1;i<=12;i++){ if(missionState(i)==='complete') c++; } return c; }
+  function streakCountSafe(){ try{ return (typeof evokeStreak==='function') ? evokeStreak().count : 0; }catch(e){ return 0; } }
+  // Financial Literacy — one badge per PFL domain, earned by completing that
+  // domain's missions (mission→PFL mapping straight from the campaign doc).
+  var FIN_BADGES = [
+    { name:"Philanthropist", icon:"volunteer_activism", missions:[1,3],        blurb:"Sees how giving and community needs shape prosperity." },
+    { name:"Goal Setter",    icon:"flag",               missions:[2,4,7],      blurb:"Sets a clear direction and plans the steps to reach it." },
+    { name:"Budget Builder", icon:"savings",            missions:[5,6,8],      blurb:"Turns a vision into a realistic plan of costs and resources." },
+    { name:"Savvy Investor", icon:"trending_up",        missions:[9,10,11,12], blurb:"Weighs risk and reward and makes the case for backing an idea." }
+  ];
+  // Narrative / milestone achievements — earned from real progress signals.
+  var ACHV = [
+    { name:"First Steps",          icon:"footprint",             earned:function(){ return missionsDoneCount()>=1; }, desc:"Complete your first mission." },
+    { name:"The Listener",         icon:"hearing",               earned:function(){ return missionState(1)==='complete'; }, desc:"Finish Follow the Flow — listen before you judge." },
+    { name:"Origin Story",         icon:"auto_stories",          earned:function(){ return missionState(2)==='complete'; }, desc:"Write your Prosperity Origin Story." },
+    { name:"Dreamer",              icon:"tips_and_updates",      earned:function(){ return missionState(3)==='complete'; }, desc:"Map out your team's wildest ideas." },
+    { name:"Halfway Hero",         icon:"military_tech",         earned:function(){ return missionsDoneCount()>=6; }, desc:"Complete half the campaign." },
+    { name:"Into the Act",         icon:"rocket_launch",         earned:function(){ return missionsDoneCount()>=8; }, desc:"Reach the Act phase — build for real." },
+    { name:"Streak Keeper",        icon:"local_fire_department", earned:function(){ return streakCountSafe()>=5; }, desc:"Show up 5 days in one week." },
+    { name:"Prosperity Architect", icon:"workspace_premium",    earned:function(){ return missionsDoneCount()>=12; }, desc:"Complete the entire campaign." }
+  ];
+  var bEsc = function(s){ return String(s==null?'':s).replace(/[&<>"]/g,function(c){return ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'})[c];}); };
+  function badgeTileHTML(name, icon, on, sub, s, titleText){
+    s=s||54;
+    var box = on
+      ? 'background:radial-gradient(circle at 50% 35%,rgba(0,212,146,0.28),rgba(0,150,137,0.10));box-shadow:inset 0 0 0 1.5px var(--green-400),0 0 18px -4px rgba(0,212,146,0.55);color:var(--green-400);'
+      : 'box-shadow:inset 0 0 0 1px var(--border-ui);color:var(--text-faint);';
+    return '<div style="display:flex;flex-direction:column;align-items:center;gap:7px;text-align:center;min-width:0;opacity:'+(on?'1':'0.72')+';" title="'+bEsc(titleText||sub||'')+'">'
+      +'<span style="width:min(100%,'+s+'px);aspect-ratio:1;border-radius:14px;display:flex;align-items:center;justify-content:center;'+box+'"><span class="ms'+(on?' fill':'')+'" aria-hidden="true" style="font-size:'+Math.round(s*0.46)+'px;">'+(on?icon:'lock')+'</span></span>'
+      +'<span style="font-family:var(--font-display);font-weight:600;font-size:11px;line-height:1.15;overflow-wrap:anywhere;color:'+(on?'var(--teal-050)':'var(--text-faint)')+';">'+bEsc(name)+'</span>'
+      +(sub?'<span class="hud" style="font-size:8.5px;color:var(--text-faint);">'+bEsc(sub)+'</span>':'')+'</div>';
+  }
+  function renderFinancialBadges(){
+    var host=document.getElementById('pg-financial'); if(!host) return;
+    var earnedN=0;
+    host.innerHTML = FIN_BADGES.map(function(b){
+      var total=b.missions.length, done=b.missions.filter(function(n){return missionState(n)==='complete';}).length;
+      var on=done>=total; if(on) earnedN++;
+      var pct=Math.round(done/total*100);
+      var tile = on
+        ? 'background:radial-gradient(circle at 50% 35%,rgba(0,212,146,0.28),rgba(0,150,137,0.10));box-shadow:inset 0 0 0 1.5px var(--green-400),0 0 18px -4px rgba(0,212,146,0.55);color:var(--green-400);'
+        : 'box-shadow:inset 0 0 0 1px var(--border-ui);color:var(--text-faint);';
+      return '<div style="display:flex;gap:14px;align-items:center;padding:16px 18px;border-radius:14px;box-shadow:inset 0 0 0 1px '+(on?'rgba(0,212,146,0.4)':'var(--border-ui)')+';background:'+(on?'rgba(0,212,146,0.05)':'transparent')+';">'
+        +'<span style="width:52px;height:52px;flex:none;border-radius:14px;display:flex;align-items:center;justify-content:center;'+tile+'"><span class="ms'+(on?' fill':'')+'" aria-hidden="true" style="font-size:26px;">'+(on?b.icon:'lock')+'</span></span>'
+        +'<div style="flex:1;min-width:0;"><div style="display:flex;align-items:baseline;justify-content:space-between;gap:8px;"><span style="font-family:var(--font-display);font-weight:700;font-size:15px;color:var(--text-heading);">'+bEsc(b.name)+'</span><span class="hud" style="font-size:9px;flex:none;color:'+(on?'var(--green-400)':'var(--text-faint)')+';">'+(on?'Earned':done+'/'+total)+'</span></div>'
+        +'<div style="font-family:var(--font-body);font-size:12px;line-height:1.4;color:var(--text-faint);margin:5px 0 8px;">'+bEsc(b.blurb)+'</div>'
+        +'<span style="display:block;width:100%;height:5px;border-radius:999px;background:rgba(255,255,255,0.08);overflow:hidden;"><span style="display:block;height:100%;width:'+pct+'%;background:linear-gradient(90deg,var(--cyan-500),var(--green-400));"></span></span></div></div>';
+    }).join('');
+    var c=document.getElementById('pg-fin-count'); if(c) c.textContent=earnedN+' of '+FIN_BADGES.length;
+  }
+  function renderAchievements(){
+    var host=document.getElementById('pg-achievements'); if(!host) return;
+    var earnedN=0;
+    host.innerHTML = ACHV.map(function(a){
+      var on=false; try{ on=!!a.earned(); }catch(e){}
+      if(on) earnedN++;
+      return badgeTileHTML(a.name, a.icon, on, on?'Unlocked':'', 52, a.desc);
+    }).join('');
+    var c=document.getElementById('pg-ach-count'); if(c) c.textContent=earnedN+' of '+ACHV.length;
+  }
+  window.renderFinancialBadges=renderFinancialBadges; window.renderAchievements=renderAchievements;
 
   /* ---- badges: the 4 Superpower rings on Home, each filled by its 4 Powers ---- */
   var badges = document.getElementById('badges');
@@ -421,7 +484,7 @@
     var A = CONTENT['assignment_m'+v.mission] || CONTENT.assignment;
     var story = T ? [T.lead].concat([].concat.apply([], T.stanzas||[])).concat(T.emphasis||[]).join(' ') : '';
     var goal = (A && A.objectiveLine) || '';
-    return "You are B1llbot, the friendly in-game AI mentor in EVOKE's Prosperity program — a narrative learning game set in the drought-stricken world of Keel, where an agent named Alex fights to reclaim water and justice. A young student (addressed as 'Agent') has just finished a mission. Write a warm, encouraging recap of the WHOLE mission in 4 to 6 sentences. Use second person ('you'), a confident and friendly sci-fi command-deck tone, plain language a middle-schooler understands, and absolutely no emoji. Summarize what the mission was about, what the Agent explored, and what they learned.\n\nMission title: "+v.title+"\nLearning goal: "+goal+"\nBadge earned: "+v.badge+"\nStory context (Alex's field transmission): "+story+"\n\nReturn only the recap paragraph, with no preamble or heading.";
+    return "You are B1llBot, the friendly in-game AI mentor in EVOKE's Prosperity program — a narrative learning game set in the drought-stricken world of Keel, where an agent named Alex fights to reclaim water and justice. A young student (addressed as 'Agent') has just finished a mission. Write a warm, encouraging recap of the WHOLE mission in 4 to 6 sentences. Use second person ('you'), a confident and friendly sci-fi command-deck tone, plain language a middle-schooler understands, and absolutely no emoji. Summarize what the mission was about, what the Agent explored, and what they learned.\n\nMission title: "+v.title+"\nLearning goal: "+goal+"\nBadge earned: "+v.badge+"\nStory context (Alex's field transmission): "+story+"\n\nReturn only the recap paragraph, with no preamble or heading.";
   }
   async function loadRecapSummary(v){
     var box=document.getElementById('recap-summary');
@@ -722,7 +785,7 @@
         modalSteps:[
           'Open Minecraft on your computer, click <strong style="color:var(--cyan-100);">Multiplayer \u203a Add Server</strong>, paste the address you copied above, and click <strong style="color:var(--cyan-100);">Join Server</strong>.',
           "Resize your Minecraft window to fill one side of your screen.",
-          'Tap <strong style="color:var(--cyan-100);">Enter Companion Mode</strong> below and snap EVOKE to the other side \u2014 B1llbot and your Explorer\'s Notebook stay with you while you play.',
+          'Tap <strong style="color:var(--cyan-100);">Enter Companion Mode</strong> below and snap EVOKE to the other side \u2014 B1llBot and your Explorer\'s Notebook stay with you while you play.',
           'In Keel, use <strong style="color:var(--cyan-100);">W A S D</strong> and your <strong style="color:var(--cyan-100);">mouse</strong> to explore freely. This is the world before the collapse \u2014 roam it, find the parkour, and see what prosperity looks like.'
         ]
       },
@@ -749,7 +812,7 @@
         modalSteps:[
           'Open Minecraft on your computer, click <strong style="color:var(--cyan-100);">Multiplayer \u203a Add Server</strong>, paste the address you copied above, and click <strong style="color:var(--cyan-100);">Join Server</strong>.',
           "Resize your Minecraft window to fill one side of your screen.",
-          'Tap <strong style="color:var(--cyan-100);">Enter Companion Mode</strong> below and snap EVOKE to the other side \u2014 B1llbot and your Explorer\'s Notebook stay with you while you play.',
+          'Tap <strong style="color:var(--cyan-100);">Enter Companion Mode</strong> below and snap EVOKE to the other side \u2014 B1llBot and your Explorer\'s Notebook stay with you while you play.',
           'In Keel, use <strong style="color:var(--cyan-100);">W A S D</strong> and your <strong style="color:var(--cyan-100);">mouse</strong>. Follow the mini-game markers to rebuild prosperity \u2014 earn, save, and build the world back toward the simulation you explored in Week 1.'
         ]
       }
@@ -921,6 +984,8 @@
         +'<div style="display:grid;grid-template-columns:repeat(4,1fr);gap:8px;">'+tiles+'</div></div>';
     }).join('');
     document.getElementById('pg-badge-count').textContent=totalPowersEarned()+' of 16 powers';
+    if(window.renderFinancialBadges) window.renderFinancialBadges();
+    if(window.renderAchievements) window.renderAchievements();
     if(window.renderStreaks) window.renderStreaks();
   }
   window.renderProgress=renderProgress; renderProgress();
@@ -1044,7 +1109,7 @@
     renderSettings();
   })();
 
-  /* ---- B1llbot chat (holo-comms) ---- */
+  /* ---- B1llBot chat (holo-comms) ---- */
   var bb = CONTENT.billbot;
   var log = document.getElementById('chat-log');
   var log = document.getElementById('chat-log');
@@ -1175,6 +1240,7 @@
     };
     document.getElementById('comp-exit').addEventListener('click',window.exitCompanion);
     var ec=document.getElementById('mc-companion'); if(ec) ec.addEventListener('click',window.openCompanionWindow);
+    var fk=document.getElementById('ops-fieldkit-open'); if(fk) fk.addEventListener('click',window.openCompanionWindow);
   })();
 
   /* ---- routing ---- */
@@ -1226,7 +1292,7 @@
     document.querySelectorAll('.back-btn').forEach(function(b){ b.style.display = show ? 'inline-flex' : 'none'; });
   }
 
-  /* ---- B1llbot companion dialogue ---- */
+  /* ---- B1llBot companion dialogue ---- */
   var BUDDY_LINES = {
     home:"Welcome back, Agent! Pick a week and let's get to work.",
     ops:"This is your Operations Hub \u2014 your whole mission, all in one place.",
@@ -1432,7 +1498,7 @@
       var members = st.members || [];
       var banner = (st.banner && st.banner.show) ? ('<div class="glass brackets" style="display:flex;gap:18px;align-items:center;flex-wrap:wrap;padding:18px 22px;margin-bottom:26px;box-shadow:inset 0 0 0 1px rgba(0,150,136,0.35),0 0 34px -12px rgba(0,150,136,0.5);">'
         +'<span style="width:56px;height:60px;flex:none;"><img src="img/ui/3.png" alt="" style="width:100%;height:100%;object-fit:contain;filter:drop-shadow(0 5px 14px rgba(0,150,136,0.45));"></span>'
-        +'<div style="flex:1;min-width:240px;"><div class="hud" style="font-size:10px;color:var(--cyan-300);margin-bottom:5px;">B1llbot · Team Nudge</div>'
+        +'<div style="flex:1;min-width:240px;"><div class="hud" style="font-size:10px;color:var(--cyan-300);margin-bottom:5px;">B1llBot · Team Nudge</div>'
         +'<div style="font-family:var(--font-body);font-size:15px;line-height:1.5;color:var(--teal-050);">Your team’s rolling, Agent — <strong style="color:var(--cyan-100);">'+st.banner.submitted+' of '+st.banner.total+'</strong> have turned in the Evokation and you’re the last piece. Drop yours in and finish it together. 🚀</div></div></div>') : '';
 
       var indStatus = you.individual_task ? 'done' : 'todo';
@@ -1467,7 +1533,9 @@
       }).join('') || '<p class="hud" style="font-size:12px;color:var(--text-faint);margin:0 0 14px;">No messages yet — start the conversation below.</p>';
       var discHtml = '<div class="glass" style="padding:clamp(22px,3.5vw,30px);margin-bottom:22px;">'
         + '<div style="display:flex;align-items:center;gap:12px;margin-bottom:6px;flex-wrap:wrap;"><span class="ms" aria-hidden="true" style="font-size:24px;color:var(--cyan-300);">forum</span><h2 class="hud" style="font-size:12px;margin:0;color:var(--cyan-300);">Step '+(hasInd?2:1)+' · Team Discussion</h2><span class="hud" style="margin-left:auto;font-size:11px;color:var(--text-faint);">'+(currentMsgs.length)+' message'+(currentMsgs.length===1?'':'s')+'</span></div>'
-        + '<p style="font-family:var(--font-body);font-size:14px;color:var(--teal-100);margin:0 0 16px;"><strong style="color:var(--cyan-100);">Prompt:</strong> '+e2(m.discussionPrompt)+'</p>'
+        + '<div style="margin:0 0 16px;padding:13px 15px;border-radius:12px;background:rgba(0,150,136,0.06);box-shadow:inset 0 0 0 1px var(--border-ui);">'
+          + '<div class="hud" style="font-size:10px;color:var(--cyan-300);margin-bottom:5px;">B1llBot</div>'
+          + '<div style="font-family:var(--font-body);font-size:14px;line-height:1.55;color:var(--teal-050);">'+e2(m.discussionPrompt)+'</div></div>'
         + '<div style="display:flex;flex-direction:column;gap:12px;margin-bottom:16px;">'+msgsHtml+'</div>'
         + '<form id="sub-disc-form" style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;"><input id="sub-disc-input" type="text" placeholder="Add to the discussion…" style="flex:1 1 160px;min-width:0;padding:12px 14px;border-radius:12px;border:none;background:rgba(0,150,136,0.06);box-shadow:inset 0 0 0 1px var(--border-ui);color:var(--text-heading);font-family:var(--font-body);font-size:14px;"><button class="btn sec" type="submit" style="flex:none;width:auto;min-width:96px;">Post</button></form></div>';
 
@@ -1545,7 +1613,7 @@
     window.renderSubmission = function(){ refresh(missionNo()); };
   })();
 
-  // ===== Team page (B1llbot holo-comms layout: identity+squad bay | team chat) =====
+  // ===== Team page (B1llBot holo-comms layout: identity+squad bay | team chat) =====
   (function(){
     var infoCol = document.getElementById('team-info');
     var log = document.getElementById('team-chat-log');

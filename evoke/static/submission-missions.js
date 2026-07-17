@@ -1,23 +1,21 @@
 /* submission-missions.js — the exact per-mission submission requirements,
-   transcribed from "Prosperity Campaign Missions" (Mission Submission Redesign).
-   Drives the adaptive submission screen: `individual` is null for missions that
-   the doc defines as team-product-only (5–12); those still gate each learner via
-   reflection + a Team Discussion post + ratifying the team file. */
+   transcribed from "Prosperity Campaign Missions -- 07.14.26" (track-changes final).
+   Drives the adaptive submission screen. Every mission now has BOTH an individual
+   "Each Agent must submit" component and a Team product, plus a Team Discussion post. */
 window.EVOKE_SUBMISSION_MISSIONS = [
   {
     n: 1, phase: "Explore", week: 1, title: "Follow the Flow",
     superpower: "Empathetic Changemaker", skills: ["Empathy", "Research & Analysis"],
     individual: {
       items: [
-        "B1llbot interview notes — one surprising insight, one assumption you challenged, and one question you'd now ask a real community member",
-        "Notes from at least two stakeholder perspectives, including one assumption you challenged"
+        "Notes or reflections from your B1llBot interview — one surprising insight you discovered, one assumption you challenged, and one question you'd now ask a real community member"
       ]
     },
-    discussionPrompt: "Find the Friction — compare what each of you learned. Where do their experiences align? Where do they clash? What's one assumption you had that no longer holds up?",
+    discussionPrompt: "Mind if I ask you something? Most folks think they're good listeners. Truth is, most of us are just waiting for our turn to talk. Before you wrap this up, what's one question you didn't ask that might've taught you something important? I'd ask that one next.",
     teamProduct: {
       items: [
         "A combined stakeholder list",
-        "A Challenge Statement naming the community issue and the financial realities shaping it"
+        "A Challenge Statement that identifies the community issue and the financial realities shaping it"
       ]
     }
   },
@@ -30,7 +28,7 @@ window.EVOKE_SUBMISSION_MISSIONS = [
         "A future direction that relates to the challenge (career, project, hobby, or personal interest)"
       ]
     },
-    discussionPrompt: "Team Identity — share your Origin Story or Avatar. What common values emerged? What motivates your team? What strengths does each person bring?",
+    discussionPrompt: "Everybody's got a story. Mine certainly wasn't a straight line. Here's what I'd like to know... what part of your story has actually made you stronger? Don't tell me what happened to you. Tell me what you earned because of it.",
     teamProduct: {
       items: [
         "Team Name",
@@ -46,49 +44,57 @@ window.EVOKE_SUBMISSION_MISSIONS = [
     individual: {
       items: [
         "Five original solution ideas",
-        "Highlight the one idea you're most excited about"
+        "Highlight which one you're most excited about"
       ]
     },
-    discussionPrompt: "Find the Patterns — look at everything your team generated. What ideas connect? What themes keep showing up? Which combinations are worth exploring?",
+    discussionPrompt: "Careful now. Teams have a funny habit of falling in love with the first good idea that comes along. If you had to throw out your favorite idea today...which one would you work on tomorrow? That answer might be the better one.",
     teamProduct: {
       items: [
-        "A collaborative Dream Map showing your brainstorming and emerging idea clusters",
+        "A collaborative Dream Map showing your team's brainstorming and emerging idea clusters",
         "2–3 promising solution directions your team wants to explore further"
       ]
     }
   },
   {
-    n: 4, phase: "Imagine", week: 2, title: "2035: If We Get This Right",
+    n: 4, phase: "Imagine", week: 2, title: "2037: If We Get This Right",
     superpower: "Creative Visionary", skills: ["Vision", "Leadership"],
     individual: {
       items: [
-        "A 1–2 sentence North Star Statement — the change your team wants to create and what success would look like"
+        "A 1–2 sentence North Star Statement — the change you want to create and what success would look like"
       ]
     },
-    discussionPrompt: "Compare everyone's future visions and find the common themes worth building toward.",
+    discussionPrompt: "I like optimists. But the ones I trust are the ones with a plan. So let me ask you...what has to be true for this future to actually happen? If you're counting on somebody else to make it happen, you might want to think again.",
     teamProduct: {
       items: [
-        "A short creative expression of your 2035 vision (a future headline, a message from the future, a graphic-novel panel, or another format)"
+        "A short creative expression of your 2037 vision (a future headline, a message from the future, a graphic-novel panel, or another format)"
       ]
     }
   },
   {
     n: 5, phase: "Imagine", week: 3, title: "What Would It Take—for Real?",
     superpower: "Systems Thinker", skills: ["Research & Analysis", "Problem Solving"],
-    individual: null,
-    discussionPrompt: "Sort what matters most — which resources are essential to get started, and which can wait?",
+    individual: {
+      items: [
+        "A short research snapshot (links, notes, screenshots, or sources) showing how you gathered information to make smarter estimates"
+      ]
+    },
+    discussionPrompt: "Budgets have a way of humbling people. Which number in here do you really know...and which one's just a hopeful guess? Nothing wrong with guessing—just don't confuse it with knowing.",
     teamProduct: {
       items: [
-        "A simple starter budget — prioritized expenditures, rough cost estimates, and brief notes on how you estimated them",
-        "A short research snapshot (links, notes, screenshots, or sources) showing how you gathered information"
+        "A simple starter budget — prioritized expenditures, rough cost estimates, and brief notes on how you estimated them"
       ]
     }
   },
   {
     n: 6, phase: "Imagine", week: 3, title: "What If We Actually Did This?",
     superpower: "Creative Visionary", skills: ["Creativity", "Critical Reflection"],
-    individual: null,
-    discussionPrompt: "Stress-test the plan — what seems unrealistic? What costs might be missing? Where could you start smaller or share resources?",
+    individual: {
+      items: [
+        "One revised assumption, one weakness, and one opportunity",
+        "Your reflection on the process — \"What changed my thinking?\""
+      ]
+    },
+    discussionPrompt: "Here's something I've learned. Money's usually not the first thing you run out of. You run out of creativity first. So tell me...if nobody gave you another dollar, how would you keep moving?",
     teamProduct: {
       items: [
         "An updated budget — revised expenditures, changed assumptions, and what now feels most realistic",
@@ -99,8 +105,14 @@ window.EVOKE_SUBMISSION_MISSIONS = [
   {
     n: 7, phase: "Act", week: 4, title: "Bring It to Life",
     superpower: "Systems Thinker", skills: ["Problem Solving", "Imagination"],
-    individual: null,
-    discussionPrompt: "Pause and prepare to improve — what's working, what still feels unfinished, and what would make it stronger?",
+    individual: {
+      items: [
+        "The component you created",
+        "Why it matters",
+        "Your biggest challenge"
+      ]
+    },
+    discussionPrompt: "You know what I like about prototypes? They don't argue with you. They just show you what's broken. If I picked this up without you standing beside me...where would I get stuck?",
     teamProduct: {
       items: [
         "The first version of a concrete prototype showing how your solution could work",
@@ -111,8 +123,13 @@ window.EVOKE_SUBMISSION_MISSIONS = [
   {
     n: 8, phase: "Act", week: 4, title: "Strengthen the Vision",
     superpower: "Empathetic Changemaker", skills: ["Leadership", "Vision"],
-    individual: null,
-    discussionPrompt: "Reconnect to your 2035 vision — does the prototype reflect the future you imagined? What feels like it's missing?",
+    individual: {
+      items: [
+        "Peer feedback for a teammate",
+        "A reflection — \"What improvement did I make because of feedback?\""
+      ]
+    },
+    discussionPrompt: "Can I tell you a secret? Some of my worst decisions came right after my biggest successes. We start believing every idea we've had is a good one. So tell me...what are you keeping because it's truly important...and what are you keeping just because you worked hard on it?",
     teamProduct: {
       items: [
         "A revised prototype ready for testing that clearly communicates your solution",
@@ -123,8 +140,14 @@ window.EVOKE_SUBMISSION_MISSIONS = [
   {
     n: 9, phase: "Act", week: 5, title: "Put It in the World",
     superpower: "Empathetic Changemaker", skills: ["Courage", "Empathy"],
-    individual: null,
-    discussionPrompt: "Look through their eyes — what surprised us? What did people understand right away? Where did they struggle?",
+    individual: {
+      items: [
+        "Interview notes from your prototype tests",
+        "Your top insight",
+        "Your biggest surprise"
+      ]
+    },
+    discussionPrompt: "Well...you asked for feedback. Now comes the hard part. Which comment made you a little uncomfortable? That's usually the one worth sitting with a bit longer.",
     teamProduct: {
       items: [
         "Documented feedback from your prototype testing (notes, quotes, or observations)",
@@ -135,8 +158,13 @@ window.EVOKE_SUBMISSION_MISSIONS = [
   {
     n: 10, phase: "Act", week: 5, title: "Worth Backing",
     superpower: "Deep Collaborator", skills: ["Teamwork", "Relationship Management"],
-    individual: null,
-    discussionPrompt: "Get aligned — lay out your challenge, vision, budget, prototype, and testing. Make sure you're all building the same thing.",
+    individual: {
+      items: [
+        "Your personal risk rating",
+        "Your investment rationale"
+      ]
+    },
+    discussionPrompt: "Let me put on my investor hat for a minute. If I had one tough question that could keep me from backing your idea...what do you think it'd be? Don't dodge it. That's probably the question you ought to answer first.",
     teamProduct: {
       items: [
         "2–3 measurable indicators of success",
@@ -147,8 +175,13 @@ window.EVOKE_SUBMISSION_MISSIONS = [
   {
     n: 11, phase: "Communicate", week: 6, title: "Craft Your Pitch",
     superpower: "Deep Collaborator", skills: ["Communication", "Creativity"],
-    individual: null,
-    discussionPrompt: "The Venture Points Challenge — how many of your 100 Venture Points will you offer to attract support, and why?",
+    individual: {
+      items: [
+        "Your pitch section",
+        "One improvement you made after rehearsal"
+      ]
+    },
+    discussionPrompt: "I've sat through more pitches than I can count. Most people try to tell me everything they know. Big mistake. What's the one thing you want me talking about after you leave the room?",
     teamProduct: {
       items: [
         "A completed pitch",
@@ -159,8 +192,14 @@ window.EVOKE_SUBMISSION_MISSIONS = [
   {
     n: 12, phase: "Communicate", week: 6, title: "The Evokation",
     superpower: "Deep Collaborator", skills: ["Relationship Management", "Courage"],
-    individual: null,
-    discussionPrompt: "Prepare to engage the audience — anticipate their questions and decide how you'll respond thoughtfully as a team.",
+    individual: {
+      items: [
+        "One leadership lesson",
+        "One thing you learned about teamwork",
+        "One thing you learned about yourself"
+      ]
+    },
+    discussionPrompt: "I've enjoyed watching you build this. But here's something I've learned after a lot of years...this presentation isn't really the finish line. It's just proof that you're capable of more than you knew six weeks ago. So what's the first thing you're going to build after this?",
     teamProduct: {
       items: [
         "Your team's live Evokation presentation: the challenge you identified, your innovation and prototype, your pitch, your Venture Points offer / investment case, and your vision for the future"
