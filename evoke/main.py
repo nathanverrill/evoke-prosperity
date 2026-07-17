@@ -48,6 +48,12 @@ AI_ENABLED = os.getenv("AI_ENABLED", "false").lower() == "true"
 MINECRAFT_PUBLIC_HOST = os.getenv("MINECRAFT_PUBLIC_HOST", "prosperity.apexmc.co")
 MINECRAFT_PUBLIC_PORT_JAVA = os.getenv("MINECRAFT_PUBLIC_PORT_JAVA", "25565")
 MINECRAFT_PUBLIC_PORT_BEDROCK = os.getenv("MINECRAFT_PUBLIC_PORT_BEDROCK", "19132")
+# Java requires an exact version match to even connect (a mismatched client
+# gets "Outdated client/server" and can't join at all) -- Bedrock via Geyser
+# is far more forgiving about client version, so this is a Java-specific
+# instruction. Kept server-side, not hardcoded in companion.html, so a
+# future server upgrade is a one-line env change, not a frontend redeploy.
+MINECRAFT_JAVA_VERSION = os.getenv("MINECRAFT_JAVA_VERSION", "1.21.10")
 
 # Brightspace integration (adapter or simulator)
 BRIGHTSPACE_SIMULATOR_MODE = os.getenv("BRIGHTSPACE_SIMULATOR_MODE", "true").lower() == "true"
@@ -330,6 +336,50 @@ async def startup():
             resolved_at TIMESTAMP,
             status VARCHAR(16) NOT NULL DEFAULT 'waiting'
         )""")
+
+        # Staged in-world dialogue for the Minecraft NPCs (Jim/Beth/Benjamin/
+        # Craig/Billbot) -- externally editable content, not baked into the
+        # ProsperityDialog.java mod itself. The mod fetches GET /api/npc-lines
+        # at startup and on a periodic refresh, so editing a row here changes
+        # what an NPC says without a mod rebuild/redeploy. Replaced the old
+        # BillBot.java's live OpenWebUI call per-NPC (removed along with
+        # in-game player-to-player chat, see GAPS.md) -- these are canned
+        # lines now, not AI-generated.
+        db_execute("""CREATE TABLE IF NOT EXISTS npc_lines (
+            id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+            npc_name VARCHAR(64) NOT NULL,
+            line_text TEXT NOT NULL,
+            is_greeting BOOLEAN NOT NULL DEFAULT false,
+            sort_order INT NOT NULL DEFAULT 0
+        )""")
+        if not db_fetch_one("SELECT 1 FROM npc_lines"):
+            _npc_seed = [
+                ("jim", True, 0, "Here — take this. [taps a small relay chip into your hand] Frequency's yours now. Signal's not what it used to be, but it'll reach me."),
+                ("jim", False, 1, "Yield's down again today. Coal's not what it used to be around here."),
+                ("jim", False, 2, "Keep your credits close. Don't gamble 'em — I've seen it eat men whole."),
+                ("jim", False, 3, "Never miss a shift. That's the only rule that matters down here."),
+                ("beth", True, 0, "You want to actually talk sometime? Here. [hands over a scratched relay chip] Towers went dark years back — this is the only way anyone talks anymore."),
+                ("beth", False, 1, "Apartment's still got no walls. Water still comes in warm, if it comes at all."),
+                ("beth", False, 2, "Tough conditions, low pay, fewer resources every season. That's Keel for you."),
+                ("beth", False, 3, "You didn't hear it from me, but the Oasis isn't hoarding water out of spite. It's something else."),
+                ("benjamin", True, 0, "You'll want a relay if you're going to keep asking me questions. Here — courtesy of Alpha Dynamics. Don't say we never gave you anything."),
+                ("benjamin", False, 1, "Need tools? Right-click the signs. Alpha's not made of credits, you know."),
+                ("benjamin", False, 2, "Halyard's better than this dust pit, I'll tell you that much."),
+                ("benjamin", False, 3, "Alpha does more for this town than the government ever did. Remember that."),
+                ("craig", True, 0, "Eh — take the chip, keep the noise down. [mutters] Not like the old towers are coming back. Frequency's yours."),
+                ("craig", False, 1, "Coal's honest work. Don't let the Oasis crowd tell you otherwise."),
+                ("craig", False, 2, "Keel residents do the hardest work on this mountain. Don't forget it."),
+                ("craig", False, 3, "...You're not still short on credits, are you? [glances toward the town hall stairs, says nothing more]"),
+                ("billbot", True, 0, "I've patched a relay into your Field Kit. The old comm towers went dark when Alpha pulled out — this signal's the only line left, but it reaches me anytime you need it."),
+                ("billbot", False, 1, "Every credit you don't spend today is a choice you're making about tomorrow."),
+                ("billbot", False, 2, "Ask yourself: who benefits when you don't ask questions about where your pay goes?"),
+                ("billbot", False, 3, "I've got more to say than a few words can hold out here. Open your Field Kit — let's really talk."),
+            ]
+            for _name, _greeting, _order, _text in _npc_seed:
+                db_execute(
+                    "INSERT INTO npc_lines (npc_name, line_text, is_greeting, sort_order) VALUES (%s, %s, %s, %s)",
+                    (_name, _text, _greeting, _order)
+                )
 
         # Completing the Aqueduct Kit delivers a real in-world trophy for
         # linked players (a conduit — the most water-alive block in the
@@ -2429,22 +2479,30 @@ async def minecraft_connect_info():
         "bedrock_port": MINECRAFT_PUBLIC_PORT_BEDROCK,
         "java_address": f"{MINECRAFT_PUBLIC_HOST}:{MINECRAFT_PUBLIC_PORT_JAVA}",
         "bedrock_address": f"{MINECRAFT_PUBLIC_HOST}:{MINECRAFT_PUBLIC_PORT_BEDROCK}",
+        "java_version": MINECRAFT_JAVA_VERSION,
     }
 
 
-@app.post("/api/minecraft/link")
-async def link_minecraft(user_id: str, minecraft_username: str):
-    """Link a user to a Minecraft account"""
-    try:
-        db_execute(
-            """INSERT INTO minecraft_links (user_id, server_id, minecraft_username)
-               VALUES (%s::uuid, 'default', %s)
-               ON CONFLICT (user_id, server_id) DO UPDATE SET minecraft_username = EXCLUDED.minecraft_username""",
-            (user_id, minecraft_username)
-        )
-        return {"status": "linked", "username": minecraft_username}
-    except Exception as e:
-        raise HTTPException(status_code=400, detail=str(e))
+@app.get("/api/npc-lines")
+async def get_npc_lines():
+    """Staged dialogue for the in-Minecraft NPCs, externally editable here
+    instead of baked into ProsperityDialog.java's jar. The mod polls this on
+    a timer, so editing a row changes what an NPC says with no rebuild or
+    redeploy. One greeting (shown once per player, per NPC, the first time
+    they're approached -- the "here's my frequency" beat) plus a rotating
+    pool of ordinary lines."""
+    rows = db_fetch_all(
+        "SELECT npc_name, line_text, is_greeting FROM npc_lines ORDER BY npc_name, sort_order"
+    )
+    result: dict = {}
+    for npc_name, line_text, is_greeting in rows:
+        entry = result.setdefault(npc_name, {"greeting": None, "lines": []})
+        if is_greeting:
+            entry["greeting"] = line_text
+        else:
+            entry["lines"].append(line_text)
+    return result
+
 
 @app.get("/api/minecraft/link/{user_id}")
 async def get_minecraft_link(user_id: str):
@@ -2730,9 +2788,31 @@ def _companion_url(request: Request, hint_host: Optional[str] = None) -> str:
     return f"http://{host}/companion.html"
 
 
+def _mint_pairing_token(user_id: str) -> Optional[str]:
+    """Single-use, 10-min-expiry token that lets a *different device/tab*
+    open companion.html already logged in as user_id, no re-auth (BUILD_PLAN_2
+    §7). Shared by the QR code (phone) and the desktop "Open Field Kit"
+    entry points -- same mechanism either way, since Field Kit is the same
+    PWA regardless of which device opens it."""
+    token = str(uuid.uuid4())
+    try:
+        db_execute(
+            "INSERT INTO pairing_tokens (token, user_id) VALUES (%s::uuid, %s::uuid)",
+            (token, user_id)
+        )
+        return token
+    except Exception as e:
+        logger.warning(f"Pairing token mint failed: {e}")
+        return None
+
+
 @app.get("/api/companion/info")
-async def companion_info(request: Request, hint_host: Optional[str] = None):
+async def companion_info(request: Request, hint_host: Optional[str] = None, user_id: Optional[str] = None):
     url = _companion_url(request, hint_host)
+    if user_id:
+        token = _mint_pairing_token(user_id)
+        if token:
+            url += f"?pair={token}"
     return {"url": url, "scannable": not url.startswith("http://localhost") and not url.startswith("http://127.")}
 
 
@@ -2743,18 +2823,9 @@ async def companion_qr(request: Request, user_id: Optional[str] = None, hint_hos
     import qrcode.image.svg
     url = _companion_url(request, hint_host)
     if user_id:
-        # Pairing token (BUILD_PLAN_2 §7): the QR registers the phone as
-        # the logged-in web user, no login. Single-use, 10-min expiry,
-        # a fresh token per render.
-        token = str(uuid.uuid4())
-        try:
-            db_execute(
-                "INSERT INTO pairing_tokens (token, user_id) VALUES (%s::uuid, %s::uuid)",
-                (token, user_id)
-            )
+        token = _mint_pairing_token(user_id)
+        if token:
             url += f"?pair={token}"
-        except Exception as e:
-            logger.warning(f"Pairing token mint failed (QR stays unpaired): {e}")
     img = qrcode.make(url, image_factory=qrcode.image.svg.SvgPathImage, box_size=12)
     buf = io.BytesIO()
     img.save(buf)

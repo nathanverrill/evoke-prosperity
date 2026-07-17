@@ -11,21 +11,36 @@
   <link rel="stylesheet" href="layout.css">
   <link rel="stylesheet" href="theme.css">
   <link rel="stylesheet" href="showcase.css">
+  <style>
+    /* Phone-first tab bar -- same B1llBot/Notebook/Minecraft split as the
+       desktop app's in-app Companion Mode screen (index.html), so the
+       experience is the same whether you scan the QR or open this on a
+       computer. B1llBot is the default tab, everywhere, no exceptions. */
+    .fk-tabs{display:flex;gap:6px;margin:14px 0;}
+    .fk-tab{flex:1;padding:9px 6px;border-radius:10px;border:none;cursor:pointer;font-family:inherit;font-size:0.85em;font-weight:600;background:rgba(0,0,0,0.06);color:inherit;opacity:0.6;}
+    .fk-tab.on{opacity:1;background:rgba(44,62,80,0.14);}
+    .fk-pane[hidden]{display:none;}
+  </style>
 </head>
 <body>
   <div class="companion-page stack" id="companion-root">
+    <section class="card" id="mc-conduct-gate">
+      <div class="card__eyebrow">The Rule of Law in Keel</div>
+      <p>Keel wasn't rebuilt by accident — it runs on a charter every visitor agrees to, posted at the gates for as long as anyone can remember:</p>
+      <ol style="padding-left:20px;line-height:1.6;">
+        <li style="margin-bottom:8px;"><strong>Every person you meet is real.</strong> Treat them the way you'd want to be treated — no bullying, no harassment, no cruelty. The Basin has no room for it.</li>
+        <li style="margin-bottom:8px;"><strong>Keep your real name, address, phone number, and school to yourself.</strong> In the Basin, your Agent handle is who you are.</li>
+        <li style="margin-bottom:8px;"><strong>Bring a grown-up with you, in spirit.</strong> A parent, guardian, or teacher should know you're here — this world is meant to be shared, not sneaked into.</li>
+        <li style="margin-bottom:8px;"><strong>If something feels wrong, leave and say something.</strong> Tell a trusted adult right away. The Basin stays safe because people speak up.</li>
+        <li><strong>The Watchtower keeps a record.</strong> What happens in the Basin is logged, same as any shared space — for safety, not surveillance.</li>
+      </ol>
+      <button class="btn btn-primary" id="mc-conduct-accept" style="width:100%">I Understand — Enter the Basin</button>
+    </section>
+
+    <div id="fk-content" hidden>
     <h1 class="card__title">EVOKE Field Kit</h1>
     <p class="empty-state" id="agent-line"></p>
-    <p class="empty-state">Your pocket companion — keep this open on your phone next to Minecraft, or check in here anytime for your Daily Field Report, pending awards, and B1llBot.</p>
-
-    <section class="card" id="pair-confirm" hidden>
-      <div class="card__eyebrow">Pairing</div>
-      <p>Registering this phone as <strong id="pair-name"></strong> — that's you?</p>
-      <div class="row">
-        <button class="btn btn-primary" id="pair-yes">Yes, that's me</button>
-        <button class="btn" id="pair-no">No</button>
-      </div>
-    </section>
+    <p class="empty-state">Your pocket companion — keep this open on your phone next to Minecraft, or check in here anytime for B1llBot, your Notebook, and Minecraft.</p>
 
     <section class="card" id="link-confirm-card" hidden>
       <div class="card__eyebrow">⛏ Minecraft link request</div>
@@ -36,14 +51,38 @@
       </div>
     </section>
 
-    <section class="card" id="reflect-card">
+    <div class="fk-tabs" role="tablist" aria-label="Companion tools">
+      <button class="fk-tab on" id="fk-tab-chat" data-fpane="chat" role="tab" aria-selected="true" type="button">B1llBot</button>
+      <button class="fk-tab" id="fk-tab-note" data-fpane="note" role="tab" aria-selected="false" type="button">Notebook</button>
+      <button class="fk-tab" id="fk-tab-mc" data-fpane="mc" role="tab" aria-selected="false" type="button">Minecraft</button>
+    </div>
+
+    <section class="card fk-pane" data-fpane="chat">
+      <div class="billbot-drawer__log" id="chat"></div>
+      <form id="chat-form" class="row">
+        <input type="text" id="chat-input" placeholder="Ask B1llBot..." style="flex:1" autocomplete="off">
+        <button type="submit">→</button>
+      </form>
+    </section>
+
+    <section class="card fk-pane" data-fpane="note" hidden>
       <div class="card__eyebrow">Daily Field Report</div>
       <div id="reflect-body">Loading...</div>
     </section>
 
-    <section class="card" id="connect-card">
-      <div class="card__eyebrow">Basin Simulation</div>
+    <section class="card fk-pane" data-fpane="mc" hidden>
+      <div class="card__eyebrow">Connect to Minecraft</div>
       <div id="connect-body">Loading...</div>
+      <div id="mc-quest-card" hidden style="margin-top:14px;">
+        <div class="card__eyebrow">Minecraft Quests</div>
+        <p class="empty-state" style="margin-top:-4px">Small in-Minecraft activities tied to your missions — self-reported, honor system, never graded.</p>
+        <form id="quest-form" class="stack-sm">
+          <select id="quest-select"></select>
+          <textarea id="quest-observation" placeholder="What did you observe? (optional)" rows="2"></textarea>
+          <button type="submit" class="btn btn-primary">Report Complete</button>
+        </form>
+        <p id="quest-status" class="empty-state"></p>
+      </div>
     </section>
 
     <section class="card world-meter">
@@ -65,26 +104,7 @@
       <div class="card__eyebrow">Pending Awards</div>
       <div id="awards" class="stack-sm"></div>
     </section>
-
-    <section class="card" id="quest-card" hidden>
-      <div class="card__eyebrow">Report Quest Complete</div>
-      <p class="empty-state" style="margin-top:-4px">Small in-Minecraft activities tied to your missions — self-reported, honor system, never graded.</p>
-      <form id="quest-form" class="stack-sm">
-        <select id="quest-select"></select>
-        <textarea id="quest-observation" placeholder="What did you observe? (optional)" rows="2"></textarea>
-        <button type="submit" class="btn btn-primary">Report Complete</button>
-      </form>
-      <p id="quest-status" class="empty-state"></p>
-    </section>
-
-    <section class="card">
-      <div class="card__eyebrow">B1llBot</div>
-      <div class="billbot-drawer__log" id="chat"></div>
-      <form id="chat-form" class="row">
-        <input type="text" id="chat-input" placeholder="Ask B1llBot..." style="flex:1" autocomplete="off">
-        <button type="submit">→</button>
-      </form>
-    </section>
+    </div>
   </div>
 
   <script>
@@ -97,6 +117,41 @@
     }
 
     let displayName = null;
+
+    // Tabs -- B1llBot is the default everywhere, matching the desktop app's
+    // Companion Mode screen exactly (no special-cased entry point defaults
+    // to a different tab there either).
+    function switchFkTab(which) {
+      document.querySelectorAll(".fk-tab").forEach((t) => {
+        const on = t.dataset.fpane === which;
+        t.classList.toggle("on", on);
+        t.setAttribute("aria-selected", on ? "true" : "false");
+      });
+      document.querySelectorAll(".fk-pane").forEach((p) => { p.hidden = p.dataset.fpane !== which; });
+    }
+    document.querySelectorAll(".fk-tab").forEach((t) => t.addEventListener("click", () => switchFkTab(t.dataset.fpane)));
+
+    // Conduct gate -- the whole page ("Rule of Law in Keel"), same gate as
+    // the desktop app's Minecraft tab, but page-level here: nothing else on
+    // this page renders or loads until it's accepted, including pairing/
+    // login (init(), which drives all of that plus every data fetch, is
+    // only called once accepted). NOT a substitute for actual legal review
+    // (GAPS.md already flags FERPA/COPPA posture as an open, unresolved
+    // decision) -- this is a real, useful safety/conduct acknowledgment,
+    // not a certified compliance instrument.
+    function enterField() {
+      document.getElementById("mc-conduct-gate").hidden = true;
+      document.getElementById("fk-content").hidden = false;
+      init();
+    }
+    if (localStorage.getItem("evoke-mc-conduct-accepted") === "1") {
+      enterField();
+    } else {
+      document.getElementById("mc-conduct-accept").addEventListener("click", () => {
+        try { localStorage.setItem("evoke-mc-conduct-accepted", "1"); } catch (e) {}
+        enterField();
+      });
+    }
 
     async function init() {
       // Service worker intentionally disabled: it cached the app shell and
@@ -123,7 +178,13 @@
       }
       // Pairing (BUILD_PLAN_2 §7): a ?pair= token from the Hub QR registers
       // this phone as the scanning user — no login. Falls back to a stored
-      // pairing, then dev-login.
+      // pairing, then dev-login. Committed silently, no "Yes, that's me?"
+      // step: the token is already scoped to a specific already-logged-in
+      // user (minted by /api/companion/info for that exact user_id) -- the
+      // site/QR already knows who this is, so asking again was redundant.
+      // The old confirm step existed for a "someone else scans your QR off
+      // a shared screen" threat model; explicitly deferred for later rather
+      // than solved here. Name still shows -- see agent-line below.
       const pairToken = new URLSearchParams(location.search).get("pair");
       if (pairToken) {
         try {
@@ -133,23 +194,9 @@
             if (!r.ok) throw new Error("pair failed");
             return r.json();
           });
-          // Confirm before committing — the projector-QR threat model.
-          document.getElementById("pair-name").textContent = who.display_name;
-          document.getElementById("pair-confirm").hidden = false;
-          await new Promise(resolve => {
-            document.getElementById("pair-yes").addEventListener("click", () => {
-              localStorage.setItem("fieldkit_user_id", who.user_id);
-              localStorage.setItem("fieldkit_display_name", who.display_name);
-              document.getElementById("pair-confirm").hidden = true;
-              history.replaceState(null, "", location.pathname);
-              resolve();
-            });
-            document.getElementById("pair-no").addEventListener("click", () => {
-              document.getElementById("pair-confirm").hidden = true;
-              history.replaceState(null, "", location.pathname);
-              resolve();
-            });
-          });
+          localStorage.setItem("fieldkit_user_id", who.user_id);
+          localStorage.setItem("fieldkit_display_name", who.display_name);
+          history.replaceState(null, "", location.pathname);
         } catch (e) { /* expired/used token -- fall through */ }
       }
       userId = localStorage.getItem("fieldkit_user_id");
@@ -169,7 +216,7 @@
       setInterval(pollLinkRequest, 8000);
     }
 
-    // ---- Daily Field Report ----
+    // ---- Daily Field Report (the Notebook tab's real content) ----
     async function loadReflect() {
       const body = document.getElementById("reflect-body");
       try {
@@ -202,7 +249,11 @@
       });
     }
 
-    // ---- Connect to Basin Simulation (inline instructions, §8) ----
+    // ---- Connect to Minecraft (Minecraft tab) -- same code-entry mechanism
+    // as the desktop app's Minecraft tab: mint a code, type it in-game,
+    // confirm here. Poll-only fallback alongside the live /ws push below. ----
+    let mcPollTimer = null;
+    function mcStopPolling() { if (mcPollTimer) { clearInterval(mcPollTimer); mcPollTimer = null; } }
     async function loadConnect() {
       const body = document.getElementById("connect-body");
       try {
@@ -210,30 +261,36 @@
           fetch(`/api/minecraft/link/${userId}`).then(r => r.json()),
           fetch("/api/minecraft/connect-info").then(r => r.json()),
         ]);
+        mcStopPolling();
         if (link.linked) {
           body.innerHTML = `<p>Linked as <strong>${escapeHtml(link.username)}</strong> ✓</p><p class="empty-state">Rewards, quests, and XP flow between the Basin and your account.</p>`;
+          loadMcQuests();
           return;
         }
+        document.getElementById("mc-quest-card").hidden = true;
         body.innerHTML = `
           <p class="empty-state">Optional — never graded. Play the same world in Minecraft: fly over Keel, Halyard, and the Oasis, and talk to B1llBot and the people of Keel yourself.</p>
-          <button class="btn btn-primary" id="connect-start">Connect to Basin Simulation</button>
+          <p><strong>1.</strong> Make sure you're running Minecraft <strong>Java Edition ${escapeHtml(info.java_version)}</strong> — Java needs a matching version to connect at all; a mismatch gets you "Outdated client/server," not a normal error. (Bedrock/mobile: any recent version works through the address below.)</p>
+          <p><strong>2.</strong> In Minecraft, add a multiplayer server:</p>
+          <p style="display:flex;align-items:center;gap:6px">Java: <code>${escapeHtml(info.java_address)}</code>
+            <button class="btn" data-copy="${escapeHtml(info.java_address)}" style="padding:2px 8px;font-size:0.85em">Copy</button></p>
+          <p style="display:flex;align-items:center;gap:6px">Bedrock: <code>${escapeHtml(info.bedrock_address)}</code>
+            <button class="btn" data-copy="${escapeHtml(info.bedrock_address)}" style="padding:2px 8px;font-size:0.85em">Copy</button></p>
+          <p><strong>3.</strong> You'll spawn on the mountain, above Keel — it's a real walk down, not a quick hop. Head downhill and outward from spawn; Keel is the hot, cramped mining town at the base, and that's where B1llBot's kiosk is. If you get turned around, open your coordinates (F3 on Java, the settings menu on Bedrock) — Keel is roughly <code>-50, 65, 210</code>.</p>
+          <button class="btn btn-primary" id="connect-start">Link Your Minecraft Account</button>
           <div id="connect-steps" hidden style="margin-top:8px">
-            <p><strong>1.</strong> In Minecraft, add a multiplayer server:</p>
-            <p style="display:flex;align-items:center;gap:6px">Java: <code>${escapeHtml(info.java_address)}</code>
-              <button class="btn" data-copy="${escapeHtml(info.java_address)}" style="padding:2px 8px;font-size:0.85em">Copy</button></p>
-            <p style="display:flex;align-items:center;gap:6px">Bedrock: <code>${escapeHtml(info.bedrock_address)}</code>
-              <button class="btn" data-copy="${escapeHtml(info.bedrock_address)}" style="padding:2px 8px;font-size:0.85em">Copy</button></p>
-            <p><strong>2.</strong> You'll spawn on the mountain, above Keel — it's a real walk down, not a quick hop. Head downhill and outward from spawn; Keel is the hot, cramped mining town at the base, and that's where B1llBot's kiosk is. If you get turned around, open your coordinates (F3 on Java, the settings menu on Bedrock) — Keel is roughly <code>-50, 65, 210</code>.</p>
-            <p><strong>3.</strong> Once you're at the kiosk, he'll whisper hello on his own. Type in chat:</p>
+            <p><strong>4.</strong> Once you're at the kiosk, he'll whisper hello on his own. Type in chat:</p>
             <p><code id="connect-cmd" style="font-size:1.05em"></code></p>
-            <p><strong>4.</strong> Come back here — you'll get a confirmation to tap once the game hears you.</p>
-            <p class="empty-state">Code expires in 10 minutes. <a href="/#/faq" target="_blank">Full FAQ →</a></p>
+            <p class="empty-state">Code expires in 10 minutes.</p>
+            <button class="btn" id="connect-confirm-check" style="margin-top:6px">I typed it — Check</button>
+            <p id="connect-confirm-status" class="empty-state"></p>
           </div>`;
         document.getElementById("connect-start").addEventListener("click", async () => {
           const res = await fetch(`/api/minecraft/link-code?user_id=${userId}`, { method: "POST" }).then(r => r.json());
           document.getElementById("connect-cmd").textContent = res.command;
           document.getElementById("connect-steps").hidden = false;
           document.getElementById("connect-start").hidden = true;
+          mcPollTimer = setInterval(pollLinkRequest, 10000);
         });
         body.querySelectorAll("[data-copy]").forEach((btn) => {
           btn.addEventListener("click", async () => {
@@ -245,16 +302,57 @@
             } catch (e) { /* clipboard unavailable — the address is still visible to copy by hand */ }
           });
         });
-        document.getElementById("connect-confirm-check").addEventListener("click", async () => {
+        document.getElementById("connect-confirm-check").addEventListener("click", async (e) => {
           const status = document.getElementById("connect-confirm-status");
+          const btn = e.currentTarget;
           status.textContent = "Checking…";
+          btn.disabled = true;
           const found = await pollLinkRequest();
-          if (!found) status.textContent = "Not yet — make sure you typed the command in Minecraft, then tap Confirm again.";
+          btn.disabled = false;
+          // Bug found live via docker/bridge logs: this used to only ever
+          // update status text on the NOT-found path -- on a real match it
+          // stayed stuck reading "Checking…" forever, even though
+          // showLinkConfirm() had already rendered the real confirm card
+          // above it. Looked exactly like a hang.
+          status.textContent = found ? "Found it! Confirm above ↑" : "Not yet — make sure you typed the command in Minecraft, then tap Confirm again.";
         });
       } catch (e) {
         body.innerHTML = `<p class="empty-state">Basin status unavailable right now.</p>`;
       }
     }
+
+    // Quests are Basin content: revealed only once Minecraft is linked
+    // (BUILD_PLAN_2 §4).
+    async function loadMcQuests() {
+      const card = document.getElementById("mc-quest-card");
+      try {
+        const missions = await fetch(`/api/missions?user_id=${userId}`).then(r => r.json());
+        const questOptions = (missions.missions || [])
+          .filter(mm => mm.quest)
+          .map(mm => `<option value="${mm.quest.id}">${escapeHtml(mm.quest.title)}</option>`)
+          .join("");
+        document.getElementById("quest-select").innerHTML = questOptions || `<option disabled>No quests available</option>`;
+        card.hidden = false;
+      } catch (e) {}
+    }
+
+    document.getElementById("quest-form").addEventListener("submit", async (e) => {
+      e.preventDefault();
+      const questId = document.getElementById("quest-select").value;
+      const observation = document.getElementById("quest-observation").value;
+      const statusEl = document.getElementById("quest-status");
+      if (!questId) return;
+      const formData = new FormData();
+      formData.append("observation_text", observation);
+      statusEl.textContent = "Reporting...";
+      try {
+        await fetch(`/api/mc-quests/${questId}/submit?user_id=${userId}`, { method: "POST", body: formData });
+        statusEl.textContent = "Logged — self-reported, never graded, never required.";
+        document.getElementById("quest-observation").value = "";
+      } catch (err) {
+        statusEl.textContent = "Couldn't report that just now.";
+      }
+    });
 
     // ---- Two-channel link confirm (push + poll fallback) ----
     async function pollLinkRequest() {
@@ -274,6 +372,7 @@
         fd.append("accept", accept ? "true" : "false");
         await fetch(`/api/minecraft/link-confirm?user_id=${userId}`, { method: "POST", body: fd }).catch(() => {});
         card.hidden = true;
+        mcStopPolling();
         if (accept) showLinkCelebration(mcName);
         loadConnect();
       };
@@ -288,7 +387,7 @@
       overlay.className = "celebration-overlay";
       overlay.innerHTML = `
         <div class="card celebration-card" data-tier="legendary">
-          <div class="card__eyebrow">Basin Simulation</div>
+          <div class="card__eyebrow">Connect to Minecraft</div>
           <h1>Connected!</h1>
           <p class="celebration-tier">Linked as <strong>${escapeHtml(mcName)}</strong></p>
           <p>Rewards, quests, and XP now flow between the Basin and your account.</p>
@@ -299,7 +398,7 @@
       document.getElementById("link-celebration-continue").addEventListener("click", () => overlay.remove());
     }
 
-    // Live push channel -- same /ws feed the Hub uses. The 10s poll below
+    // Live push channel -- same /ws feed the Hub uses. The 10s poll above
     // stays as the safety net; this just makes the phone feel alive
     // (presence flips, world stages, awards) without waiting for it.
     function connectLive() {
@@ -349,24 +448,12 @@
     async function loadData() {
       if (!userId) return;
       loadWorldAndPresence();
-      // Quests are Basin content: revealed only once Minecraft is linked
-      // (BUILD_PLAN_2 §4).
-      try {
-        const link = await fetch(`/api/minecraft/link/${userId}`).then(r => r.json());
-        document.getElementById("quest-card").hidden = !link.linked;
-      } catch (e) {}
       try {
         const missions = await fetch(`/api/missions?user_id=${userId}`).then(r => r.json());
         const m = (missions.missions || [])[0];
         document.getElementById("mission").innerHTML = m
           ? `<strong>${escapeHtml(m.title)}</strong><br><span class="empty-state">Week ${m.week} · ${m.arc}</span>`
           : `<span class="empty-state">No missions yet.</span>`;
-
-        const questOptions = (missions.missions || [])
-          .filter(mm => mm.quest)
-          .map(mm => `<option value="${mm.quest.id}">${escapeHtml(mm.quest.title)}</option>`)
-          .join("");
-        document.getElementById("quest-select").innerHTML = questOptions || `<option disabled>No quests available</option>`;
 
         const notifs = await fetch(`/api/notifications/${userId}`).then(r => r.json());
         const pending = (notifs.notifications || []).filter(n => !n.read);
@@ -392,24 +479,6 @@
       } catch (e) { console.error(e); }
     }
 
-    document.getElementById("quest-form").addEventListener("submit", async (e) => {
-      e.preventDefault();
-      const questId = document.getElementById("quest-select").value;
-      const observation = document.getElementById("quest-observation").value;
-      const statusEl = document.getElementById("quest-status");
-      if (!questId) return;
-      const formData = new FormData();
-      formData.append("observation_text", observation);
-      statusEl.textContent = "Reporting...";
-      try {
-        await fetch(`/api/mc-quests/${questId}/submit?user_id=${userId}`, { method: "POST", body: formData });
-        statusEl.textContent = "Logged — self-reported, never graded, never required.";
-        document.getElementById("quest-observation").value = "";
-      } catch (err) {
-        statusEl.textContent = "Couldn't report that just now.";
-      }
-    });
-
     document.getElementById("chat-form").addEventListener("submit", async (e) => {
       e.preventDefault();
       const input = document.getElementById("chat-input");
@@ -430,8 +499,6 @@
       }
       chat.scrollTop = chat.scrollHeight;
     });
-
-    init();
   </script>
 </body>
 </html>

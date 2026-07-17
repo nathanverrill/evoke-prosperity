@@ -1235,12 +1235,16 @@
         <div id="ops-checklist" class="ops-ov-list"></div>
       </div>
       <div class="glass" style="padding:clamp(18px,2.5vw,24px);display:flex;flex-direction:column;">
-        <h3 class="hud" style="font-size:12px;color:var(--cyan-300);margin:0 0 14px;">Go to Minecraft <span style="color:var(--text-faint);">· Optional</span></h3>
-        <div class="ops-photo" style="border-radius:12px;box-shadow:inset 0 0 0 1px var(--border-ui);flex:1;min-height:150px;margin-bottom:14px;background:#0e2236;">
-          <img src="img/ui/10.jpg" alt="B1llBot waving in the Prosperity Minecraft world" style="position:absolute;inset:0;width:100%;height:100%;object-fit:cover;object-position:center top;">
+        <h3 class="hud" style="font-size:12px;color:var(--cyan-300);margin:0 0 2px;">EVOKE Field Kit</h3>
+        <div style="font-family:var(--font-mono);font-size:10.5px;color:var(--text-faint);letter-spacing:.06em;margin-bottom:12px;">// Your Basin, Your Pocket</div>
+        <div style="display:flex;gap:12px;align-items:center;margin-bottom:14px;">
+          <div id="mc-fieldkit-qr" style="width:88px;height:88px;flex:none;border-radius:10px;background:#fff;padding:7px;display:flex;align-items:center;justify-content:center;"><span class="ms" aria-hidden="true" style="font-size:26px;color:#0b1220;">qr_code_2</span></div>
+          <div style="flex:1;min-width:0;height:88px;border-radius:10px;box-shadow:inset 0 0 0 1px var(--border-ui);background:#0e2236;position:relative;overflow:hidden;">
+            <img src="img/ui/10.jpg" alt="B1llBot waving in the Prosperity Minecraft world" style="position:absolute;inset:0;width:100%;height:100%;object-fit:cover;object-position:center top;">
+          </div>
         </div>
-        <p style="font-family:var(--font-body);font-size:13px;line-height:1.5;color:var(--teal-100);margin:0 0 14px;">Optional practice space — explore the Prosperity Simulation of Keel. Your real-world fieldwork is what completes the mission.</p>
-        <button id="ops-mc" class="btn sec" type="button" style="margin-top:auto;width:100%;">Go to Minecraft to talk with B1llBot&nbsp;<span class="ms" aria-hidden="true" style="font-size:16px;vertical-align:middle;">open_in_new</span></button>
+        <p style="font-family:var(--font-body);font-size:14.5px;line-height:1.6;color:var(--teal-050);margin:0 0 14px;">Travel light, Agent. Your Field Kit is a companion for the Minecraft experience — scan to carry B1llBot, your Notebook, and Keel itself with you, wherever the mission takes you next.</p>
+        <button id="ops-fieldkit-open" type="button" style="margin-top:auto;background:none;border:none;padding:0;cursor:pointer;font-family:var(--font-body);font-size:13px;color:var(--cyan-300);text-decoration:underline;text-underline-offset:2px;">Or open it on your computer&nbsp;<span class="ms" aria-hidden="true" style="font-size:16px;vertical-align:middle;">open_in_new</span></button>
       </div>
       <div class="glass" style="padding:clamp(18px,2.5vw,24px);">
         <h3 class="hud" style="font-size:12px;color:var(--cyan-300);margin:0 0 14px;">Superpowers</h3>
@@ -1251,16 +1255,6 @@
         <div class="hud" style="font-size:10px;color:var(--text-faint);margin-bottom:10px;display:none;">Superpowers</div>
         <div id="ops-superpowers" style="display:flex;flex-direction:column;gap:10px;flex:1;justify-content:space-evenly;"></div>
       </div>
-    </div>
-
-    <div class="glass brackets" style="display:flex;align-items:center;gap:20px;flex-wrap:wrap;padding:clamp(18px,2.5vw,26px);margin-top:22px;box-shadow:inset 0 0 0 1px rgba(0,150,136,0.32),var(--elev-glass);">
-      <div id="mc-fieldkit-qr" style="width:104px;height:104px;flex:none;border-radius:12px;background:#fff;padding:9px;display:flex;align-items:center;justify-content:center;"><span class="ms" aria-hidden="true" style="font-size:32px;color:#0b1220;">qr_code_2</span></div>
-      <div style="flex:1;min-width:240px;">
-        <div class="hud" style="font-size:10px;color:var(--cyan-300);margin-bottom:6px;">Take It With You</div>
-        <div style="font-family:var(--font-display);font-weight:800;font-size:clamp(18px,2.4vw,22px);color:var(--text-heading);margin-bottom:6px;">Heading into the field? Take B1llBot with you.</div>
-        <p style="font-family:var(--font-body);font-size:14px;line-height:1.55;color:var(--teal-050);margin:0;max-width:520px;">Interviewing people, exploring your community, gathering evidence — scan with your phone camera to keep your <strong style="color:var(--cyan-100);">mission, B1llBot, and your Field Notebook</strong> right in your pocket.</p>
-      </div>
-      <button id="ops-fieldkit-open" class="btn sec" type="button" style="flex:none;">Open Field Kit&nbsp;<span class="ms" aria-hidden="true" style="font-size:16px;vertical-align:middle;">open_in_new</span></button>
     </div>
 
     <div class="glass" style="display:flex;align-items:center;justify-content:space-between;gap:24px;flex-wrap:wrap;padding:clamp(20px,3vw,30px);margin-top:22px;">
@@ -1300,7 +1294,7 @@
       </div>
       <div style="display:flex;gap:13px;align-items:flex-start;">
         <span class="ms" aria-hidden="true" style="font-size:22px;color:var(--cyan-300);flex:none;">deployed_code</span>
-        <div><div style="font-family:var(--font-display);font-weight:700;font-size:14px;color:var(--cyan-100);margin-bottom:2px;">Optional: Go to Minecraft</div><div style="font-family:var(--font-body);font-size:13.5px;line-height:1.5;color:var(--teal-050);">A practice space to explore in the simulation. Helpful, but never required to complete a mission.</div></div>
+        <div><div style="font-family:var(--font-display);font-weight:700;font-size:14px;color:var(--cyan-100);margin-bottom:2px;">Travel Light — Take Field Kit With You</div><div style="font-family:var(--font-body);font-size:13.5px;line-height:1.5;color:var(--teal-050);">Scan the QR code, or open it on your computer — B1llBot, your Notebook, and Keel itself, wherever the mission takes you next.</div></div>
       </div>
       <div style="display:flex;gap:13px;align-items:flex-start;">
         <span class="ms" aria-hidden="true" style="font-size:22px;color:var(--cyan-300);flex:none;">workspace_premium</span>
@@ -1318,40 +1312,6 @@
 </div>
 
 <!-- Minecraft instructions popup -->
-<div class="ops-modal" id="mc-modal" role="dialog" aria-modal="true" aria-labelledby="mc-modal-title">
-  <div class="sheet">
-    <div style="display:flex;align-items:flex-start;gap:14px;margin-bottom:18px;">
-      <span style="width:46px;height:46px;flex:none;display:flex;align-items:center;justify-content:center;"><img src="img/ui/12.png" alt="" aria-hidden="true" style="width:42px;height:42px;object-fit:contain;"></span>
-      <h2 id="mc-modal-title" style="font-family:var(--font-display);font-weight:700;font-size:22px;color:var(--text-heading);margin:0;flex:1;line-height:1.15;">Go to Minecraft to talk with B1llBot</h2>
-      <button id="mc-modal-x" type="button" aria-label="Close" style="border:none;background:none;color:var(--text-faint);cursor:pointer;flex:none;"><span class="ms" aria-hidden="true" style="font-size:24px;">close</span></button>
-    </div>
-    <p id="mc-modal-intro" style="font-family:var(--font-body);font-size:14px;line-height:1.55;color:var(--teal-100);margin:0 0 16px;">This step is <strong style="color:var(--cyan-100);">optional</strong> — your mission is completed with real-world fieldwork. If you'd like to practice in the simulation, then follow the steps below to enter Keel.</p>
-    <div style="display:flex;align-items:center;gap:14px;flex-wrap:wrap;padding:13px 14px;border-radius:12px;background:rgba(0,150,136,0.07);box-shadow:inset 0 0 0 1px var(--border-ui);margin-bottom:16px;">
-      <span class="hud" style="font-size:10px;color:var(--cyan-300);margin-right:6px;">Server address:</span>
-      <code id="mc-server" style="flex:1;min-width:150px;font-family:var(--font-mono);font-size:14px;color:var(--cyan-100);">prosperity.apexmc.co</code>
-      <button id="mc-copy" type="button" class="btn sec" style="padding:7px 14px;font-size:12px;"><span class="ms" aria-hidden="true" style="font-size:15px;vertical-align:middle;">content_copy</span> Copy</button>
-    </div>
-    <div style="padding:13px 14px;border-radius:12px;background:rgba(0,150,136,0.05);box-shadow:inset 0 0 0 1px var(--border-ui);margin-bottom:16px;">
-      <div style="display:flex;align-items:center;gap:10px;margin-bottom:9px;"><span class="ms" aria-hidden="true" style="font-size:18px;color:var(--cyan-300);">link</span><span class="hud" style="font-size:10px;color:var(--cyan-300);">Link Your Minecraft Account</span></div>
-      <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;">
-        <label class="sr-only" for="mc-username">Minecraft username</label>
-        <input id="mc-username" type="text" autocomplete="off" placeholder="Your Minecraft username" style="flex:1;min-width:160px;padding:10px 12px;border-radius:10px;border:none;background:rgba(0,150,136,0.06);box-shadow:inset 0 0 0 1px var(--border-ui);color:var(--text-heading);font-family:var(--font-body);font-size:14px;">
-        <button class="btn sec" id="mc-link-btn" type="button" style="flex:none;padding:9px 16px;font-size:13px;">Link</button>
-      </div>
-      <div id="mc-link-status" class="hud" style="font-size:11px;margin-top:9px;color:var(--text-faint);">Not linked yet.</div>
-    </div>
-    <div id="mc-modal-steps" style="margin-bottom:18px;"></div>
-    <div style="display:flex;gap:12px;align-items:flex-start;padding:14px 16px;border-radius:12px;box-shadow:inset 0 0 0 1px var(--border-ui);background:rgba(0,150,136,0.05);margin-bottom:18px;">
-      <img src="img/ui/13.png" alt="" style="width:40px;height:46px;object-fit:contain;flex:none;">
-      <div><div style="font-family:var(--font-display);font-weight:700;font-size:14px;color:var(--cyan-300);margin-bottom:3px;">Need help getting in?</div><div style="font-family:var(--font-body);font-size:13px;line-height:1.5;color:var(--teal-100);">Make sure you're on <strong style="color:var(--cyan-100);">prosperity.apexmc.co</strong>, then follow the steps above for movement, chat commands, and troubleshooting.</div></div>
-    </div>
-    <div style="display:flex;flex-direction:column;gap:10px;">
-      <button id="mc-modal-companion" class="btn" type="button" style="width:100%;">Enter Companion Mode&nbsp;<span class="ms" aria-hidden="true" style="font-size:16px;vertical-align:middle;">open_in_new</span></button>
-      <button id="mc-modal-ok" class="btn sec" type="button" style="width:100%;">OK, Got It</button>
-    </div>
-  </div>
-</div>
-
 <!-- ===== EVIDENCE (real-world submission) ===== -->
 <section class="screen" data-screen="evidence" aria-label="Submit Your Evidence">
   <header class="topbar"><div class="lockup brand-static"></div></header>
@@ -1398,7 +1358,7 @@
         <div style="font-family:var(--font-display);font-weight:800;font-size:19px;color:var(--text-heading);margin-bottom:3px;">Play alongside EVOKE</div>
         <div style="font-family:var(--font-body);font-size:14px;line-height:1.5;color:var(--teal-050);">Dock EVOKE beside your Minecraft window so B1llBot and your Explorer's Notebook stay with you while you play.</div>
       </div>
-      <button class="btn" id="mc-companion" type="button" style="flex:none;">Enter Companion Mode&nbsp;<span class="ms" aria-hidden="true" style="font-size:16px;vertical-align:middle;">open_in_new</span></button>
+      <button class="btn" id="mc-companion" type="button" style="flex:none;">Open Field Kit&nbsp;<span class="ms" aria-hidden="true" style="font-size:16px;vertical-align:middle;">open_in_new</span></button>
     </div>
 
     <h2 class="hud" style="font-size:12px;margin:0 0 16px;color:var(--cyan-300);">How to Complete Your Quest</h2>
@@ -1424,12 +1384,12 @@
   </main>
 </section>
 
-<!-- ===== COMPANION MODE (docks beside Minecraft) ===== -->
-<section class="screen" data-screen="companion" aria-label="Companion Mode">
+<!-- ===== FIELD KIT (docks beside Minecraft) ===== -->
+<section class="screen" data-screen="companion" aria-label="Field Kit">
   <div class="comp-shell">
     <header class="comp-top">
       <div class="lockup brand-static"></div>
-      <button class="comp-exit" id="comp-exit" type="button"><span class="ms" aria-hidden="true" style="font-size:17px;">close_fullscreen</span>Exit Companion</button>
+      <button class="comp-exit" id="comp-exit" type="button"><span class="ms" aria-hidden="true" style="font-size:17px;">close_fullscreen</span>Exit Field Kit</button>
     </header>
     <div class="comp-banner">
       <span class="ms" aria-hidden="true">dock_to_left</span>
@@ -1445,9 +1405,10 @@
         <li><span class="ms" aria-hidden="true">looks_4</span>Capture what you earn &amp; notice in your Notebook.</li>
       </ul>
     </div>
-    <div class="comp-tabs" role="tablist" aria-label="Companion tools">
+    <div class="comp-tabs" role="tablist" aria-label="Field Kit tools">
       <button class="comp-tab on" id="comp-tab-chat" data-ctab="chat" role="tab" aria-selected="true" type="button"><span class="ms" aria-hidden="true" style="font-size:17px;">smart_toy</span>B1llBot</button>
       <button class="comp-tab" id="comp-tab-note" data-ctab="note" role="tab" aria-selected="false" type="button"><span class="ms" aria-hidden="true" style="font-size:17px;">history_edu</span>Notebook</button>
+      <button class="comp-tab" id="comp-tab-mc" data-ctab="mc" role="tab" aria-selected="false" type="button"><span class="ms" aria-hidden="true" style="font-size:17px;">stadia_controller</span>Minecraft</button>
     </div>
 
     <div class="comp-pane" data-cpane="chat" role="tabpanel" aria-labelledby="comp-tab-chat">
@@ -1480,6 +1441,55 @@
             <span>Click or drag an image here</span>
           </div>
           <input id="comp-shot-input" type="file" accept="image/*" style="display:none;">
+        </div>
+      </div>
+    </div>
+
+    <div class="comp-pane" data-cpane="mc" role="tabpanel" aria-labelledby="comp-tab-mc" hidden>
+      <div id="mc-conduct-gate" style="padding:16px 18px;border-radius:12px;background:rgba(0,150,136,0.06);box-shadow:inset 0 0 0 1px var(--border-ui);">
+        <div class="hud" style="font-size:10px;color:var(--cyan-300);margin-bottom:10px;">The Rule of Law in Keel</div>
+        <p style="font-family:var(--font-body);font-size:13px;line-height:1.6;color:var(--teal-050);margin:0 0 12px;">Keel wasn't rebuilt by accident — it runs on a charter every visitor agrees to, posted at the gates for as long as anyone can remember:</p>
+        <ol style="font-family:var(--font-body);font-size:13px;line-height:1.6;color:var(--teal-050);margin:0 0 14px;padding-left:20px;">
+          <li style="margin-bottom:8px;"><strong style="color:var(--cyan-100);">Every person you meet is real.</strong> Treat them the way you'd want to be treated — no bullying, no harassment, no cruelty. The Basin has no room for it.</li>
+          <li style="margin-bottom:8px;"><strong style="color:var(--cyan-100);">Keep your real name, address, phone number, and school to yourself.</strong> In the Basin, your Agent handle is who you are.</li>
+          <li style="margin-bottom:8px;"><strong style="color:var(--cyan-100);">Bring a grown-up with you, in spirit.</strong> A parent, guardian, or teacher should know you're here — this world is meant to be shared, not sneaked into.</li>
+          <li style="margin-bottom:8px;"><strong style="color:var(--cyan-100);">If something feels wrong, leave and say something.</strong> Tell a trusted adult right away. The Basin stays safe because people speak up.</li>
+          <li><strong style="color:var(--cyan-100);">The Watchtower keeps a record.</strong> What happens in the Basin is logged, same as any shared space — for safety, not surveillance.</li>
+        </ol>
+        <button id="mc-conduct-accept" class="btn" type="button" style="width:100%;">I Understand — Enter the Basin</button>
+      </div>
+      <div id="mc-conduct-body" hidden style="flex:1;overflow:auto;padding-right:2px;">
+        <p id="mc-modal-intro" style="font-family:var(--font-body);font-size:13px;line-height:1.55;color:var(--teal-050);margin:0 0 14px;">This step is <strong style="color:var(--cyan-100);">optional</strong> — your mission is completed with real-world fieldwork. If you'd like to practice in the simulation, then follow the steps below to enter Keel.</p>
+        <div style="display:flex;align-items:center;gap:14px;flex-wrap:wrap;padding:13px 14px;border-radius:12px;background:rgba(0,150,136,0.07);box-shadow:inset 0 0 0 1px var(--border-ui);margin-bottom:16px;">
+          <span class="hud" style="font-size:10px;color:var(--cyan-300);margin-right:6px;">Server address:</span>
+          <code id="mc-server" style="flex:1;min-width:150px;font-family:var(--font-mono);font-size:14px;color:var(--cyan-100);">prosperity.apexmc.co</code>
+          <button id="mc-copy" type="button" class="btn sec" style="padding:7px 14px;font-size:12px;"><span class="ms" aria-hidden="true" style="font-size:15px;vertical-align:middle;">content_copy</span> Copy</button>
+        </div>
+        <div style="padding:13px 14px;border-radius:12px;background:rgba(0,150,136,0.05);box-shadow:inset 0 0 0 1px var(--border-ui);margin-bottom:16px;">
+          <div style="display:flex;align-items:center;gap:10px;margin-bottom:9px;"><span class="ms" aria-hidden="true" style="font-size:18px;color:var(--cyan-300);">link</span><span class="hud" style="font-size:10px;color:var(--cyan-300);">Link Your Minecraft Account</span></div>
+          <div id="mc-link-flow" class="hud" style="font-size:11px;color:var(--text-faint);line-height:1.5;">Checking…</div>
+        </div>
+        <div id="mc-link-confirm-card" hidden style="padding:13px 14px;border-radius:12px;background:rgba(0,150,136,0.08);box-shadow:inset 0 0 0 1px var(--cyan-300);margin-bottom:16px;">
+          <p style="font-family:var(--font-body);font-size:13px;line-height:1.5;color:var(--teal-050);margin:0 0 10px;">Player <strong id="mc-link-mc-name" style="color:var(--cyan-100);"></strong> entered your code in the Basin. Link it to your account?</p>
+          <div style="display:flex;gap:10px;">
+            <button id="mc-link-yes" class="btn" type="button" style="flex:1;">Confirm Link</button>
+            <button id="mc-link-no" class="btn sec" type="button" style="flex:1;">Deny</button>
+          </div>
+        </div>
+        <div id="comp-mc-quests" hidden style="padding:13px 14px;border-radius:12px;background:rgba(0,150,136,0.05);box-shadow:inset 0 0 0 1px var(--border-ui);margin-bottom:16px;">
+          <div class="hud" style="font-size:10px;color:var(--cyan-300);margin-bottom:9px;">Minecraft Quests</div>
+          <p style="font-family:var(--font-body);font-size:12px;line-height:1.5;color:var(--text-faint);margin:0 0 10px;">Small in-Minecraft activities tied to your missions — self-reported, honor system, never graded.</p>
+          <form id="comp-mc-quest-form">
+            <select id="comp-mc-quest-select" style="width:100%;padding:8px 10px;border-radius:8px;border:none;background:rgba(0,150,136,0.06);box-shadow:inset 0 0 0 1px var(--border-ui);color:var(--text-heading);font-family:var(--font-body);font-size:13px;margin-bottom:8px;"></select>
+            <textarea id="comp-mc-quest-observation" placeholder="What did you observe? (optional)" rows="2" style="width:100%;padding:8px 10px;border-radius:8px;border:none;background:rgba(0,150,136,0.06);box-shadow:inset 0 0 0 1px var(--border-ui);color:var(--text-heading);font-family:var(--font-body);font-size:13px;margin-bottom:8px;resize:vertical;"></textarea>
+            <button type="submit" class="btn sec" style="width:100%;">Report Complete</button>
+          </form>
+          <p id="comp-mc-quest-status" style="font-family:var(--font-body);font-size:12px;color:var(--text-faint);margin:8px 0 0;"></p>
+        </div>
+        <div id="mc-modal-steps" style="margin-bottom:18px;"></div>
+        <div style="display:flex;gap:12px;align-items:flex-start;padding:14px 16px;border-radius:12px;box-shadow:inset 0 0 0 1px var(--border-ui);background:rgba(0,150,136,0.05);">
+          <img src="img/ui/13.png" alt="" style="width:40px;height:46px;object-fit:contain;flex:none;">
+          <div><div style="font-family:var(--font-display);font-weight:700;font-size:14px;color:var(--cyan-300);margin-bottom:3px;">Need help getting in?</div><div style="font-family:var(--font-body);font-size:13px;line-height:1.5;color:var(--teal-100);">Make sure you're on <strong style="color:var(--cyan-100);">prosperity.apexmc.co</strong>, then follow the steps above for movement, chat commands, and troubleshooting.</div></div>
         </div>
       </div>
     </div>
@@ -1528,6 +1538,6 @@
 
   <script src="submission-missions.js?b=4"></script>
   <script src="content.js?b=4"></script>
-  <script src="controller.js?b=21"></script>
+  <script src="controller.js?b=26"></script>
 </body>
 </html>

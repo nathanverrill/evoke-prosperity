@@ -798,7 +798,7 @@
         modalSteps:[
           'Open Minecraft on your computer, click <strong style="color:var(--cyan-100);">Multiplayer \u203a Add Server</strong>, paste the address you copied above, and click <strong style="color:var(--cyan-100);">Join Server</strong>.',
           "Resize your Minecraft window to fill one side of your screen.",
-          'Tap <strong style="color:var(--cyan-100);">Enter Companion Mode</strong> below and snap EVOKE to the other side \u2014 B1llBot and your Explorer\'s Notebook stay with you while you play.',
+          'Tap <strong style="color:var(--cyan-100);">Open Field Kit</strong> below and snap EVOKE to the other side \u2014 B1llBot and your Explorer\'s Notebook stay with you while you play.',
           'In Keel, use <strong style="color:var(--cyan-100);">W A S D</strong> and your <strong style="color:var(--cyan-100);">mouse</strong> to explore freely. This is the world before the collapse \u2014 roam it, find the parkour, and see what prosperity looks like.'
         ]
       },
@@ -821,11 +821,11 @@
           "Earn, save, and build prosperity step by step.",
           "Capture your progress in your Notebook."
         ],
-        modalIntro:'This step is <strong style="color:var(--cyan-100);">optional</strong> \u2014 your mission is completed with real-world fieldwork. If you\'d like to keep rebuilding Keel in the simulation, follow the steps below.',
+        modalIntro:'',
         modalSteps:[
           'Open Minecraft on your computer, click <strong style="color:var(--cyan-100);">Multiplayer \u203a Add Server</strong>, paste the address you copied above, and click <strong style="color:var(--cyan-100);">Join Server</strong>.',
           "Resize your Minecraft window to fill one side of your screen.",
-          'Tap <strong style="color:var(--cyan-100);">Enter Companion Mode</strong> below and snap EVOKE to the other side \u2014 B1llBot and your Explorer\'s Notebook stay with you while you play.',
+          'Tap <strong style="color:var(--cyan-100);">Open Field Kit</strong> below and snap EVOKE to the other side \u2014 B1llBot and your Explorer\'s Notebook stay with you while you play.',
           'In Keel, use <strong style="color:var(--cyan-100);">W A S D</strong> and your <strong style="color:var(--cyan-100);">mouse</strong>. Follow the mini-game markers to rebuild prosperity \u2014 earn, save, and build the world back toward the simulation you explored in Week 1.'
         ]
       }
@@ -920,14 +920,26 @@
       if(guide){ guide.addEventListener('click',function(e){ if(e.target===guide) closeGuide(); }); }
       document.addEventListener('keydown',function(e){ if(e.key==='Escape' && guide && guide.classList.contains('open')) closeGuide(); });
     })();
-    var modal=document.getElementById('mc-modal'), steps=document.getElementById('mc-modal-steps');
     renderMinecraftWeek();
-    function openM(){ modal.classList.add('open'); document.getElementById('mc-modal-ok').focus(); }
-    function closeM(){ modal.classList.remove('open'); go('ops'); }
-    document.getElementById('ops-mc').addEventListener('click',openM);
-    document.getElementById('mc-modal-ok').addEventListener('click',closeM);
-    var mcc=document.getElementById('mc-modal-companion'); if(mcc) mcc.addEventListener('click',function(){ closeM(); if(window.openCompanionWindow) window.openCompanionWindow(); });
-    document.getElementById('mc-modal-x').addEventListener('click',closeM);
+    // ops-mc ("Go to Minecraft · Optional" grid tile) is gone -- EVOKE Field
+    // Kit (QR + "Or open it on your computer", see ops-fieldkit-open below)
+    // is the one path in now, and Minecraft is reachable from inside it.
+    // Conduct gate -- shown once per device before the real connect content,
+    // same "Rule of Law" gate as Field Kit's Minecraft tab (companion.html).
+    // NOT a substitute for actual legal review (GAPS.md already flags
+    // FERPA/COPPA posture as an open, unresolved decision) -- this is a
+    // real, useful safety/conduct acknowledgment, not a certified compliance
+    // instrument.
+    (function(){
+      var gate=document.getElementById('mc-conduct-gate'), body=document.getElementById('mc-conduct-body');
+      if(!gate) return;
+      if(localStorage.getItem('evoke-mc-conduct-accepted')==='1'){ gate.hidden=true; body.hidden=false; return; }
+      var acceptBtn=document.getElementById('mc-conduct-accept');
+      if(acceptBtn) acceptBtn.addEventListener('click',function(){
+        try{ localStorage.setItem('evoke-mc-conduct-accepted','1'); }catch(e){}
+        gate.hidden=true; body.hidden=false;
+      });
+    })();
     (function(){
       var copyBtn=document.getElementById('mc-copy');
       if(copyBtn) copyBtn.addEventListener('click',function(){
@@ -937,7 +949,120 @@
         else { try{ var t=document.createElement('textarea'); t.value=addr; document.body.appendChild(t); t.select(); document.execCommand('copy'); document.body.removeChild(t); }catch(e){} done(); }
       });
     })();
-    modal.addEventListener('click',function(e){ if(e.target===modal) closeM(); });
+    // Real Minecraft account link, inline in this modal -- the same
+    // code-entry mechanism as Field Kit's Connect to Minecraft
+    // (/api/minecraft/link-code -> type the command in-game -> confirm),
+    // not the old unverified typed-username box this used to have. Linking
+    // an account never has to leave this app for Field Kit now. Poll-only
+    // (this build has no live /ws channel -- see the "live layer" comment
+    // further down), same 10s interval Field Kit's own poll uses as its
+    // fallback.
+    (function(){
+      var flowEl=document.getElementById('mc-link-flow'), confirmCard=document.getElementById('mc-link-confirm-card');
+      if(!flowEl) return;
+      var pollTimer=null;
+      function stopPolling(){ if(pollTimer){ clearInterval(pollTimer); pollTimer=null; } }
+      function showLinked(username){
+        flowEl.innerHTML='<span class="ms" aria-hidden="true" style="font-size:16px;color:var(--green-400);vertical-align:middle;">check_circle</span> Linked as <strong style="color:var(--cyan-100);">'+username+'</strong>';
+        stopPolling();
+        loadMcQuests();
+      }
+      function showStart(){
+        flowEl.innerHTML='<button id="mc-link-start" class="btn sec" type="button" style="width:100%;">Link Your Minecraft Account</button>';
+        var b=document.getElementById('mc-link-start'); if(b) b.addEventListener('click',startLink);
+        var qs=document.getElementById('comp-mc-quests'); if(qs) qs.hidden=true;
+      }
+      // Quests are Basin content: revealed only once Minecraft is linked,
+      // same rule Field Kit's Report Quest Complete card follows.
+      function loadMcQuests(){
+        var qs=document.getElementById('comp-mc-quests'), sel=document.getElementById('comp-mc-quest-select');
+        if(!qs || !sel || !STATE.userId) return;
+        fetch('/api/missions?user_id='+encodeURIComponent(STATE.userId)).then(function(r){ return r.ok?r.json():null; }).then(function(d){
+          var missions=(d && d.missions) || [];
+          var options=missions.filter(function(m){ return m.quest; }).map(function(m){ return '<option value="'+m.quest.id+'">'+m.quest.title+'</option>'; }).join('');
+          sel.innerHTML = options || '<option disabled>No quests available</option>';
+          qs.hidden=false;
+        }).catch(function(){});
+      }
+      function pollOnce(){
+        if(!STATE.userId) return Promise.resolve(false);
+        return fetch('/api/minecraft/link-request/'+STATE.userId).then(function(r){ return r.ok?r.json():null; }).then(function(r){
+          if(r && r.pending){ showConfirm(r.minecraft_username); return true; }
+          return false;
+        }).catch(function(){ return false; });
+      }
+      function startPolling(){ if(pollTimer) return; pollTimer=setInterval(pollOnce,10000); }
+      function showConfirm(mcName){
+        if(!confirmCard || !confirmCard.hidden) return;
+        document.getElementById('mc-link-mc-name').textContent=mcName;
+        confirmCard.hidden=false;
+        function respond(accept){
+          var fd=new FormData(); fd.append('accept', accept?'true':'false');
+          fetch('/api/minecraft/link-confirm?user_id='+encodeURIComponent(STATE.userId), {method:'POST', body:fd}).catch(function(){}).then(function(){
+            confirmCard.hidden=true;
+            checkStatus();
+          });
+        }
+        document.getElementById('mc-link-yes').addEventListener('click',function(){ respond(true); },{once:true});
+        document.getElementById('mc-link-no').addEventListener('click',function(){ respond(false); },{once:true});
+      }
+      function startLink(){
+        if(!STATE.userId) return;
+        fetch('/api/minecraft/link-code?user_id='+encodeURIComponent(STATE.userId), {method:'POST'})
+          .then(function(r){ return r.ok?r.json():null; })
+          .then(function(d){
+            if(!d || !d.command) return;
+            flowEl.innerHTML =
+              '<p style="font-family:var(--font-body);font-size:13px;line-height:1.5;color:var(--teal-050);margin:0 0 8px;">Once you\'re at B1llBot\'s kiosk in Keel, type this in chat:</p>'+
+              '<p><code style="font-size:14px;color:var(--cyan-100);">'+d.command+'</code></p>'+
+              '<p style="font-family:var(--font-body);font-size:12px;color:var(--text-faint);margin:8px 0;">Code expires in 10 minutes.</p>'+
+              '<button id="mc-link-check" class="btn sec" type="button" style="width:100%;">I typed it — Check</button>';
+            var checkBtn=document.getElementById('mc-link-check');
+            if(checkBtn) checkBtn.addEventListener('click',function(){
+              checkBtn.textContent='Checking…';
+              checkBtn.disabled=true;
+              pollOnce().then(function(found){
+                checkBtn.disabled=false;
+                // Bug found live via docker/bridge logs: this used to only
+                // ever update the button text on the NOT-found path -- on a
+                // real match it stayed stuck reading "Checking…" forever,
+                // even though showConfirm() had already rendered the real
+                // confirm card just above it. Looked exactly like a hang.
+                checkBtn.textContent = found ? 'Found it! Confirm below ↓' : 'Not yet — try again';
+              });
+            });
+            startPolling();
+          });
+      }
+      function checkStatus(){
+        if(!STATE.userId){ flowEl.textContent=''; return; }
+        fetch('/api/minecraft/link/'+STATE.userId).then(function(r){ return r.ok?r.json():null; }).then(function(d){
+          if(d && d.linked) showLinked(d.username); else showStart();
+        }).catch(showStart);
+      }
+      checkStatus();
+      window.__mcLinkStopPolling = stopPolling; // exitCompanion() (below) stops the poll on the way out
+    })();
+    // Minecraft Quests report form (visible once linked, see loadMcQuests above)
+    (function(){
+      var form=document.getElementById('comp-mc-quest-form');
+      if(!form) return;
+      form.addEventListener('submit',function(e){
+        e.preventDefault();
+        var questId=document.getElementById('comp-mc-quest-select').value;
+        var observation=document.getElementById('comp-mc-quest-observation').value;
+        var statusEl=document.getElementById('comp-mc-quest-status');
+        if(!questId || !STATE.userId) return;
+        var fd=new FormData(); fd.append('observation_text', observation);
+        if(statusEl) statusEl.textContent='Reporting...';
+        fetch('/api/mc-quests/'+questId+'/submit?user_id='+encodeURIComponent(STATE.userId), {method:'POST', body:fd})
+          .then(function(){
+            if(statusEl) statusEl.textContent='Logged — self-reported, never graded, never required.';
+            document.getElementById('comp-mc-quest-observation').value='';
+          })
+          .catch(function(){ if(statusEl) statusEl.textContent="Couldn't report that just now."; });
+      });
+    })();
     document.addEventListener('keydown',function(e){ if(e.key==='Escape' && modal.classList.contains('open')) closeM(); });
   })();
 
@@ -1204,12 +1329,14 @@
     var csg=document.getElementById('comp-suggest');
     bb.suggestions.forEach(function(s){ var b=el('<button type="button">'+s+'</button>'); b.addEventListener('click',function(){ cSend(s); }); csg.appendChild(b); });
     document.getElementById('comp-form').addEventListener('submit',function(e){ e.preventDefault(); var f=document.getElementById('comp-field'); cSend(f.value); f.value=''; });
-    // tabs
-    document.querySelectorAll('.comp-tab').forEach(function(t){ t.addEventListener('click',function(){
-      var which=t.dataset.ctab;
-      document.querySelectorAll('.comp-tab').forEach(function(x){ var on=x===t; x.classList.toggle('on',on); x.setAttribute('aria-selected',on?'true':'false'); });
+    // tabs -- named so ops-mc (below) can jump straight to the Minecraft
+    // tab instead of always landing on B1llBot first.
+    function switchCompTab(which){
+      document.querySelectorAll('.comp-tab').forEach(function(x){ var on=x.dataset.ctab===which; x.classList.toggle('on',on); x.setAttribute('aria-selected',on?'true':'false'); });
       document.querySelectorAll('.comp-pane').forEach(function(p){ p.hidden = p.dataset.cpane!==which; });
-    }); });
+    }
+    window.switchCompTab = switchCompTab;
+    document.querySelectorAll('.comp-tab').forEach(function(t){ t.addEventListener('click',function(){ switchCompTab(t.dataset.ctab); }); });
     // notebook autosave
     function bindNote(id,key){ var t=document.getElementById(id); if(!t)return; try{ t.value=localStorage.getItem(key)||''; }catch(e){}
       var saved=document.getElementById(id+'-saved'), tmo;
@@ -1240,20 +1367,40 @@
         window.resizeTo(w,sh); window.moveTo(0,0);
       }catch(e){}
     }
-    // Companion mode is ONE single-tab screen — no pop-out window and no
-    // window resizing (both caused stale/leftover-screen bugs). Enter it from
-    // anywhere; exit always returns to the Ops Hub. Snap this window beside
-    // Minecraft yourself if you want them side by side.
+    // Companion Mode stays its own real, single-tab in-app screen -- B1llBot
+    // chat + Explorer's Notebook. Not merged into Field Kit: instead, the
+    // mc-modal this screen is entered from (see the real Minecraft-link flow
+    // wired further down, right where ops-mc/openM/closeM are set up) now
+    // does the actual account linking itself, using the same code-entry
+    // mechanism as Field Kit -- so this whole path never has to leave the
+    // app to link an account.
     window.enterCompanion=function(){ go('companion'); };
-    window.openCompanionWindow=function(){ go('companion'); };
+    window.openCompanionWindow=function(){ go('companion'); if(window.switchCompTab) window.switchCompTab('chat'); };
     window.exitCompanion=function(){
+      if(window.__mcLinkStopPolling) window.__mcLinkStopPolling();
       // Close any lingering old pop-out window; otherwise just return to Ops.
       if(/companion-window/.test(location.hash)){ try{ window.close(); }catch(e){} return; }
       go('ops');
     };
     document.getElementById('comp-exit').addEventListener('click',window.exitCompanion);
     var ec=document.getElementById('mc-companion'); if(ec) ec.addEventListener('click',window.openCompanionWindow);
-    var fk=document.getElementById('ops-fieldkit-open'); if(fk) fk.addEventListener('click',window.openCompanionWindow);
+    // ops-fieldkit-open ("Take EVOKE With You" banner, "Or open it on your
+    // computer") stays a separate feature -- a desktop preview of the real
+    // Field Kit PWA in a phone-scaled popup -- distinct from Companion Mode.
+    window.openFieldKitPreview=function(){
+      if(!STATE.userId) return;
+      fetch('/api/companion/info?user_id=' + encodeURIComponent(STATE.userId))
+        .then(function(r){ return r.ok ? r.json() : null; })
+        .then(function(d){
+          if(!d || !d.url) return;
+          var w=400, h=860;
+          var left=Math.max(0, Math.round(((window.screen.availWidth||w) - w) / 2));
+          var top=Math.max(0, Math.round(((window.screen.availHeight||h) - h) / 2));
+          window.open(d.url, 'evoke-field-kit', 'width='+w+',height='+h+',left='+left+',top='+top+',resizable=yes,scrollbars=yes,noopener');
+        })
+        .catch(function(){});
+    };
+    var fk=document.getElementById('ops-fieldkit-open'); if(fk) fk.addEventListener('click',window.openFieldKitPreview);
   })();
 
   /* ---- routing ---- */
@@ -1263,6 +1410,21 @@
     flow.appendChild(b);
   });
   var navHist = [];
+  var VALID_SCREENS = SCREENS.map(function(s){return s[0];}).concat(['missions','submission','team']);
+  var _hashSynced = false;
+  // Real browser history, separate from navHist above (which only drives the
+  // in-app .back-btn UI). Without this, go() only ever toggled a CSS class --
+  // no URL change, no history entry -- so the browser's own native Back
+  // button had nothing to step through and exited straight to whatever page
+  // was open before this app loaded. Skipped entirely for the popped-out
+  // phone-preview window (#companion-window), which owns its own hash.
+  function syncHash(name){
+    if(document.body.classList.contains('companion-window')) return;
+    var newHash = '#' + name;
+    if(location.hash === newHash) return;
+    if(!_hashSynced){ history.replaceState({screen:name}, '', newHash); _hashSynced = true; }
+    else { history.pushState({screen:name}, '', newHash); }
+  }
   function go(name, fromBack){
     var activeEl = document.querySelector('.screen.active');
     var cur = activeEl ? activeEl.dataset.screen : null;
@@ -1295,6 +1457,7 @@
     // the rail returns everywhere.
     if(name!=='companion' && !/companion-window/.test(location.hash)){ document.body.classList.remove('companion-window'); }
     if(name==='home') navHist.length=0; // Home is the hub / reset point
+    syncHash(name); // no-ops if location.hash already matches (true for popstate-driven calls)
     updateBackBtn(name);
     updateBuddy(name);
     window.scrollTo(0,0);
@@ -1353,8 +1516,60 @@
     try{ var _sh=window.screen.availHeight, _w=Math.min(480,window.screen.availWidth), _sx=window.screen.availLeft||0, _sy=window.screen.availTop||0; window.moveTo(_sx,_sy); window.resizeTo(_w,_sh); }catch(e){}
     go('companion');
   } else {
-    go(_sp.get('screen') || 'home');
+    // Prefer an existing #screen hash (a shared/bookmarked/reloaded link)
+    // over ?screen=, so reloading mid-app doesn't bounce back to Home.
+    var _hashScreen = location.hash ? location.hash.slice(1) : '';
+    var _boot = (VALID_SCREENS.indexOf(_hashScreen) > -1) ? _hashScreen : (_sp.get('screen') || 'home');
+    go(_boot);
   }
+  // Native browser Back/Forward: without this, go() only ever changed which
+  // .screen had the "active" class -- no URL change, no history entry -- so
+  // the browser's own Back button had nothing to step through and exited
+  // straight to whatever page was open before this app loaded. syncHash()
+  // (see near go()'s definition) pushes a real entry per screen; this reads
+  // it back on Back/Forward. fromBack=true so it doesn't re-push navHist
+  // (the separate stack driving the in-app .back-btn) or loop back into
+  // history.pushState -- syncHash no-ops when location.hash already matches,
+  // which is always true by the time this fires (the browser updates the
+  // hash before dispatching popstate).
+  window.addEventListener('popstate', function(e){
+    var name = (e.state && e.state.screen) || (location.hash ? location.hash.slice(1) : '');
+    if(VALID_SCREENS.indexOf(name) === -1) return;
+    go(name, true);
+  });
+
+  /* ---- live layer (evoke/live.py's /ws) ----
+     The pixel-exact UI port (this file, replacing app.js) never carried this
+     over -- app.js still has it, but app.js isn't loaded by index.html, and
+     companion.html is a separate page with its own copy. Without it, this
+     tab never learns about anything that happens outside its own clicks: in
+     particular, a mission that completes because a TEAMMATE's later action
+     closes YOUR AND-gate (you already reflected; they just now submitted the
+     team's evidence) sat invisible here until a hard reload re-ran
+     seedFromBackend() -- a real gap UX_HANDOFF.md already flagged. Mirrors
+     companion.html's connectLive(): same event shape, same backoff. */
+  function connectLive(){
+    if(!STATE.userId || !('WebSocket' in window)) return;
+    var retryMs = 2000;
+    function open(){
+      var proto = location.protocol==='https:' ? 'wss' : 'ws';
+      var ws = new WebSocket(proto+'://'+location.host+'/ws');
+      ws.onopen = function(){ retryMs = 2000; };
+      ws.onmessage = function(e){
+        var msg; try{ msg = JSON.parse(e.data); }catch(err){ return; }
+        if(msg.type!=='MissionCompleted' || !msg.data || msg.data.user_id!==STATE.userId) return;
+        var no = STATE.missionIds.indexOf(msg.data.mission_id) + 1;
+        if(no>0 && missionState(no)!=='complete'){
+          if(window.opsMarkSubmitted) window.opsMarkSubmitted(no);
+          go('reward');
+        }
+      };
+      ws.onclose = function(){ setTimeout(open, retryMs); retryMs = Math.min(retryMs*2, 15000); };
+    }
+    open();
+  }
+  connectLive();
+
   /* ================= DEVELOPER PANEL (browse any week) =================
      Lets a developer jump to any mission and unlock the timeline. Turning it
      off restores the locked, sequential experience students see. */
@@ -1433,33 +1648,20 @@
       img.onload = function(){ qrBox.innerHTML=''; qrBox.appendChild(img); };
       img.src = '/api/companion/qr.svg?user_id=' + encodeURIComponent(STATE.userId);
     }
-    var input = document.getElementById('mc-username');
-    var btn = document.getElementById('mc-link-btn');
+    // Read-only status check -- the only way to actually *link* an account
+    // is Field Kit's code+confirm flow (bridge.py's link_code_loop), which
+    // proves someone genuinely typed the code in-game. This box just
+    // reflects that real state; it never accepts a typed username itself
+    // (that used to POST straight to /api/minecraft/link with zero
+    // verification -- anyone who knew a username could claim it).
     var status = document.getElementById('mc-link-status');
-    function showLinked(username){
-      if(!status) return;
-      status.innerHTML = '<span class="ms" aria-hidden="true" style="font-size:16px;color:var(--green-400);vertical-align:middle;">check_circle</span> Linked as <strong style="color:var(--cyan-100);">' + username + '</strong>';
-      status.style.color = 'var(--green-400)';
-    }
-    if(STATE.userId){
+    if(STATE.userId && status){
       fetch('/api/minecraft/link/' + STATE.userId).then(function(r){ return r.ok ? r.json() : null; }).then(function(d){
-        if(d && d.linked){ if(input) input.value = d.username; showLinked(d.username); }
+        if(d && d.linked){
+          status.innerHTML = '<span class="ms" aria-hidden="true" style="font-size:16px;color:var(--green-400);vertical-align:middle;">check_circle</span> Linked as <strong style="color:var(--cyan-100);">' + d.username + '</strong>';
+          status.style.color = 'var(--green-400)';
+        }
       }).catch(function(){});
-    }
-    if(btn && input){
-      btn.addEventListener('click', function(){
-        var u = input.value.trim();
-        if(!u || !STATE.userId) return;
-        btn.disabled = true;
-        fetch('/api/minecraft/link?user_id=' + encodeURIComponent(STATE.userId) + '&minecraft_username=' + encodeURIComponent(u), {method:'POST'})
-          .then(function(r){ return r.ok ? r.json() : null; })
-          .then(function(d){
-            btn.disabled = false;
-            if(d && d.status === 'linked'){ showLinked(d.username); }
-            else if(status){ status.textContent = 'Could not link — please try again.'; status.style.color = 'var(--text-faint)'; }
-          })
-          .catch(function(){ btn.disabled = false; if(status){ status.textContent = 'Could not link — check your connection.'; status.style.color = 'var(--text-faint)'; } });
-      });
     }
   })();
 
@@ -1564,7 +1766,7 @@
         + '<div class="hud" style="font-size:10px;color:var(--cyan-300);margin-bottom:10px;">Team Roster · who’s turned it in</div>'
         + '<div style="display:flex;flex-wrap:wrap;gap:10px;">'+chips+'</div>'+divNote+'</div>';
 
-      var footer = '<div style="display:flex;align-items:center;justify-content:space-between;gap:14px;flex-wrap:wrap;"><button class="btn sec back-step" type="button">◀ Back</button><button class="btn" id="sub-complete" type="button">Back to Operations Hub ▶<span class="key" aria-hidden="true"></span></button></div>';
+      var footer = '<div style="display:flex;align-items:center;justify-content:flex-end;gap:14px;flex-wrap:wrap;"><button class="btn" id="sub-complete" type="button">Back to Operations Hub ▶<span class="key" aria-hidden="true"></span></button></div>';
 
       subMain.innerHTML = head + stepper + indHtml + discHtml + teamHtml + footer;
       wire(no);
@@ -1620,6 +1822,18 @@
         currentState = res[0] || {};
         currentMsgs = (res[1] && res[1].messages) || [];
         render();
+        // The real completion gate (main.py's _complete_mission_for_user) is
+        // your team's product + your own reflection -- both visible right
+        // here in submission-state. Nothing else in this screen ever marked
+        // the mission locally complete, so Ops Hub/XP/curMission() all sat
+        // stale until a hard reload re-ran seedFromBackend(). Detect it here
+        // instead, the moment either half lands.
+        var you = currentState.you;
+        var justCompleted = you && you.team_product && you.team_product!=='missing' && you.reflected && missionState(no)!=='complete';
+        if(justCompleted){
+          if(window.opsMarkSubmitted) window.opsMarkSubmitted(no);
+          go('reward');
+        }
       });
     }
 
