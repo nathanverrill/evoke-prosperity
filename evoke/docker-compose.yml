@@ -83,6 +83,7 @@ services:
       RCON_PASSWORD: ${MINECRAFT_BRIDGE_RCON_PASSWORD:-devsecret123}
       OPENWEBUI_URL: http://open-webui:8080
       OPENWEBUI_API_KEY: ${OPENWEBUI_API_KEY:-}
+      AUTO_LINK_PLAYER_ONE: ${AUTO_LINK_PLAYER_ONE:-true}
     healthcheck:
       # No HTTP server in this service (a Kafka consumer loop) — process-liveness
       # only, not a real readiness signal. A proper check would need bridge.py to

@@ -107,6 +107,20 @@
           regs.forEach((r) => r.unregister());
         }).catch(() => {});
       }
+      // Playtest magic link: ?login=<email> always wins over whatever's in
+      // localStorage, same as app.js's ensureLoggedIn() -- so a shared/reused
+      // device or a stale prior session can't leave a tester on the wrong
+      // account, and a fresh device never silently falls through to
+      // dev-login's Player One default (see /api/dev-login's no-params case).
+      const loginEmail = new URLSearchParams(location.search).get("login");
+      if (loginEmail) {
+        const who = await fetch(`/api/dev-login?email=${encodeURIComponent(loginEmail)}`, { method: "POST" }).then(r => r.json());
+        localStorage.setItem("fieldkit_user_id", who.user_id);
+        localStorage.setItem("fieldkit_display_name", who.display_name);
+        const url = new URL(location.href);
+        url.searchParams.delete("login");
+        history.replaceState({}, "", url);
+      }
       // Pairing (BUILD_PLAN_2 §7): a ?pair= token from the Hub QR registers
       // this phone as the scanning user — no login. Falls back to a stored
       // pairing, then dev-login.

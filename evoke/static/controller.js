@@ -58,7 +58,20 @@
   // Backend /api/missions is ordered by (week, sequence) — the SAME order as
   // the design's sequential missions 1..12 — so index i maps to design N=i+1.
   function seedFromBackend(){
-    return postJSON('/api/dev-login').then(function(d){
+    // Playtest magic link: ?login=<email> always wins over whatever dev-login
+    // would otherwise default to (the earliest-created learner -- "Player
+    // One"), so a shared/reused device or a stale prior session can't leave
+    // a tester looking at the wrong person's progress. Same pattern as
+    // app.js's ensureLoggedIn()/companion.html's init() -- this file just
+    // never had it, since it calls dev-login with no params at all.
+    var loginEmail = new URLSearchParams(location.search).get('login');
+    var loginQS = loginEmail ? ('?email=' + encodeURIComponent(loginEmail)) : '';
+    if(loginEmail){
+      var url = new URL(location.href);
+      url.searchParams.delete('login');
+      history.replaceState({}, '', url);
+    }
+    return postJSON('/api/dev-login' + loginQS).then(function(d){
       STATE.userId = d.user_id; STATE.displayName = d.display_name;
       try{ localStorage.setItem('evoke_user_id', STATE.userId); }catch(e){}
       return Promise.all([

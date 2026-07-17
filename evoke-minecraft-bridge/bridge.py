@@ -36,6 +36,12 @@ ONLINE_XP_AMOUNT = 5
 ITEM_DROP_PROBABILITY = 0   # disabled during playtest -- was ~once per 10 online-minutes per player
 LORE_MESSAGE_PROBABILITY = 0.05  # ~once per 20 online-minutes per player
 PLAYER_ONE_EMAIL = "player1@evoke.local"  # must match evoke-infra/seed.py
+# Off during real playtests -- ensure_first_player_linked() silently
+# re-links the first unlinked online player to Player One on every
+# heartbeat (every HEARTBEAT_INTERVAL) as long as Player One has no link,
+# which fights any test of a genuine fresh-player linking flow (deleting
+# the link doesn't stick -- it just gets re-created within a minute).
+AUTO_LINK_PLAYER_ONE = os.getenv("AUTO_LINK_PLAYER_ONE", "true").lower() == "true"
 
 # Presence loop -- faster than the heartbeat because it feeds the web's
 # live "who's in the Basin" card, and 60s-stale presence reads as broken.
@@ -1107,7 +1113,8 @@ async def heartbeat_loop():
 
             conn = get_db_connection()
             try:
-                ensure_first_player_linked(conn, online_players)
+                if AUTO_LINK_PLAYER_ONE:
+                    ensure_first_player_linked(conn, online_players)
                 linked = get_online_linked_players(conn, online_players)
             finally:
                 return_db_connection(conn)
