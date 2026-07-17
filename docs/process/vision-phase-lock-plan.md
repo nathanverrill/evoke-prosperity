@@ -39,6 +39,90 @@ The live `server.properties` on Apex currently has `gamemode=creative` + `force-
 - Any web-app mission-completion event triggering the phase flip — explicitly rejected in favor of a standalone toggle, for testing.
 - Deciding the exact nudge banner copy/design in Companion Mode — flagged as a real piece, not pre-designed here.
 
+## Update 2026-07-17: pivoted to a two-server design, then paused for the playtest
+
+After the single-server (`vision_phase` scoreboard flag) version above was built,
+tested, and confirmed working locally, the conversation moved toward a
+different, more isolated design -- captured here so the work already done
+isn't lost, even though it's now paused in favor of simpler playtest prep
+(see bottom of this section).
+
+**Why the pivot**: extending the single-server flag to also block the
+minigames (not just NPCs) would mean editing 6+ already-working datapacks
+I didn't build and hadn't re-verified fresh -- real regression risk against
+systems that currently just work (we'd already seen tonight how one
+malformed datapack folder can crash an entire server). A second, genuinely
+separate server sidesteps that entirely: no risk of touching working
+minigame code, since the minigames just aren't there at all.
+
+**The two-server design**:
+- **`sim.apexmc.co`** -- the vision phase. Stripped to just the world +
+  Adventure mode + universal flight. No NPCs, no minigames, no mods beyond
+  whatever's needed for connectivity.
+- **`prosperity.apexmc.co`** -- the real, as-designed server (this is the
+  same server referenced throughout this session as the main Apex
+  instance, `6689.node.apexhosting.gdn` -- `prosperity.apexmc.co` is
+  Apex's custom-domain alias for it).
+- **Transfer mechanism**: Minecraft's built-in `/transfer <host> <port>`
+  command (added 1.20.5, no proxy/BungeeCord needed) -- fired server-side
+  to move a specific player from `sim` to `prosperity` seamlessly, no
+  manual reconnect. Proposed trigger: the same admin action that would
+  have flipped `vision_phase` to 0 also fires the transfer for everyone
+  online, so "stop flying, go silent, leave this server" happens as one
+  event instead of three things to keep in sync.
+- **Players manually reconnecting to `sim` later** (after already having
+  moved to `prosperity`): decided this needs no special handling. `sim`
+  has no economy/inventory/mission state, so there's nothing to
+  duplicate or exploit by revisiting -- narratively it reads fine too
+  ("revisiting a memory" vs. "living it twice"). Not building any
+  return-visitor blocking logic.
+
+**What was actually found/done on `sim.apexmc.co` before pausing**:
+- FTP username is per-server, not shared with `prosperity` -- had to get
+  `sim`'s own username (`nathanverrill@gmail.com.3151410`) from the panel;
+  same account password worked once we had the right username.
+- `sim` turned out to already have a real, substantial `true_oasis` world
+  (region data, 1.7KB `level.dat` -- not a stub) uploaded the same day,
+  plus the **full original mod stack**, more complete than anything
+  pieced together on `prosperity` tonight: `BiomesOPlenty`, `GlitchCore`,
+  `TerraBlender`, `chisels-and-bits`, `fabric-api-0.138.4+1.21.10`, `JEI`,
+  `polyfactory`, `polymer-bundled`, **`savs-common-economy`** (the actual
+  shop-system mod -- would make the "Admin Shop" signs found earlier this
+  session actually functional, something never achieved on `prosperity`),
+  `thirdbrain-1.21.10-v4.0.1-alpha` (newer than the v4.0.0 built earlier
+  tonight), `worldedit-mod`. Worth remembering this exists next time
+  `prosperity`'s missing shop/decoration mods come up.
+- All 11 mods moved (not deleted) to `/default/mods-backup-full-stack/` on
+  `sim` -- recoverable, not gone.
+- A new `sim_vision` datapack was built and uploaded to
+  `true_oasis/datapacks/sim_vision/` on `sim`: unconditional
+  Adventure-mode enforcement (only corrects players actually in Survival,
+  so an admin can still deliberately use Creative) + universal `mayfly`
+  grant every tick. No toggle needed on this server -- it's permanently
+  the vision experience; leaving it happens via the transfer, not a mode
+  change.
+- **Not yet done**: `server.properties` on `sim` still says
+  `gamemode=creative` (needs to become `adventure` for the datapack's
+  enforcement to matter -- right now Creative would just override it
+  every tick, though harmlessly). Server hasn't been restarted since the
+  mod removal + datapack upload, so none of this is live yet.
+- **Real open question surfaced, not resolved**: `sim` never had
+  Geyser/Floodgate installed at all (they weren't among the 11 mods
+  removed) -- Bedrock players currently cannot connect to `sim` at all,
+  a hard protocol wall, not a soft limitation. If the vision phase is
+  meant to be every player's first experience (matching `prosperity`'s
+  existing Java+Bedrock support via Geyser/Floodgate), this needs
+  Geyser-Fabric + Floodgate-Fabric added back (~15MB, small next to the
+  90MB of mods that were removed) before `sim` is usable by Bedrock
+  players. Left undecided when the session pivoted away from this thread.
+
+**Paused here.** For the actual near-term playtest, the priority shifted
+to writing clear, in-narrative help/guidance text for the Field Kit /
+Companion Mode page instead of finishing the two-server infrastructure.
+The single-server `vision_phase` version earlier in this doc is still
+built, tested, and working if a simpler path is wanted later instead of
+finishing the two-server approach.
+
 ## Verification
 - Toggle `vision_phase` via RCON directly, confirm: all online players get/lose `mayfly` within one tick; nobody can break/place blocks in either state; NPC chat is silent vs. responsive matching the flag.
 - Confirm the old `gamemode_lock` datapack is fully removed/replaced, not left deployed alongside the new one (would double-fire conflicting logic).

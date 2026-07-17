@@ -16,6 +16,7 @@
   <div class="companion-page stack" id="companion-root">
     <h1 class="card__title">EVOKE Field Kit</h1>
     <p class="empty-state" id="agent-line"></p>
+    <p class="empty-state">Your pocket companion — keep this open on your phone next to Minecraft, or check in here anytime for your Daily Field Report, pending awards, and B1llbot.</p>
 
     <section class="card" id="pair-confirm" hidden>
       <div class="card__eyebrow">Pairing</div>
@@ -67,6 +68,7 @@
 
     <section class="card" id="quest-card" hidden>
       <div class="card__eyebrow">Report Quest Complete</div>
+      <p class="empty-state" style="margin-top:-4px">Small in-Minecraft activities tied to your missions — self-reported, honor system, never graded.</p>
       <form id="quest-form" class="stack-sm">
         <select id="quest-select"></select>
         <textarea id="quest-observation" placeholder="What did you observe? (optional)" rows="2"></textarea>
@@ -77,6 +79,7 @@
 
     <section class="card">
       <div class="card__eyebrow">B1llbot</div>
+      <p class="empty-state" style="margin-top:-4px">Your guide to the Basin. Try "What's my next mission?" or "Tell me about Keel."</p>
       <div class="billbot-drawer__log" id="chat"></div>
       <form id="chat-form" class="row">
         <input type="text" id="chat-input" placeholder="Ask B1llbot..." style="flex:1" autocomplete="off">
@@ -199,17 +202,18 @@
           return;
         }
         body.innerHTML = `
-          <p class="empty-state">Optional — never graded. Play the same world in Minecraft.</p>
+          <p class="empty-state">Optional — never graded. Play the same world in Minecraft: fly over Keel, Halyard, and the Oasis, and talk to B1llbot and the people of Keel yourself.</p>
           <button class="btn btn-primary" id="connect-start">Connect to Basin Simulation</button>
           <div id="connect-steps" hidden style="margin-top:8px">
-            <p><strong>1.</strong> In Minecraft, add a multiplayer server:<br>
-               Java: <code>${escapeHtml(info.java_address)}</code><br>
-               Bedrock: <code>${escapeHtml(info.bedrock_address)}</code></p>
-            <p><strong>2.</strong> Find B1llbot's secret kiosk near the starter villagers, close to spawn — he'll whisper hello. Right there, type in chat:</p>
+            <p><strong>1.</strong> In Minecraft, add a multiplayer server:</p>
+            <p style="display:flex;align-items:center;gap:6px">Java: <code>${escapeHtml(info.java_address)}</code>
+              <button class="btn" data-copy="${escapeHtml(info.java_address)}" style="padding:2px 8px;font-size:0.85em">Copy</button></p>
+            <p style="display:flex;align-items:center;gap:6px">Bedrock: <code>${escapeHtml(info.bedrock_address)}</code>
+              <button class="btn" data-copy="${escapeHtml(info.bedrock_address)}" style="padding:2px 8px;font-size:0.85em">Copy</button></p>
+            <p><strong>2.</strong> You'll spawn on the mountain, above Keel — it's a real walk down, not a quick hop. Head downhill and outward from spawn; Keel is the hot, cramped mining town at the base, and that's where B1llbot's kiosk is. If you get turned around, open your coordinates (F3 on Java, the settings menu on Bedrock) — Keel is roughly <code>-50, 65, 210</code>.</p>
+            <p><strong>3.</strong> Once you're at the kiosk, he'll whisper hello on his own. Type in chat:</p>
             <p><code id="connect-cmd" style="font-size:1.05em"></code></p>
-            <p><strong>3.</strong> Come back here and tap Confirm.</p>
-            <button class="btn btn-primary" id="connect-confirm-check">Confirm</button>
-            <p class="empty-state" id="connect-confirm-status" style="margin-top:6px"></p>
+            <p><strong>4.</strong> Come back here — you'll get a confirmation to tap once the game hears you.</p>
             <p class="empty-state">Code expires in 10 minutes. <a href="/#/faq" target="_blank">Full FAQ →</a></p>
           </div>`;
         document.getElementById("connect-start").addEventListener("click", async () => {
@@ -217,6 +221,16 @@
           document.getElementById("connect-cmd").textContent = res.command;
           document.getElementById("connect-steps").hidden = false;
           document.getElementById("connect-start").hidden = true;
+        });
+        body.querySelectorAll("[data-copy]").forEach((btn) => {
+          btn.addEventListener("click", async () => {
+            try {
+              await navigator.clipboard.writeText(btn.dataset.copy);
+              const orig = btn.textContent;
+              btn.textContent = "Copied!";
+              setTimeout(() => { btn.textContent = orig; }, 1500);
+            } catch (e) { /* clipboard unavailable — the address is still visible to copy by hand */ }
+          });
         });
         document.getElementById("connect-confirm-check").addEventListener("click", async () => {
           const status = document.getElementById("connect-confirm-status");
