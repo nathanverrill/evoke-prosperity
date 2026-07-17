@@ -33,7 +33,7 @@ POLL_INTERVAL = 60  # Check for offline deliveries every 60s
 # GAPS.md's "XP economy is undesigned" item for the real one.
 HEARTBEAT_INTERVAL = 60
 ONLINE_XP_AMOUNT = 5
-ITEM_DROP_PROBABILITY = 0.1   # ~once per 10 online-minutes per player
+ITEM_DROP_PROBABILITY = 0   # disabled during playtest -- was ~once per 10 online-minutes per player
 LORE_MESSAGE_PROBABILITY = 0.05  # ~once per 20 online-minutes per player
 PLAYER_ONE_EMAIL = "player1@evoke.local"  # must match evoke-infra/seed.py
 
