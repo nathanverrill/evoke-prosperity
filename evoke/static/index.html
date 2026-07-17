@@ -495,28 +495,6 @@
      !important overrides the inline repeat(4) the renderer sets. */
   @media (max-width:1040px){ #pg-badges-all{grid-template-columns:repeat(2,minmax(0,1fr)) !important;} }
   @media (max-width:560px){ #pg-badges-all{grid-template-columns:1fr !important;} }
-  /* Money Skills 2x2 · Achievements 4x2 — perfect rows, no orphans */
-  #pg-financial{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:14px;}
-  @media (max-width:640px){ #pg-financial{grid-template-columns:1fr;} }
-  #pg-achievements{display:grid;grid-template-columns:repeat(8,minmax(0,1fr));gap:14px;}
-  @media (max-width:1080px){ #pg-achievements{grid-template-columns:repeat(4,minmax(0,1fr));} }
-  @media (max-width:560px){ #pg-achievements{grid-template-columns:repeat(2,minmax(0,1fr));} }
-  .pg-badge{position:relative;display:flex;align-items:center;gap:13px;padding:14px 16px;border-radius:13px;background:rgba(0,150,136,0.06);box-shadow:inset 0 0 0 1px var(--border-ui);overflow:hidden;}
-  .pg-badge::before{content:"";position:absolute;left:0;top:0;bottom:0;width:4px;background:linear-gradient(180deg,var(--cyan-300),rgba(0,150,136,0.25));}
-  .pg-badge-ic{position:relative;width:48px;height:48px;border-radius:12px;flex:none;display:flex;align-items:center;justify-content:center;background:linear-gradient(135deg,rgba(0,150,136,0.26),rgba(0,150,137,0.15));box-shadow:inset 0 0 0 1px var(--border-ui),0 0 18px -6px rgba(0,150,136,0.6);color:var(--cyan-200);}
-  .pg-badge-ic .ms{font-size:25px;}
-  .pg-badge-chip{position:absolute;right:-5px;bottom:-5px;min-width:18px;height:18px;padding:0 4px;border-radius:9px;background:linear-gradient(135deg,var(--orange-300,#ffb877),#ff9a4d);color:#1a0f04;font-family:var(--font-display);font-weight:800;font-size:11px;line-height:18px;text-align:center;box-shadow:0 0 8px -2px rgba(255,167,89,0.8);}
-  .pg-badge-txt{display:flex;flex-direction:column;gap:5px;min-width:0;}
-  .pg-badge-name{font-family:var(--font-display);font-weight:700;font-size:13px;color:var(--teal-050);line-height:1.15;}
-  .pg-badge-lvl{font-family:var(--font-mono);font-size:9.5px;letter-spacing:.08em;text-transform:uppercase;color:var(--cyan-300);}
-  .pg-pips{display:flex;gap:4px;}
-  .pip{width:16px;height:5px;border-radius:3px;background:rgba(145,209,209,0.16);}
-  .pip.on{background:linear-gradient(90deg,var(--cyan-300),var(--cyan-500));box-shadow:0 0 6px -1px rgba(0,150,136,0.7);}
-  .pg-badge.locked{opacity:.5;}
-  .pg-badge.locked::before{background:rgba(145,209,209,0.18);}
-  .pg-badge.locked .pg-badge-ic{background:rgba(15,23,43,0.5);color:var(--text-locked);box-shadow:inset 0 0 0 1px var(--border-ui);}
-  .pg-badge.locked .pg-badge-name{color:var(--text-faint);}
-  .pg-badge.locked .pg-badge-lvl{color:var(--text-faint);}
   .track{position:relative;height:12px;border-radius:var(--radius-pill);background:rgba(15,23,43,0.6);box-shadow:inset 0 0 0 1px var(--border-ui);}
   .fill-xp{position:absolute;inset:0;width:62%;border-radius:var(--radius-pill);background:var(--grad-xp);box-shadow:0 0 16px rgba(255,167,89,0.6);}
   .knob{position:absolute;top:50%;left:62%;width:16px;height:16px;transform:translate(-50%,-50%);border-radius:50%;background:var(--orange-500);box-shadow:0 0 14px rgba(255,167,89,0.9);}
@@ -936,26 +914,6 @@
         <span class="hud" id="pg-badge-count" style="font-size:12px;color:var(--text-muted);"></span>
       </div>
       <div id="pg-badges-all"></div>
-    </div>
-
-    <!-- Financial Literacy badges -->
-    <div class="glass" style="padding:clamp(12px,1.6vw,18px);margin-bottom:12px;">
-      <div style="display:flex;justify-content:space-between;align-items:flex-end;margin-bottom:14px;gap:14px;flex-wrap:wrap;">
-        <div><div class="hud" style="font-size:10px;color:var(--cyan-300);letter-spacing:.16em;margin-bottom:5px;">Personal Financial Literacy</div>
-        <h2 style="font-family:var(--font-display);font-weight:800;font-size:clamp(16px,2.1vw,21px);color:var(--text-heading);margin:0;text-transform:uppercase;">Money Skills</h2></div>
-        <span class="hud" id="pg-fin-count" style="font-size:12px;color:var(--text-muted);"></span>
-      </div>
-      <div id="pg-financial"></div>
-    </div>
-
-    <!-- Achievements / narrative badges -->
-    <div class="glass" style="padding:clamp(12px,1.6vw,18px);margin-bottom:12px;">
-      <div style="display:flex;justify-content:space-between;align-items:flex-end;margin-bottom:14px;gap:14px;flex-wrap:wrap;">
-        <div><div class="hud" style="font-size:10px;color:var(--cyan-300);letter-spacing:.16em;margin-bottom:5px;">Milestones</div>
-        <h2 style="font-family:var(--font-display);font-weight:800;font-size:clamp(16px,2.1vw,21px);color:var(--text-heading);margin:0;text-transform:uppercase;">Agent Achievements</h2></div>
-        <span class="hud" id="pg-ach-count" style="font-size:12px;color:var(--text-muted);"></span>
-      </div>
-      <div id="pg-achievements"></div>
     </div>
 
     <!-- Level hero -->
@@ -1528,6 +1486,6 @@
 
   <script src="submission-missions.js?b=4"></script>
   <script src="content.js?b=4"></script>
-  <script src="controller.js?b=21"></script>
+  <script src="controller.js?b=22"></script>
 </body>
 </html>

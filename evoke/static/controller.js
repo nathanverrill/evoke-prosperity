@@ -254,69 +254,6 @@
   }
   window.powerGroups=powerGroups; window.totalPowersEarned=totalPowersEarned;
 
-  // ---- extra badge families: Financial Literacy (PFL) + narrative Achievements ----
-  function missionsDoneCount(){ var c=0; for(var i=1;i<=12;i++){ if(missionState(i)==='complete') c++; } return c; }
-  function streakCountSafe(){ try{ return (typeof evokeStreak==='function') ? evokeStreak().count : 0; }catch(e){ return 0; } }
-  // Financial Literacy — one badge per PFL domain, earned by completing that
-  // domain's missions (mission→PFL mapping straight from the campaign doc).
-  var FIN_BADGES = [
-    { name:"Philanthropist", icon:"volunteer_activism", missions:[1,3],        blurb:"Sees how giving and community needs shape prosperity." },
-    { name:"Goal Setter",    icon:"flag",               missions:[2,4,7],      blurb:"Sets a clear direction and plans the steps to reach it." },
-    { name:"Budget Builder", icon:"savings",            missions:[5,6,8],      blurb:"Turns a vision into a realistic plan of costs and resources." },
-    { name:"Savvy Investor", icon:"trending_up",        missions:[9,10,11,12], blurb:"Weighs risk and reward and makes the case for backing an idea." }
-  ];
-  // Narrative / milestone achievements — earned from real progress signals.
-  var ACHV = [
-    { name:"First Steps",          icon:"footprint",             earned:function(){ return missionsDoneCount()>=1; }, desc:"Complete your first mission." },
-    { name:"The Listener",         icon:"hearing",               earned:function(){ return missionState(1)==='complete'; }, desc:"Finish Follow the Flow — listen before you judge." },
-    { name:"Origin Story",         icon:"auto_stories",          earned:function(){ return missionState(2)==='complete'; }, desc:"Write your Prosperity Origin Story." },
-    { name:"Dreamer",              icon:"tips_and_updates",      earned:function(){ return missionState(3)==='complete'; }, desc:"Map out your team's wildest ideas." },
-    { name:"Halfway Hero",         icon:"military_tech",         earned:function(){ return missionsDoneCount()>=6; }, desc:"Complete half the campaign." },
-    { name:"Into the Act",         icon:"rocket_launch",         earned:function(){ return missionsDoneCount()>=8; }, desc:"Reach the Act phase — build for real." },
-    { name:"Streak Keeper",        icon:"local_fire_department", earned:function(){ return streakCountSafe()>=5; }, desc:"Show up 5 days in one week." },
-    { name:"Prosperity Architect", icon:"workspace_premium",    earned:function(){ return missionsDoneCount()>=12; }, desc:"Complete the entire campaign." }
-  ];
-  var bEsc = function(s){ return String(s==null?'':s).replace(/[&<>"]/g,function(c){return ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'})[c];}); };
-  function badgeTileHTML(name, icon, on, sub, s, titleText){
-    s=s||54;
-    var box = on
-      ? 'background:radial-gradient(circle at 50% 35%,rgba(0,212,146,0.28),rgba(0,150,137,0.10));box-shadow:inset 0 0 0 1.5px var(--green-400),0 0 18px -4px rgba(0,212,146,0.55);color:var(--green-400);'
-      : 'box-shadow:inset 0 0 0 1px var(--border-ui);color:var(--text-faint);';
-    return '<div style="display:flex;flex-direction:column;align-items:center;gap:7px;text-align:center;min-width:0;opacity:'+(on?'1':'0.72')+';" title="'+bEsc(titleText||sub||'')+'">'
-      +'<span style="width:min(100%,'+s+'px);aspect-ratio:1;border-radius:14px;display:flex;align-items:center;justify-content:center;'+box+'"><span class="ms'+(on?' fill':'')+'" aria-hidden="true" style="font-size:'+Math.round(s*0.46)+'px;">'+(on?icon:'lock')+'</span></span>'
-      +'<span style="font-family:var(--font-display);font-weight:600;font-size:11px;line-height:1.15;overflow-wrap:anywhere;color:'+(on?'var(--teal-050)':'var(--text-faint)')+';">'+bEsc(name)+'</span>'
-      +(sub?'<span class="hud" style="font-size:8.5px;color:var(--text-faint);">'+bEsc(sub)+'</span>':'')+'</div>';
-  }
-  function renderFinancialBadges(){
-    var host=document.getElementById('pg-financial'); if(!host) return;
-    var earnedN=0;
-    host.innerHTML = FIN_BADGES.map(function(b){
-      var total=b.missions.length, done=b.missions.filter(function(n){return missionState(n)==='complete';}).length;
-      var on=done>=total; if(on) earnedN++;
-      var pct=Math.round(done/total*100);
-      var tile = on
-        ? 'background:radial-gradient(circle at 50% 35%,rgba(0,212,146,0.28),rgba(0,150,137,0.10));box-shadow:inset 0 0 0 1.5px var(--green-400),0 0 18px -4px rgba(0,212,146,0.55);color:var(--green-400);'
-        : 'box-shadow:inset 0 0 0 1px var(--border-ui);color:var(--text-faint);';
-      return '<div style="display:flex;gap:14px;align-items:center;padding:16px 18px;border-radius:14px;box-shadow:inset 0 0 0 1px '+(on?'rgba(0,212,146,0.4)':'var(--border-ui)')+';background:'+(on?'rgba(0,212,146,0.05)':'transparent')+';">'
-        +'<span style="width:52px;height:52px;flex:none;border-radius:14px;display:flex;align-items:center;justify-content:center;'+tile+'"><span class="ms'+(on?' fill':'')+'" aria-hidden="true" style="font-size:26px;">'+(on?b.icon:'lock')+'</span></span>'
-        +'<div style="flex:1;min-width:0;"><div style="display:flex;align-items:baseline;justify-content:space-between;gap:8px;"><span style="font-family:var(--font-display);font-weight:700;font-size:15px;color:var(--text-heading);">'+bEsc(b.name)+'</span><span class="hud" style="font-size:9px;flex:none;color:'+(on?'var(--green-400)':'var(--text-faint)')+';">'+(on?'Earned':done+'/'+total)+'</span></div>'
-        +'<div style="font-family:var(--font-body);font-size:12px;line-height:1.4;color:var(--text-faint);margin:5px 0 8px;">'+bEsc(b.blurb)+'</div>'
-        +'<span style="display:block;width:100%;height:5px;border-radius:999px;background:rgba(255,255,255,0.08);overflow:hidden;"><span style="display:block;height:100%;width:'+pct+'%;background:linear-gradient(90deg,var(--cyan-500),var(--green-400));"></span></span></div></div>';
-    }).join('');
-    var c=document.getElementById('pg-fin-count'); if(c) c.textContent=earnedN+' of '+FIN_BADGES.length;
-  }
-  function renderAchievements(){
-    var host=document.getElementById('pg-achievements'); if(!host) return;
-    var earnedN=0;
-    host.innerHTML = ACHV.map(function(a){
-      var on=false; try{ on=!!a.earned(); }catch(e){}
-      if(on) earnedN++;
-      return badgeTileHTML(a.name, a.icon, on, on?'Unlocked':'', 52, a.desc);
-    }).join('');
-    var c=document.getElementById('pg-ach-count'); if(c) c.textContent=earnedN+' of '+ACHV.length;
-  }
-  window.renderFinancialBadges=renderFinancialBadges; window.renderAchievements=renderAchievements;
-
   /* ---- badges: the 4 Superpower rings on Home, each filled by its 4 Powers ---- */
   var badges = document.getElementById('badges');
   function renderHomeBadges(){
@@ -981,8 +918,6 @@
         +'<div style="display:grid;grid-template-columns:repeat('+g.powers.length+',1fr);gap:8px;">'+tiles+'</div></div>';
     }).join('');
     document.getElementById('pg-badge-count').textContent=totalPowersEarned()+' of '+TOTAL_POWERS+' powers';
-    if(window.renderFinancialBadges) window.renderFinancialBadges();
-    if(window.renderAchievements) window.renderAchievements();
     if(window.renderStreaks) window.renderStreaks();
   }
   window.renderProgress=renderProgress; renderProgress();
