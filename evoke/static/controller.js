@@ -11,23 +11,6 @@
   var CONTENT = window.EVOKE_CONTENT;
   if(!CONTENT){ console.error('EVOKE content missing (content.js failed to load)'); return; }
 
-  // TEMPORARY ("for now"): swap Mission 1 and Mission 2 content — the week cards,
-  // the mission brief, the transmission, and the submission work all swap so the
-  // two activities trade places. Delete this block to restore the original order.
-  (function(){
-    try{
-      var W = CONTENT.weeks && CONTENT.weeks[0] && CONTENT.weeks[0].missions;
-      if(W && W.length>=2){ var m=W[0]; W[0]=W[1]; W[1]=m; }
-      var a=CONTENT.assignment; CONTENT.assignment=CONTENT.assignment_m2; CONTENT.assignment_m2=a;
-      var t=CONTENT.transmission; CONTENT.transmission=CONTENT.transmission_m2; CONTENT.transmission_m2=t;
-      var SM=window.EVOKE_SUBMISSION_MISSIONS;
-      if(SM){
-        var s1=SM.filter(function(x){return x.n===1;})[0], s2=SM.filter(function(x){return x.n===2;})[0];
-        if(s1&&s2){ ['title','phase','week','superpower','skills','individual','discussionPrompt','teamProduct'].forEach(function(k){ var tmp=s1[k]; s1[k]=s2[k]; s2[k]=tmp; }); }
-      }
-    }catch(e){ console.warn('mission 1/2 swap failed', e); }
-  })();
-
   // ----- backend bridge -----
   var STATE = { userId:null, displayName:null, profile:null, missionIds:[] };
   function getJSON(p){ return fetch(p).then(function(r){ if(!r.ok) throw new Error(p+' '+r.status); return r.json(); }); }
