@@ -361,6 +361,35 @@
 
   /* ---- vault ---- */
   var vault = document.getElementById('vault');
+  var vEsc = function(s){ return String(s==null?'':s).replace(/[&<>"]/g,function(c){return ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'})[c];}); };
+  // The exact files this learner turned in for a mission, with download links.
+  function loadVaultSubs(host, missionNo){
+    var mid = STATE.missionIds && STATE.missionIds[missionNo-1];
+    if(!mid || !STATE.userId) return;
+    fetch('/api/my-submissions/'+encodeURIComponent(STATE.userId)+'?mission_id='+encodeURIComponent(mid))
+      .then(function(r){ return r.ok?r.json():null; })
+      .then(function(d){
+        var subs = (d && d.submissions) || [];
+        if(!subs.length) return;
+        var wrap = el('<div style="padding:0 24px 22px;"></div>');
+        wrap.appendChild(el('<div style="height:1px;background:var(--border-ui);margin:0 0 16px;"></div>'));
+        wrap.appendChild(el('<div class="hud" style="font-size:10px;color:var(--cyan-300);letter-spacing:.14em;margin-bottom:10px;">Your submitted work</div>'));
+        subs.forEach(function(s){
+          var label = s.kind==='individual_task' ? 'Individual task' : 'Team product';
+          var icon = s.kind==='individual_task' ? 'person' : 'groups';
+          var href = '/api/submission-file/'+encodeURIComponent(s.submission_id)+'?user_id='+encodeURIComponent(STATE.userId);
+          var row = el('<a href="'+vEsc(href)+'" download style="display:flex;align-items:center;gap:11px;padding:10px 12px;margin-bottom:8px;border-radius:11px;text-decoration:none;color:inherit;background:rgba(0,150,136,0.06);box-shadow:inset 0 0 0 1px var(--border-ui);"></a>');
+          row.addEventListener('click', function(e){ e.stopPropagation(); });
+          row.innerHTML =
+            '<span class="ms" aria-hidden="true" style="font-size:20px;flex:none;color:var(--cyan-300);">'+icon+'</span>'+
+            '<span style="flex:1;min-width:0;"><span style="display:block;font-family:var(--font-display);font-weight:600;font-size:13.5px;color:var(--teal-050);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">'+vEsc(s.filename)+'</span>'+
+            '<span class="hud" style="font-size:9.5px;color:var(--text-faint);">'+label+'</span></span>'+
+            '<span class="ms" aria-hidden="true" style="font-size:19px;flex:none;color:var(--cyan-300);">download</span>';
+          wrap.appendChild(row);
+        });
+        host.appendChild(wrap);
+      }).catch(function(){});
+  }
   function renderVault(){
     vault.innerHTML='';
     var any=false;
@@ -368,10 +397,9 @@
       if(missionState(v.mission)!=='complete') return;
       any=true;
       var _wp=(v.n||'').split('·'); var wm=_wp.length===2?('WEEK '+_wp[0].replace(/\D/g,'')+' · MISSION '+_wp[1].replace(/\D/g,'')):(v.n||'');
-      var card = el('<button class="glass vault-card" style="text-align:left;border:none;cursor:pointer;color:inherit;position:relative;" aria-label="Review '+wm+', '+v.title+', badge '+v.badge+'"></button>');
-      card.innerHTML =
-        
-        '<div style="padding:22px 24px;">'+
+      var card = el('<div class="glass vault-card" style="position:relative;"></div>');
+      var head = el('<button type="button" style="display:block;width:100%;text-align:left;border:none;cursor:pointer;color:inherit;background:none;padding:22px 24px;" aria-label="Review '+wm+', '+v.title+', badge '+v.badge+'"></button>');
+      head.innerHTML =
         '<div style="display:flex;align-items:center;gap:16px;margin-bottom:16px;">'+
           '<div class="mtile" style="width:48px;height:48px;flex:none;"><span class="ms" aria-hidden="true" style="font-size:24px;">'+v.icon+'</span></div>'+
           '<div><div class="hud" style="font-size:10.5px;color:var(--cyan-300);letter-spacing:.14em;margin-bottom:5px;">'+wm+'</div><div style="font-family:var(--font-display);font-weight:700;font-size:19px;color:var(--text-heading);text-transform:uppercase;line-height:1.1;">'+v.title+'</div>'+
@@ -379,14 +407,17 @@
           '<span class="ms" aria-hidden="true" style="margin-left:auto;font-size:22px;color:var(--cyan-300);">chevron_right</span>'+
         '</div>'+
         '<p style="font-family:var(--font-body);font-size:15px;line-height:1.6;color:var(--teal-100);margin:0 0 18px;">'+v.desc+'</p>'+
-        '<span class="chip teal"><span class="ms" aria-hidden="true" style="font-size:16px;">military_tech</span>'+v.badge+'</span>'+
-        '</div>';
-      card.addEventListener('click', function(){ openRecap(v); });
+        '<span class="chip teal"><span class="ms" aria-hidden="true" style="font-size:16px;">military_tech</span>'+v.badge+'</span>';
+      head.addEventListener('click', function(){ openRecap(v); });
+      card.appendChild(head);
+      var body = el('<div></div>');
+      card.appendChild(body);
+      loadVaultSubs(body, v.mission);
       vault.appendChild(card);
     });
     if(!any){ vault.innerHTML='<div class="glass" style="padding:34px;text-align:center;grid-column:1/-1;"><span class="ms" aria-hidden="true" style="font-size:36px;color:var(--text-faint);">inventory_2</span><p style="font-family:var(--font-body);font-size:15px;color:var(--text-faint);margin:12px 0 0;">No missions archived yet. Complete a mission and it will appear here for review.</p></div>'; }
   }
-  renderVault();
+  window.renderVault=renderVault; renderVault();
 
   /* ---- Vault recap popup: an AI-generated summary of the whole mission.
          "Re-read Story" still opens the full comic, returning to the Vault. ---- */

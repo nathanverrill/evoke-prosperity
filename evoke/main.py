@@ -2283,6 +2283,76 @@ async def get_submission(user_id: str, mission_id: str):
     }
 
 
+def _filename_from_key(object_key: str, user_id: str) -> str:
+    """Recover the original upload name from an evidence object key
+    (evoke-evidence/{mission}/{kind}/{user_id}_{filename})."""
+    tail = (object_key or "").rsplit("/", 1)[-1]
+    prefix = f"{user_id}_"
+    return tail[len(prefix):] if tail.startswith(prefix) else tail
+
+
+@app.get("/api/my-submissions/{user_id}")
+async def my_submissions(user_id: str, mission_id: str = None):
+    """Every file THIS learner has turned in -- their own individual tasks plus
+    the team products they uploaded -- so the Vault can show a learner their
+    exact submitted work. Optionally scoped to one mission. Newest first."""
+    if mission_id:
+        rows = db_fetch_all(
+            """SELECT id, mission_id, kind, file_path, submitted_at
+               FROM submissions
+               WHERE user_id = %s::uuid AND mission_id = %s::uuid
+               ORDER BY submitted_at DESC""",
+            (user_id, mission_id),
+        )
+    else:
+        rows = db_fetch_all(
+            """SELECT id, mission_id, kind, file_path, submitted_at
+               FROM submissions
+               WHERE user_id = %s::uuid
+               ORDER BY submitted_at DESC""",
+            (user_id,),
+        )
+    return {
+        "submissions": [
+            {
+                "submission_id": str(r[0]),
+                "mission_id": str(r[1]),
+                "kind": r[2],
+                "filename": _filename_from_key(r[3], user_id),
+                "submitted_at": r[4].isoformat() if r[4] else None,
+            }
+            for r in rows
+        ]
+    }
+
+
+@app.get("/api/submission-file/{submission_id}")
+async def submission_file(submission_id: str, user_id: str):
+    """Stream one of the learner's own submitted files back from MinIO for the
+    Vault. Scoped to the owner -- a learner can only download submissions they
+    turned in themselves."""
+    row = db_fetch_one(
+        "SELECT file_path FROM submissions WHERE id = %s::uuid AND user_id = %s::uuid",
+        (submission_id, user_id),
+    )
+    if not row or not row[0]:
+        raise HTTPException(status_code=404, detail="Submission not found")
+    object_key = row[0]
+    try:
+        obj = s3_client.get_object(Bucket="default-bucket", Key=object_key)
+    except Exception:
+        raise HTTPException(status_code=404, detail="File no longer available")
+    filename = _filename_from_key(object_key, user_id)
+    return Response(
+        content=obj["Body"].read(),
+        media_type=obj.get("ContentType", "application/octet-stream"),
+        headers={
+            "Content-Disposition": f'attachment; filename="{filename}"',
+            "Cache-Control": "no-cache",
+        },
+    )
+
+
 # ========== Timeline ==========
 @app.get("/api/timeline/{user_id}/{mission_id}")
 async def get_timeline(user_id: str, mission_id: str):
