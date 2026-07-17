@@ -76,10 +76,10 @@
     </section>
 
     <section class="card">
-      <div class="card__eyebrow">B1llbot</div>
+      <div class="card__eyebrow">B1llBot</div>
       <div class="billbot-drawer__log" id="chat"></div>
       <form id="chat-form" class="row">
-        <input type="text" id="chat-input" placeholder="Ask B1llbot..." style="flex:1" autocomplete="off">
+        <input type="text" id="chat-input" placeholder="Ask B1llBot..." style="flex:1" autocomplete="off">
         <button type="submit">→</button>
       </form>
     </section>
@@ -160,7 +160,7 @@
         const r = await fetch(`/api/reflections/${userId}`).then(r => r.json());
         if (r.filed_today) {
           const latest = (r.journal || [])[0];
-          body.innerHTML = `<p>Filed today ✓</p>${latest && latest.wisdom ? `<p class="empty-state">"${escapeHtml(latest.wisdom)}" — B1llbot</p>` : ""}`;
+          body.innerHTML = `<p>Filed today ✓</p>${latest && latest.wisdom ? `<p class="empty-state">"${escapeHtml(latest.wisdom)}" — B1llBot</p>` : ""}`;
           return;
         }
       } catch (e) {}
@@ -174,12 +174,12 @@
         e.preventDefault();
         const text = document.getElementById("reflect-text").value.trim();
         if (!text) return;
-        document.getElementById("reflect-status").textContent = "Filing… B1llbot is thinking (~20s).";
+        document.getElementById("reflect-status").textContent = "Filing… B1llBot is thinking (~20s).";
         try {
           const fd = new FormData();
           fd.append("text", text);
           const res = await fetch(`/api/reflection?user_id=${userId}`, { method: "POST", body: fd }).then(r => r.json());
-          body.innerHTML = `<p>Filed ✓</p><p class="empty-state">"${escapeHtml(res.wisdom)}" — B1llbot</p>`;
+          body.innerHTML = `<p>Filed ✓</p><p class="empty-state">"${escapeHtml(res.wisdom)}" — B1llBot</p>`;
         } catch (err) {
           document.getElementById("reflect-status").textContent = "Couldn't file that — try again.";
         }
@@ -205,7 +205,7 @@
             <p><strong>1.</strong> In Minecraft, add a multiplayer server:<br>
                Java: <code>${escapeHtml(info.java_address)}</code><br>
                Bedrock: <code>${escapeHtml(info.bedrock_address)}</code></p>
-            <p><strong>2.</strong> Find B1llbot's secret kiosk near the starter villagers, close to spawn — he'll whisper hello. Right there, type in chat:</p>
+            <p><strong>2.</strong> Find B1llBot's secret kiosk near the starter villagers, close to spawn — he'll whisper hello. Right there, type in chat:</p>
             <p><code id="connect-cmd" style="font-size:1.05em"></code></p>
             <p><strong>3.</strong> Come back here — you'll get a confirmation to tap.</p>
             <p class="empty-state">Code expires in 10 minutes. <a href="/#/faq" target="_blank">Full FAQ →</a></p>
