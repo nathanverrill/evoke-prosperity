@@ -244,7 +244,173 @@ codebase.
 
 ---
 
-## 4. What this spec deliberately does not cover
+## 4. UI feedback timing — never wait on Hub
+
+The learner-facing celebration/debrief sequence is already driven entirely
+by Prosperity's own completion detection — the AND-gate closing in
+`_complete_mission_for_user` produces the award/XP/badge rows and fires
+`MissionCompleted` synchronously, today, unaffected by anything in this
+spec. Keep it that way. Concretely:
+
+- Write `00-detected.json` synchronously, inline, before anything Hub-
+  related happens — it's a cheap local MinIO write and it's the "we
+  definitely saw this happen" proof (see §2's crash-survival reasoning).
+- Do the actual Hub HTTP call, and the `01-attempt.json`/`02-result.json`
+  writes that come from it, inside a FastAPI `BackgroundTasks.add_task(...)`
+  scheduled from `_complete_mission_for_user`, so it executes *after* the
+  HTTP response to the learner's own request has already gone out.
+
+A slow or unreachable Hub must add zero latency to what the learner sees.
+This is the same "arm's length" principle already in §3 (a Hub failure
+can't roll back the completion) extended from correctness to timing —
+even a *slow* Hub can't be allowed to delay the UI, not just a failed one.
+
+---
+
+## 5. Ack vs. callback — these are two different things
+
+As currently spec'd (§3), this is a plain synchronous call: Prosperity
+POSTs, waits up to the timeout, and whatever comes back becomes
+`02-result.json`. That's an **ack** — "Hub received and accepted a
+well-formed, idempotency-keyed event" — not proof that whatever Hub does
+with it downstream (a blockchain transaction, in particular) has actually
+finished. Those often confirm well after an HTTP request/response cycle
+would reasonably stay open.
+
+A true **callback** — Hub notifying Prosperity later, once the real
+downstream action completes or fails — does not exist in the current
+design. This is a genuinely open decision, not a settled part of this
+spec. If Hub needs it:
+
+- New endpoint on Prosperity's side, e.g. `POST /api/hub/callback`.
+- Authenticated in the *reverse* direction from §3/§6 — Hub needs its own
+  credential to call back *into* Prosperity.
+- Carries `hub_event_id` so it can be correlated to the original chain.
+- Appends its own immutable object to the same `hub-events/{hub_event_id}/`
+  prefix (e.g. `03-hub-confirmed.json`), same Object Lock treatment as
+  everything else in §2 — no different in kind from the outbound side.
+
+Settle this with whoever owns Hub before building either side: if Hub's
+own processing is fast/synchronous (writes to its own outbox and
+returns), a callback is unnecessary. If it's genuinely async, the
+callback is the only way this audit trail ever reflects the true
+end-state, rather than just "we successfully handed it off."
+
+---
+
+## 6. Auth to Hub — Client Credentials against Hub's existing Keycloak
+
+**Correction from the first draft of this section**: it originally
+proposed Prosperity mint its own signing keypair and run its own JWKS
+route. That was solving a problem Hub has already solved — Hub runs
+Keycloak and already serves as IdP for at least one other application.
+Prosperity doesn't need to become an identity provider; it needs to
+become one more OIDC client in Hub's existing realm, the same way that
+other application already is. Building a parallel keypair/JWKS
+mechanism would be redundant infrastructure, not the zero-trust
+improvement it looked like in isolation.
+
+This is a different concern from `IdentityProvider`
+(`ARCHITECTURE.md`'s adapter interface for "who is the logged-in
+learner"), and doesn't touch it. `ARCHITECTURE.md` (lines 7, 42, 323)
+is explicit that Prosperity deliberately runs no Keycloak of its own —
+"a full IAM server... is a lot of surface area for the amount of auth
+this project actually needs" — and that decision stands: Prosperity's
+learner-facing login stays LTI/local, unaffected by any of this. What
+this section covers is narrower: how the Prosperity *service*
+authenticates itself when calling the Hub *API* — the same category of
+concern as the `OPENWEBUI_API_KEY` / `MINIO_ROOT_USER` credentials
+already in `clients.py`, not a login system.
+
+**Checked against the actual code**: Prosperity has no real JWT to
+forward even if that were the design — the LTI 1.3 launch
+(`evoke/lti/brightspace_lti_provider.py`) verifies a real signed JWT
+*inbound* from Brightspace, but `verify_and_login()` (line ~118) hands
+back `session_token = str(uuid4())`, an opaque random string, no
+signature, no claims, no expiry; the dev-login path (`main.py`, two
+call sites) does the same; `/api/session/validate` (main.py ~752)
+literally comments "accept any non-empty token as valid." Forwarding
+that token to Hub would be "token passthrough" regardless — a token
+scoped for Prosperity's own consumption replayed to an unrelated
+third-party system. Good that there's nothing to accidentally forward.
+
+**The actual design — Client Credentials grant, Hub's Keycloak as the
+trust anchor:**
+
+- Prosperity is registered as a **confidential client** in Hub's
+  Keycloak realm (`evoke-prosperity-backend` or similar) — the same
+  registration mechanism the other application already uses. No new
+  pattern invented per integration.
+- New env vars, same shape as the existing `OPENWEBUI_URL` /
+  `OPENWEBUI_API_KEY` pair in `clients.py`: `HUB_KEYCLOAK_TOKEN_URL`,
+  `HUB_KEYCLOAK_CLIENT_ID`, `HUB_KEYCLOAK_CLIENT_SECRET`.
+- A small `get_hub_token()` helper in `clients.py`: a plain `httpx`
+  POST to Keycloak's token endpoint with `grant_type=client_credentials`,
+  caching the returned access token in memory (`{token, expires_at}`)
+  and refetching once close to Keycloak's (short, default ~5 min)
+  expiry. No SDK dependency needed for this — it's one HTTP call.
+- The §3 Hub call attaches it as `Authorization: Bearer <token>`. Hub
+  validates it exactly the way it already validates every other
+  client's token in that realm — no bespoke per-caller trust logic on
+  Hub's side, no keypair or JWKS route on Prosperity's.
+
+**Learner identity still travels as a data claim, not as the token's
+subject** — `user_id` / `mission_id` stay plain fields in the §3 JSON
+payload, unchanged. The token proves "this call genuinely came from
+Prosperity's registered Hub client"; Prosperity is separately vouching
+for which learner did what — exactly the risk split this doc opens
+with ("Prosperity's risk: correctly detecting completion... Hub's
+risk: what happens after"). This deliberately avoids making
+Prosperity's learners real Keycloak principals in Hub's realm, which
+would cut against `ARCHITECTURE.md`'s decision to keep Prosperity's own
+auth LTI-only.
+
+An interim, weaker v0 — a static shared-secret header (`X-Hub-Api-Key`)
+— would still unblock a first version if Hub-side Keycloak client
+registration isn't ready yet, but it's explicitly not the target: no
+per-request cryptographic proof, no expiry, no central revocation via
+Hub's own IdP tooling. Prefer waiting for the Keycloak client over
+shipping the shared-secret version if the timeline allows it — the real
+version isn't meaningfully more build work once Hub's realm is the
+thing doing the heavy lifting.
+
+---
+
+## 7. Same Docker network — possible, but cuts against the premise
+
+Every existing shared service (Postgres, Redpanda, OpenSearch, MinIO,
+Ollama, OpenWebUI, Minecraft) already lives together on one box, one
+Compose network, per `ARCHITECTURE.md`'s "one server per organization"
+model — so mechanically, Hub could join `evoke-infra-network` as another
+container with zero network-layer friction.
+
+Worth naming the tension directly: the entire premise of this spec (see
+"The problem this solves," top of this doc) is that Hub and Prosperity
+carry deliberately separate risk, verified independently — not "trusted
+because they're adjacent." Same-network doesn't break that boundary (the
+JWT/signature check in §6 still holds regardless of network topology),
+but it invites the boundary to erode in practice — network adjacency has
+a way of quietly becoming implicit trust (the next engineer skips auth on
+an internal route "because it's already firewalled").
+
+There's also a real question this doc can't settle from the code alone:
+is Hub meant to be **one centrally-run service that many separate
+Prosperity deployments talk to** (consistent with "one box per
+organization" — if every org gets its own Prosperity instance, there's
+presumably one Hub, not one-Hub-per-org, especially given the framing of
+consolidating blockchain/financial risk in one place), or a **component
+deployed alongside each Prosperity instance**? If it's the former,
+same-Docker-network isn't just architecturally muddy, it's not actually
+achievable — Hub can't sit on N different orgs' private networks
+simultaneously. In that case the connection is inherently over the
+network (HTTPS + the §6 JWT), and same-network is only ever relevant for
+local dev/testing. Settle Hub's actual deployment topology before
+deciding this either way — it changes whether §6 is defense-in-depth on
+top of network isolation, or the entire security model.
+
+---
+
+## 8. What this spec deliberately does not cover
 
 - Hub's own API authentication scheme, retry/dedup implementation, or
   anything about what Hub does with the event after receiving it — out of
