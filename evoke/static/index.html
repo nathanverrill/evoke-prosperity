@@ -498,8 +498,9 @@
   /* Money Skills 2x2 · Achievements 4x2 — perfect rows, no orphans */
   #pg-financial{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:14px;}
   @media (max-width:640px){ #pg-financial{grid-template-columns:1fr;} }
-  #pg-achievements{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:14px;}
-  @media (max-width:760px){ #pg-achievements{grid-template-columns:repeat(2,minmax(0,1fr));} }
+  #pg-achievements{display:grid;grid-template-columns:repeat(8,minmax(0,1fr));gap:14px;}
+  @media (max-width:1080px){ #pg-achievements{grid-template-columns:repeat(4,minmax(0,1fr));} }
+  @media (max-width:560px){ #pg-achievements{grid-template-columns:repeat(2,minmax(0,1fr));} }
   .pg-badge{position:relative;display:flex;align-items:center;gap:13px;padding:14px 16px;border-radius:13px;background:rgba(0,150,136,0.06);box-shadow:inset 0 0 0 1px var(--border-ui);overflow:hidden;}
   .pg-badge::before{content:"";position:absolute;left:0;top:0;bottom:0;width:4px;background:linear-gradient(180deg,var(--cyan-300),rgba(0,150,136,0.25));}
   .pg-badge-ic{position:relative;width:48px;height:48px;border-radius:12px;flex:none;display:flex;align-items:center;justify-content:center;background:linear-gradient(135deg,rgba(0,150,136,0.26),rgba(0,150,137,0.15));box-shadow:inset 0 0 0 1px var(--border-ui),0 0 18px -6px rgba(0,150,136,0.6);color:var(--cyan-200);}
