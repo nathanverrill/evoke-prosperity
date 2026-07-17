@@ -211,26 +211,23 @@
      backend's mission-tag -> Power mapping in skills_framework). Themed Material
      Symbols icons; earned = green glow, locked = dim + lock. */
   var POWER_META = {
-    "Empathy":["Empathetic Changemaker","favorite"],
-    "Curiosity":["Empathetic Changemaker","travel_explore"],
-    "Leadership":["Empathetic Changemaker","flag"],
-    "Transformation":["Empathetic Changemaker","change_circle"],
-    "Problem Solving":["Systems Thinker","extension"],
-    "Analysis":["Systems Thinker","analytics"],
-    "Aggregation":["Systems Thinker","hub"],
-    "Critical Reflection":["Systems Thinker","psychology"],
+    "Creativity":["Creative Visionary","palette"],
     "Imagination":["Creative Visionary","lightbulb"],
-    "Ideation":["Creative Visionary","tips_and_updates"],
     "Vision":["Creative Visionary","visibility"],
-    "Courage":["Creative Visionary","bolt"],
-    "Communication":["Deep Collaborator","forum"],
+    "Problem Solving":["Systems Thinker","extension"],
+    "Research & Analysis":["Systems Thinker","analytics"],
+    "Critical Reflection":["Systems Thinker","psychology"],
     "Teamwork":["Deep Collaborator","groups"],
-    "Networking":["Deep Collaborator","share"],
-    "Generosity of Spirit":["Deep Collaborator","volunteer_activism"]
+    "Communication":["Deep Collaborator","forum"],
+    "Relationship Management":["Deep Collaborator","handshake"],
+    "Empathy":["Empathetic Changemaker","favorite"],
+    "Leadership":["Empathetic Changemaker","flag"],
+    "Courage":["Empathetic Changemaker","bolt"]
   };
-  var QUALITY_META = { "Empathetic Changemaker":"volunteer_activism", "Systems Thinker":"account_tree", "Creative Visionary":"auto_awesome", "Deep Collaborator":"diversity_3" };
-  var QUALITY_ORDER = ["Empathetic Changemaker","Systems Thinker","Creative Visionary","Deep Collaborator"];
-  var POWER_ALIAS = { "Research & Analysis":"Aggregation", "Creativity":"Ideation", "Relationship Management":"Networking" };
+  var QUALITY_META = { "Creative Visionary":"auto_awesome", "Systems Thinker":"account_tree", "Deep Collaborator":"diversity_3", "Empathetic Changemaker":"volunteer_activism" };
+  var QUALITY_ORDER = ["Creative Visionary","Systems Thinker","Deep Collaborator","Empathetic Changemaker"];
+  var POWER_ALIAS = {};
+  var TOTAL_POWERS = Object.keys(POWER_META).length;
   function earnedPowerSet(){
     var set={}, ms=window.EVOKE_SUBMISSION_MISSIONS||[];
     ms.forEach(function(m){
@@ -327,14 +324,14 @@
     var C=175.9;
     badges.innerHTML = powerGroups().map(function(g){
       var lvl=g.powers.filter(function(p){return p.earned;}).length, on=lvl>0;
-      var off=(C*(1 - lvl/4)).toFixed(1);
-      return '<div class="sp-tile'+(on?'':' locked')+'" role="img" aria-label="'+g.quality+', '+lvl+' of 4 powers">'
+      var off=(C*(1 - lvl/g.powers.length)).toFixed(1);
+      return '<div class="sp-tile'+(on?'':' locked')+'" role="img" aria-label="'+g.quality+', '+lvl+' of '+g.powers.length+' powers">'
         +'<div class="sp-ring"><svg viewBox="0 0 64 64" aria-hidden="true"><circle class="bg" cx="32" cy="32" r="28"></circle>'
         +'<circle class="fg" cx="32" cy="32" r="28" stroke-dasharray="'+C.toFixed(1)+'" stroke-dashoffset="'+off+'"></circle></svg>'
         +'<span class="ic"><span class="ms" aria-hidden="true">'+(on?g.icon:'lock')+'</span></span>'+(on?'<span class="lv">'+lvl+'</span>':'')
         +'</div><div class="lbl">'+g.quality+'</div></div>';
     }).join('');
-    var hdr = document.getElementById('badges-week'); if(hdr) hdr.textContent=totalPowersEarned()+' of 16 powers';
+    var hdr = document.getElementById('badges-week'); if(hdr) hdr.textContent=totalPowersEarned()+' of '+TOTAL_POWERS+' powers';
   }
   window.renderHomeBadges=renderHomeBadges; renderHomeBadges();
 
@@ -872,7 +869,7 @@
           return '<div style="display:flex;align-items:center;gap:12px;padding:10px 12px;border-radius:11px;box-shadow:inset 0 0 0 1px var(--border-ui);opacity:'+(on?'1':'0.6')+';">'
             +'<span class="ms" aria-hidden="true" style="font-size:20px;flex:none;color:'+(on?'var(--cyan-300)':'var(--text-faint)')+';">'+g.icon+'</span>'
             +'<div style="flex:1;min-width:0;"><div style="font-family:var(--font-display);font-weight:700;font-size:12.5px;color:var(--teal-050);line-height:1.15;margin-bottom:6px;">'+g.quality+'</div><div style="display:flex;gap:5px;flex-wrap:wrap;">'+mini+'</div></div>'
-            +'<span class="hud" style="font-size:10px;flex:none;color:'+(on?'var(--cyan-300)':'var(--text-faint)')+';">'+e+'/4</span></div>';
+            +'<span class="hud" style="font-size:10px;flex:none;color:'+(on?'var(--cyan-300)':'var(--text-faint)')+';">'+e+'/'+g.powers.length+'</span></div>';
         }).join('');
       })();
       document.getElementById('ops-alex').textContent='\u201c'+m.alex+'\u201d';
@@ -980,10 +977,10 @@
       var tiles=g.powers.map(function(p){ return powerTile(p,52); }).join('');
       return '<div class="glass" style="padding:18px 16px;">'
         +'<div style="display:flex;align-items:center;gap:10px;margin-bottom:16px;"><span class="mtile" style="width:38px;height:38px;flex:none;border-radius:11px;display:flex;align-items:center;justify-content:center;"><span class="ms fill" aria-hidden="true" style="font-size:20px;">'+g.icon+'</span></span>'
-        +'<div style="min-width:0;"><div style="font-family:var(--font-display);font-weight:800;font-size:13.5px;color:var(--text-heading);text-transform:uppercase;line-height:1.1;">'+g.quality+'</div><div class="hud" style="font-size:10px;color:var(--cyan-300);margin-top:2px;">'+e+' of 4 powers</div></div></div>'
-        +'<div style="display:grid;grid-template-columns:repeat(4,1fr);gap:8px;">'+tiles+'</div></div>';
+        +'<div style="min-width:0;"><div style="font-family:var(--font-display);font-weight:800;font-size:13.5px;color:var(--text-heading);text-transform:uppercase;line-height:1.1;">'+g.quality+'</div><div class="hud" style="font-size:10px;color:var(--cyan-300);margin-top:2px;">'+e+' of '+g.powers.length+' powers</div></div></div>'
+        +'<div style="display:grid;grid-template-columns:repeat('+g.powers.length+',1fr);gap:8px;">'+tiles+'</div></div>';
     }).join('');
-    document.getElementById('pg-badge-count').textContent=totalPowersEarned()+' of 16 powers';
+    document.getElementById('pg-badge-count').textContent=totalPowersEarned()+' of '+TOTAL_POWERS+' powers';
     if(window.renderFinancialBadges) window.renderFinancialBadges();
     if(window.renderAchievements) window.renderAchievements();
     if(window.renderStreaks) window.renderStreaks();
