@@ -292,13 +292,20 @@
   }
   function renderFinancialBadges(){
     var host=document.getElementById('pg-financial'); if(!host) return;
-    host.style.display='grid'; host.style.gridTemplateColumns='repeat(auto-fit,minmax(min(100%,150px),1fr))'; host.style.gap='14px';
+    host.style.display='grid'; host.style.gridTemplateColumns='repeat(auto-fit,minmax(min(100%,300px),1fr))'; host.style.gap='14px';
     var earnedN=0;
     host.innerHTML = FIN_BADGES.map(function(b){
-      var done=b.missions.filter(function(n){return missionState(n)==='complete';}).length;
-      var on=done>=b.missions.length; if(on) earnedN++;
-      var sub = on ? 'Earned' : (done+'/'+b.missions.length+' missions');
-      return badgeTileHTML(b.name, b.icon, on, sub, 58, b.blurb);
+      var total=b.missions.length, done=b.missions.filter(function(n){return missionState(n)==='complete';}).length;
+      var on=done>=total; if(on) earnedN++;
+      var pct=Math.round(done/total*100);
+      var tile = on
+        ? 'background:radial-gradient(circle at 50% 35%,rgba(0,212,146,0.28),rgba(0,150,137,0.10));box-shadow:inset 0 0 0 1.5px var(--green-400),0 0 18px -4px rgba(0,212,146,0.55);color:var(--green-400);'
+        : 'box-shadow:inset 0 0 0 1px var(--border-ui);color:var(--text-faint);';
+      return '<div style="display:flex;gap:14px;align-items:center;padding:16px 18px;border-radius:14px;box-shadow:inset 0 0 0 1px '+(on?'rgba(0,212,146,0.4)':'var(--border-ui)')+';background:'+(on?'rgba(0,212,146,0.05)':'transparent')+';">'
+        +'<span style="width:52px;height:52px;flex:none;border-radius:14px;display:flex;align-items:center;justify-content:center;'+tile+'"><span class="ms'+(on?' fill':'')+'" aria-hidden="true" style="font-size:26px;">'+(on?b.icon:'lock')+'</span></span>'
+        +'<div style="flex:1;min-width:0;"><div style="display:flex;align-items:baseline;justify-content:space-between;gap:8px;"><span style="font-family:var(--font-display);font-weight:700;font-size:15px;color:var(--text-heading);">'+bEsc(b.name)+'</span><span class="hud" style="font-size:9px;flex:none;color:'+(on?'var(--green-400)':'var(--text-faint)')+';">'+(on?'Earned':done+'/'+total)+'</span></div>'
+        +'<div style="font-family:var(--font-body);font-size:12px;line-height:1.4;color:var(--text-faint);margin:5px 0 8px;">'+bEsc(b.blurb)+'</div>'
+        +'<span style="display:block;width:100%;height:5px;border-radius:999px;background:rgba(255,255,255,0.08);overflow:hidden;"><span style="display:block;height:100%;width:'+pct+'%;background:linear-gradient(90deg,var(--cyan-500),var(--green-400));"></span></span></div></div>';
     }).join('');
     var c=document.getElementById('pg-fin-count'); if(c) c.textContent=earnedN+' of '+FIN_BADGES.length;
   }
@@ -1528,10 +1535,9 @@
       }).join('') || '<p class="hud" style="font-size:12px;color:var(--text-faint);margin:0 0 14px;">No messages yet — start the conversation below.</p>';
       var discHtml = '<div class="glass" style="padding:clamp(22px,3.5vw,30px);margin-bottom:22px;">'
         + '<div style="display:flex;align-items:center;gap:12px;margin-bottom:6px;flex-wrap:wrap;"><span class="ms" aria-hidden="true" style="font-size:24px;color:var(--cyan-300);">forum</span><h2 class="hud" style="font-size:12px;margin:0;color:var(--cyan-300);">Step '+(hasInd?2:1)+' · Team Discussion</h2><span class="hud" style="margin-left:auto;font-size:11px;color:var(--text-faint);">'+(currentMsgs.length)+' message'+(currentMsgs.length===1?'':'s')+'</span></div>'
-        + '<div style="display:flex;gap:12px;align-items:flex-start;margin:0 0 16px;padding:12px 14px;border-radius:12px;background:rgba(0,150,136,0.06);box-shadow:inset 0 0 0 1px var(--border-ui);">'
-          + '<span style="width:34px;height:34px;flex:none;"><img src="img/ui/3.png" alt="" style="width:100%;height:100%;object-fit:contain;"></span>'
-          + '<div><div class="hud" style="font-size:10px;color:var(--cyan-300);margin-bottom:4px;">B1llBot</div>'
-          + '<div style="font-family:var(--font-body);font-size:14px;line-height:1.5;color:var(--teal-050);">'+e2(m.discussionPrompt)+'</div></div></div>'
+        + '<div style="margin:0 0 16px;padding:13px 15px;border-radius:12px;background:rgba(0,150,136,0.06);box-shadow:inset 0 0 0 1px var(--border-ui);">'
+          + '<div class="hud" style="font-size:10px;color:var(--cyan-300);margin-bottom:5px;">B1llBot</div>'
+          + '<div style="font-family:var(--font-body);font-size:14px;line-height:1.55;color:var(--teal-050);">'+e2(m.discussionPrompt)+'</div></div>'
         + '<div style="display:flex;flex-direction:column;gap:12px;margin-bottom:16px;">'+msgsHtml+'</div>'
         + '<form id="sub-disc-form" style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;"><input id="sub-disc-input" type="text" placeholder="Add to the discussion…" style="flex:1 1 160px;min-width:0;padding:12px 14px;border-radius:12px;border:none;background:rgba(0,150,136,0.06);box-shadow:inset 0 0 0 1px var(--border-ui);color:var(--text-heading);font-family:var(--font-body);font-size:14px;"><button class="btn sec" type="submit" style="flex:none;width:auto;min-width:96px;">Post</button></form></div>';
 
