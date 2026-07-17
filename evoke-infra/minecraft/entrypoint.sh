@@ -38,6 +38,13 @@ fi
 mkdir -p "$LEVEL_NAME/datapacks"
 cp -r /server/world-datapacks/. "$LEVEL_NAME/datapacks/"
 
+# Mod config (e.g. billbot's config/billbot/npcs.json) is also project
+# content, not world state -- Fabric reads config/ relative to this working
+# directory ($WORLD_DATA), not /server/config where the image bakes it in,
+# so it has to be synced here the same way datapacks are, every boot.
+mkdir -p config
+cp -r /server/config/. config/
+
 # server.properties is config, not state — regenerated from the template on
 # every boot from env vars, never hand-edited on disk.
 sed \
