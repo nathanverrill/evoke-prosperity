@@ -85,49 +85,112 @@ re-derivable for dedup/audit lookups, not just unique.
 
 ---
 
-## 2. The MinIO audit log — write this *before* calling Hub, not after
+## 2. The MinIO audit log — genuinely immutable, not just "durable-ish"
 
-Bucket: a new `hub-events` bucket (parallel to whatever bucket evidence
-files already use — `evoke/clients.py`'s `s3_client`, already configured
-against MinIO, is the exact client to reuse; no new connection needed).
+**Correction from the first draft of this spec**: writing a `status:
+"pending"` object and then *overwriting* it with `delivered`/`failed`
+(what this section originally said) is not actually tamper-evident — an
+overwritable object is still a mutable record, no different in kind from
+a Postgres row someone could `UPDATE`. Full governance-grade auditability
+means the log is **append-only**: every state transition is its own new,
+individually-locked object; nothing already written is ever modified,
+only added to.
 
-Object key: `hub-events/{hub_event_id}.json`
+**Bucket setup (one-time, and it must happen at creation — Object Lock
+cannot be retrofitted onto an existing MinIO/S3 bucket):**
 
-Write the audit record **before** attempting the HTTP call to Hub, with a
-`status: "pending"` field, then update the same object after the call
-resolves. This ordering matters: if the process crashes or Hub's API times
-out mid-call, there's still a durable record that Prosperity *intended* to
-notify Hub, with everything needed to retry or manually investigate later
-— the alternative (write-after-success-only) would silently lose that
-record on exactly the failure case an audit trail exists to catch.
+```python
+s3_client.create_bucket(Bucket="hub-events", ObjectLockEnabledForBucket=True)
+```
+
+Use **Object Lock in COMPLIANCE mode**, not GOVERNANCE mode, for every
+object written here. This is a real, easy-to-miss naming collision worth
+flagging explicitly: MinIO/S3's own **GOVERNANCE** retention mode still
+lets a privileged credential delete or overwrite a locked object — it is
+*not* what "just like governance [audit standards]" means, and using it
+would quietly undermine the exact guarantee this spec exists to provide.
+**COMPLIANCE mode** is the one where *no one* — not even the root
+credential — can delete or modify an object before its retention period
+expires. That's the actual tamper-evidence property. Retention period
+itself is an open decision (align it to whatever EVOKE Hub's own
+financial/compliance requirement turns out to be — 7 years is a common
+default for financial records, but don't ship that number without
+confirming it against Hub's actual requirement).
+
+**Object layout — append-only per event, not one mutable file:**
+
+```
+hub-events/{hub_event_id}/00-detected.json     -- written the moment the AND-gate closes, before any Hub call
+hub-events/{hub_event_id}/01-attempt.json      -- the exact outgoing request, written right before the HTTP call
+hub-events/{hub_event_id}/02-result.json       -- the response/outcome of that attempt
+hub-events/{hub_event_id}/03-attempt.json      -- only if attempt 1 failed and a retry fires
+hub-events/{hub_event_id}/04-result.json
+...
+```
+
+Each object is written once, locked immediately (`ObjectLockMode:
+"COMPLIANCE"` + a `RetainUntilDate` on the `put_object` call), and never
+touched again. "Current status" for a given `hub_event_id` is derived by
+listing everything under its prefix and reading the latest numbered
+object — a query, not a stored field — which is itself part of the audit
+property: the full history is always there, not just the last write.
+
+This ordering (write `00-detected` before attempting the Hub call at all)
+is what survives a crash or timeout mid-call: even if the process dies
+before `01-attempt` or `02-result` ever get written, there's still
+immutable proof Prosperity had detected the completion and intended to
+notify Hub, with a timestamp — enough to drive a manual reconciliation
+even in the worst case.
+
+**Honest gap in the current infra, not solved by this spec:** the
+running MinIO (`evoke-infra-minio-1`, a single `chainguard/minio`
+container, per `evoke-infra/docker-compose.yml`) is one node with no
+erasure coding or replication — Object Lock makes records *tamper-evident*
+(nobody can edit or delete them), it does not make them *durable against
+losing the disk*. True governance-grade durability needs either a real
+multi-node MinIO cluster or replication to a second location (a cloud
+bucket, most likely) — that's infrastructure work beyond this spec's
+scope, and should be a explicit decision (and cost line, see
+`HOSTING_COST_MODEL.md`) before this is treated as a real financial audit
+trail rather than a tamper-evident-but-single-copy one.
+
+Example contents of each object in the sequence:
 
 ```json
+// 00-detected.json
 {
   "hub_event_id": "<uuid5, see above>",
   "event_type": "MissionCompleted",
   "user_id": "<uuid>",
   "mission_id": "<uuid>",
   "team_id": "<uuid>",
-  "detected_at": "<ISO8601, when Prosperity's AND-gate closed>",
-  "sent_at": null,
-  "status": "pending",
-  "hub_request": { "...": "exact payload sent to Hub, once sent" },
-  "hub_response": null,
-  "hub_response_status": null,
-  "attempt_count": 0
+  "detected_at": "<ISO8601, when Prosperity's AND-gate closed>"
+}
+
+// 01-attempt.json
+{
+  "hub_event_id": "<uuid5>",
+  "attempt": 1,
+  "sent_at": "<ISO8601>",
+  "hub_request": { "...": "exact payload sent to Hub" }
+}
+
+// 02-result.json
+{
+  "hub_event_id": "<uuid5>",
+  "attempt": 1,
+  "resolved_at": "<ISO8601>",
+  "outcome": "delivered",
+  "hub_response_status": 200,
+  "hub_response": { "...": "exact response body from Hub" }
 }
 ```
 
-After the Hub call resolves (success, failure, or timeout), overwrite the
-same object with `status` set to `"delivered"` / `"failed"` /
-`"retrying"`, `sent_at` stamped, and the real `hub_request` /
-`hub_response` / `hub_response_status` filled in. Use MinIO's normal
-`put_object` (via `s3_client`, same as evidence uploads) — this doesn't
-need object versioning or WORM locking for a first pass, but flag that as
-a real follow-up if "tamper-evident" needs to survive someone with bucket
-write access, not just normal application bugs.
+Use MinIO's normal `put_object` (via `s3_client`, same as evidence
+uploads) with `ObjectLockMode="COMPLIANCE"` and a `RetainUntilDate` set on
+every one of these calls.
 
-**This MinIO write is the actual audit trail.** Kafka's `MissionCompleted`
+**This MinIO log is the actual audit trail.** Kafka's `MissionCompleted`
 event (already published, unchanged by this work) is for Prosperity's own
 internal consumers (workers.py's badge/XP/profile logic) — it is *not*
 durable enough to be Hub's audit record, since Redpanda topics here have
@@ -164,9 +227,11 @@ its side.
 
 Timeout + retry: a financial/blockchain-adjacent call should not be
 fire-and-forget. A short timeout (5-10s) with a small number of retries
-(e.g. 3, exponential backoff) is reasonable for the inline call; if all
-retries fail, leave the MinIO record at `status: "failed"` with the last
-error captured, and surface it somewhere a human can see it (an admin
+(e.g. 3, exponential backoff) is reasonable for the inline call, each one
+its own numbered `NN-attempt`/`NN-result` pair per §2; if all retries
+fail, the last `-result.json` in the sequence carries `"outcome":
+"failed"` and the last error captured, and surface it somewhere a human
+can see it (an admin
 view, or at minimum a log line `logger.error(...)` — matches the existing
 `except Exception as e: logger.error(f"Badge sync failed: {e}")` pattern
 already used a few lines above for the Brightspace push, in the same
@@ -187,7 +252,10 @@ codebase.
 - A backfill/replay tool for re-sending historical completions Hub never
   received (e.g. if this ships after real completions already happened).
   Worth a follow-up once this is live, not blocking the first version.
-  The MinIO audit log's own `status: "failed"` records are exactly what
-  such a tool would query to find what needs replaying.
-- Object-lock/WORM immutability on the MinIO bucket (flagged above, not
-  required for a first pass).
+  The append-only log is exactly what such a tool would scan — any
+  `hub_event_id` prefix whose latest object isn't a successful `-result`
+  is a candidate for replay.
+- Multi-node MinIO durability / cross-location replication (see the
+  honest gap called out at the end of §2) — Object Lock solves
+  tamper-evidence, not disk/node loss. A real decision + likely a real
+  cost line, not something to silently assume is covered.
