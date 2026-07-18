@@ -57,13 +57,32 @@
   // completion so all render logic reflects the learner's true progress.
   // Backend /api/missions is ordered by (week, sequence) — the SAME order as
   // the design's sequential missions 1..12 — so index i maps to design N=i+1.
+  // Revealed only when the backend says real login is required (AUTH_PROVIDER
+  // configured, see /api/auth/config) and neither a magic link nor a cached
+  // identity resolved one below. The rest of the SPA still boots underneath
+  // it (STATE.userId just stays null) -- simplest way to block interaction
+  // without threading a second boot path through everything below.
+  function showLoggedOutHome(){
+    var gate = document.getElementById('logged-out-gate');
+    if(!gate) return;
+    gate.style.display = 'flex';
+    var btn = document.getElementById('logged-out-login-btn');
+    if(btn && !btn.dataset.wired){
+      btn.dataset.wired = '1';
+      btn.addEventListener('click', function(){ location.href = '/api/auth/login'; });
+    }
+  }
+
   function seedFromBackend(){
     // Playtest magic link: ?login=<email> always wins over whatever dev-login
     // would otherwise default to (the earliest-created learner -- "Player
     // One"), so a shared/reused device or a stale prior session can't leave
     // a tester looking at the wrong person's progress. Same pattern as
     // app.js's ensureLoggedIn()/companion.html's init() -- this file just
-    // never had it, since it calls dev-login with no params at all.
+    // never had it, since it calls dev-login with no params at all. The
+    // Brightspace OAuth callback (evoke/main.py's auth_brightspace_callback)
+    // hands off through this exact same param after a real login, rather
+    // than inventing a second identity hand-off mechanism.
     var loginEmail = new URLSearchParams(location.search).get('login');
     var loginQS = loginEmail ? ('?email=' + encodeURIComponent(loginEmail)) : '';
     if(loginEmail){
@@ -71,7 +90,15 @@
       url.searchParams.delete('login');
       history.replaceState({}, '', url);
     }
-    return postJSON('/api/dev-login' + loginQS).then(function(d){
+    // A previously-established real login, cached across reloads so a
+    // returning learner doesn't have to click through Central Registry every
+    // page load.
+    var cachedUserId = null;
+    if(!loginEmail){ try{ cachedUserId = localStorage.getItem('evoke_user_id'); }catch(e){} }
+    if(cachedUserId) loginQS = '?user_id=' + encodeURIComponent(cachedUserId);
+
+    function establishIdentity(){
+      return postJSON('/api/dev-login' + loginQS).then(function(d){
       STATE.userId = d.user_id; STATE.displayName = d.display_name;
       try{ localStorage.setItem('evoke_user_id', STATE.userId); }catch(e){}
       return Promise.all([
@@ -108,6 +135,17 @@
         if(host && !/^(localhost|127\.|0\.0\.0\.0)/.test(host)){ var el2=document.getElementById('mc-server'); if(el2) el2.textContent = host; }
       }).catch(function(){});
     }).catch(function(e){ console.warn('backend seed failed; using local demo state', e); });
+    }
+
+    if(loginEmail || cachedUserId) return establishIdentity();
+
+    // Neither a magic link nor a cached identity -- ask the backend whether
+    // real login is actually required before defaulting to today's dev
+    // auto-login (what happens when no AUTH_PROVIDER is configured).
+    return getJSON('/api/auth/config').catch(function(){ return {login_required:false}; }).then(function(cfg){
+      if(cfg && cfg.login_required){ showLoggedOutHome(); return null; }
+      return establishIdentity();
+    });
   }
 
   // ----- the designer's screen logic, verbatim, booted after seeding -----
@@ -192,6 +230,28 @@
     var b = el('<button class="nav" data-go="'+it.id+'"><span class="ms '+(it.fill?'fill':'')+'" aria-hidden="true" style="font-size:28px;">'+it.icon+'</span><span class="lbl">'+it.label+'</span></button>');
     nav.appendChild(b);
   });
+
+  // ---- agent account: real name (from Brightspace/dev-login, NOT the
+  // roleplay codename Profile lets you set) + Log Out. #agent-account (in
+  // index.html) lives outside every .screen section -- same global-overlay
+  // pattern as #buddy -- so it stays visible no matter which screen is
+  // active, unlike the nav rail above (nested inside just the home screen).
+  (function(){
+    function agentCodeName(fullName){
+      var parts = (fullName||'').trim().split(/\s+/).filter(Boolean);
+      if(!parts.length) return 'AGENT//UNKNOWN';
+      if(parts.length===1) return parts[0].toUpperCase();
+      return parts[parts.length-1].toUpperCase()+'//'+parts[0].toUpperCase();
+    }
+    function logoutAgent(){
+      try{ localStorage.removeItem('evoke_user_id'); }catch(e){}
+      postJSON('/api/session/logout', {}).catch(function(){}).then(function(){ location.href = '/'; });
+    }
+    var codeEl = document.getElementById('agent-codename');
+    var logoutBtn = document.getElementById('agent-logout-btn');
+    if(codeEl) codeEl.textContent = agentCodeName(STATE.displayName);
+    if(logoutBtn) logoutBtn.addEventListener('click', logoutAgent);
+  })();
 
   /* ---- greeting ---- */
   document.getElementById('greet-kicker').textContent = CONTENT.greeting.kicker;

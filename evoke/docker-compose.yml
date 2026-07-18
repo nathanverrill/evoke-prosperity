@@ -24,6 +24,17 @@ services:
       MINIO_ACCESS_KEY: admin
       MINIO_SECRET_KEY: devsecret123
       BRIGHTSPACE_SIM_URL: http://brightspace-sim:8001
+      BRIGHTSPACE_CLIENT_ID: ${BRIGHTSPACE_CLIENT_ID:-}
+      BRIGHTSPACE_CLIENT_SECRET: ${BRIGHTSPACE_CLIENT_SECRET:-}
+      BRIGHTSPACE_TENANT_URL: ${BRIGHTSPACE_TENANT_URL:-}
+      # OAuth 2.0 login (evoke/oauth_providers.py) -- like BRIGHTSPACE_CLIENT_ID
+      # above, these were sitting in .env but never reaching this container
+      # since this block is an explicit allowlist, not env_file: .env.
+      AUTH_PROVIDER: ${AUTH_PROVIDER:-}
+      BRIGHTSPACE_OAUTH_AUTHORIZE_URL: ${BRIGHTSPACE_OAUTH_AUTHORIZE_URL:-}
+      BRIGHTSPACE_OAUTH_TOKEN_URL: ${BRIGHTSPACE_OAUTH_TOKEN_URL:-}
+      BRIGHTSPACE_OAUTH_REDIRECT_URI: ${BRIGHTSPACE_OAUTH_REDIRECT_URI:-}
+      BRIGHTSPACE_OAUTH_SCOPES: ${BRIGHTSPACE_OAUTH_SCOPES:-}
       AI_GATEWAY_URL: http://litellm:4000
       AI_GATEWAY_KEY: ${LITELLM_MASTER_KEY:-sk-devsecret123}
       AI_ENABLED: "true"

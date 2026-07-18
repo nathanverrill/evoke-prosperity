@@ -760,6 +760,18 @@
 </style>
 </head>
 <body>
+<!-- Shown only when the backend reports real login is required (AUTH_PROVIDER
+     configured) and no session/cached identity exists yet -- see controller.js's
+     seedFromBackend/showLoggedOutHome. Hidden by default so a dev-mode clone
+     with no OAuth provider configured never sees this. -->
+<div id="logged-out-gate" style="display:none;position:fixed;inset:0;z-index:9999;align-items:center;justify-content:center;background:var(--grad-page);padding:24px;">
+  <div class="glass" style="max-width:420px;width:100%;padding:clamp(28px,4vw,40px);text-align:center;">
+    <div class="hud" style="font-size:11px;color:var(--cyan-300);letter-spacing:.18em;margin-bottom:10px;">EVOKE OPERATIONS HUB</div>
+    <h1 style="font-family:var(--font-display);font-weight:800;font-size:clamp(22px,3vw,28px);color:var(--text-heading);margin:0 0 14px;">Agent Sign-In Required</h1>
+    <p style="font-family:var(--font-body);font-size:14.5px;line-height:1.6;color:var(--teal-050);margin:0 0 26px;">Your mission record lives in the Central Registry. Sign in there to pick up where you left off in Keel.</p>
+    <button id="logged-out-login-btn" class="btn" type="button" style="width:100%;">Login with Central Registry</button>
+  </div>
+</div>
 <a class="skip" href="#main">Skip to main content</a>
 
 <!-- ===== HOME ===== -->
@@ -1522,6 +1534,14 @@
   </div>
 </div>
 
+<!-- Agent account: real name (from Brightspace/dev-login) + Log Out. Global,
+     like #buddy below -- outside every .screen section so it's visible no
+     matter which screen is active, not just home. -->
+<div id="agent-account" style="position:fixed;bottom:18px;right:18px;z-index:60;display:flex;align-items:center;gap:10px;background:var(--surface-glass,rgba(119,194,192,0.12));border-radius:var(--radius-lg);box-shadow:var(--elev-glass);padding:8px 10px 8px 16px;">
+  <div class="hud" id="agent-codename" style="font-family:var(--font-mono);font-size:12px;letter-spacing:.08em;color:var(--cyan-200);white-space:nowrap;"></div>
+  <button id="agent-logout-btn" class="btn sec" type="button" style="font-size:11px;padding:7px 12px;white-space:nowrap;">Log Out</button>
+</div>
+
 <!-- B1llBot companion (travels the whole journey) -->
 <div class="buddy" id="buddy" aria-live="polite">
   <button class="buddy-face" id="buddy-face" aria-label="Talk to B1llBot"><img src="img/ui/15.png" alt=""></button>
@@ -1538,6 +1558,6 @@
 
   <script src="submission-missions.js?b=4"></script>
   <script src="content.js?b=4"></script>
-  <script src="controller.js?b=26"></script>
+  <script src="controller.js?b=30"></script>
 </body>
 </html>

@@ -6,6 +6,7 @@ import random
 import re
 import uuid
 import hashlib
+from urllib.parse import urlencode
 from typing import Optional, List
 from fastapi import FastAPI, HTTPException, File, UploadFile, Form, Depends, Response, Request, WebSocket, WebSocketDisconnect
 from fastapi.staticfiles import StaticFiles
@@ -25,6 +26,7 @@ from evoke.lti import BrightspaceLTIProvider
 from evoke import skills_framework, progression, world_state, gear as gear_catalog
 from evoke.live import live_hub
 from evoke.identity import get_or_create_evoke_player
+from evoke.oauth_providers import get_auth_provider, OAuthLoginError
 
 logger = logging.getLogger(__name__)
 
@@ -790,6 +792,80 @@ async def lti_launch_callback(session_token: str = None):
         "session_token": session_token,
         "redirect_to": "/api/missions"
     }
+
+# ========== OAuth 2.0 Login (swappable provider) ==========
+# A real user clicking "Login with Central Registry" and authorizing as
+# themselves -- distinct from the LTI 1.3 platform-launch flow above (a
+# platform-initiated launch) and from the server-to-server Brightspace API
+# creds evoke/lms/brightspace_lms.py uses for roster/classlist/dropbox calls.
+# AUTH_PROVIDER (.env) picks the implementation (evoke/oauth_providers.py);
+# adding Keycloak/EvokeHub/etc. later means adding another AuthProvider, not
+# touching these routes.
+
+@app.get("/api/auth/config")
+async def auth_config():
+    """Tells the frontend whether real login is required -- a fresh clone
+    with no AUTH_PROVIDER configured keeps today's dev auto-login behavior
+    (see controller.js's seedFromBackend)."""
+    provider = get_auth_provider()
+    return {"login_required": provider is not None, "provider": provider.name if provider else None}
+
+@app.get("/api/auth/login")
+async def auth_login():
+    """Redirects to the configured provider's authorize URL. A random state
+    value is set as a short-lived httponly cookie and echoed back by the
+    provider on callback -- a double-submit CSRF check, no server-side
+    state store needed."""
+    provider = get_auth_provider()
+    if not provider:
+        raise HTTPException(status_code=503, detail="No OAuth login provider configured")
+    state = uuid.uuid4().hex
+    response = RedirectResponse(url=provider.authorize_url(state), status_code=302)
+    response.set_cookie(
+        key="oauth_state", value=state, httponly=True, secure=True, samesite="Lax", max_age=600,
+    )
+    return response
+
+@app.get("/api/auth/brightspace/callback")
+async def auth_brightspace_callback(request: Request, code: str = None, state: str = None, error: str = None):
+    """Brightspace redirects the browser here after the user authorizes.
+    Exchanges the code, resolves the real user via whoami, provisions/finds
+    their EVOKE Player (the same shared path LTI launches and admin
+    roster-import already use -- evoke/identity.py), then hands off to the
+    SPA's existing playtest magic-link convention (?login=<email>, see
+    controller.js's seedFromBackend) rather than inventing a second
+    identity hand-off mechanism."""
+    provider = get_auth_provider()
+    if not provider:
+        raise HTTPException(status_code=503, detail="No OAuth login provider configured")
+    if error:
+        raise HTTPException(status_code=400, detail=f"Brightspace login failed: {error}")
+    if not code or not state:
+        raise HTTPException(status_code=400, detail="Missing code/state")
+
+    expected_state = request.cookies.get("oauth_state")
+    if not expected_state or state != expected_state:
+        raise HTTPException(status_code=400, detail="Invalid OAuth state")
+
+    try:
+        profile = await provider.exchange_code(code)
+    except OAuthLoginError as e:
+        logger.error(f"Brightspace OAuth login failed: {e}")
+        raise HTTPException(status_code=401, detail=str(e))
+
+    evoke_user_id = await get_or_create_evoke_player(
+        async_db_pool,
+        brightspace_user_id=profile["subject"],
+        email=profile["email"],
+        display_name=profile["display_name"],
+        role=profile["role"],
+    )
+    if not evoke_user_id:
+        raise HTTPException(status_code=500, detail="Failed to provision EVOKE Player")
+
+    redirect_response = RedirectResponse(url="/?" + urlencode({"login": profile["email"]}), status_code=302)
+    redirect_response.delete_cookie("oauth_state")
+    return redirect_response
 
 @app.get("/api/session/validate")
 async def validate_session(session_token: str = None):
