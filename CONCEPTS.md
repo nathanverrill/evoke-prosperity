@@ -152,6 +152,9 @@ COMPLIANCE_TODO.md       Sequenced P0/P1/P2 compliance action list for a real Co
 WHITELIST.md             Confirmed (not hypothetical) evidence the Minecraft server has been reached by
                          non-project entities, the team members verified and cleared to whitelist, and
                          the server-config changes required to close the exposure
+GUARDRAILS_PLAN.md       AI gateway build spec (LiteLLM + Presidio + content filter) sitting in front of
+                         every real AI call site — stakeholder/liability/technical reasoning plus the
+                         phased rollout; Phase 0/1 (pass-through + PII/content filtering) is live
 CONCEPTS.md              This file
 ```
 

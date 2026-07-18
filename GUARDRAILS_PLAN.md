@@ -89,9 +89,32 @@ mistaken for complete:
   EVOKE alone; it's a per-district staffing commitment. This plan builds
   the pipe the escalation travels through, not the person on the other
   end.
-- **The facilitator review queue UI** — `GAPS.md` line 56 territory,
-  still page-less. This plan's "flagged, routed to a human" path assumes
-  that surface exists; it's a real dependency, not a detail.
+- **The facilitator review queue** — `GAPS.md` line 63 territory. Neither
+  the `instructor-dashboard` projection nor the page on it exists yet
+  (corrected during this reconciliation; earlier drafts of this repo's
+  docs claimed the backend was already built). This plan's "flagged,
+  routed to a human" path assumes that surface exists; it's a real
+  dependency, not a detail — see §III's Logging and retention section for
+  the concrete plan to build it.
+
+### Regulatory landscape — checked live, not carried over from memory
+
+A few developments outside this repo's own prior notes, confirmed against
+current sources rather than assumed current: the FTC's amended COPPA Rule
+(compliance deadline April 22, 2026, already past) makes a documented
+retention window and an annual security risk assessment real requirements,
+not best practice; Colorado's SB 24-041 minors amendment to the Colorado
+Privacy Act (effective October 1, 2025) requires opt-in consent for
+"design features that significantly increase, sustain, or extend a
+minor's use" — a real, unresolved question for this app's own streaks/XP/
+badge mechanics, not just ad-tech; and Colorado repealed and replaced its
+AI Act (SB 24-205 → SB 26-189, effective January 1, 2027), which regulates
+automated decisions materially influencing "consequential decisions" —
+education examples given include automated grading, which B1llBot's
+system prompt explicitly refuses to do, but the AI COACH WORKER's
+automated epic-tier award grant is a closer call worth a real legal read.
+Full detail and citations: `COMPLIANCE_TODO.md`'s P1 list and its
+"Sourcing" section.
 
 ---
 
@@ -127,13 +150,19 @@ configured to forward to OpenWebUI as its one real backend). No call site's
 actual request/response handling code changes.
 
 ```
-Today:      main.py / workers.py  ──────────────────────────▶  OpenWebUI
-Proposed:   main.py / workers.py  ──▶  LiteLLM Proxy  ──▶  OpenWebUI
-                                        │
-                                        ├─ pre-call:  Presidio (PII) + Llama Guard 3
-                                        ├─ post-call: same two, run on the reply
-                                        ├─ log every request/response → Postgres
-                                        └─ rate limit + budget per caller
+Today:      main.py / workers.py / bridge.py  ──▶  LiteLLM Proxy  ──▶  OpenWebUI
+                                                     │
+                                                     ├─ pre-call:  Presidio (PII) + Content Filter   [live]
+                                                     ├─ post-call: same two, run on the reply         [live]
+                                                     ├─ Llama Guard 3, pre- and post-call              [proposed]
+                                                     └─ rate limit + budget per caller                 [proposed]
+
+Also today:  main.py / workers.py / bridge.py  ──▶  publish_event("ChatMessageLogged")  ──▶  Redpanda
+                                                     │
+                                                     └─ CHAT ARCHIVE WORKER (workers.py)      [proposed]
+                                                        ├─ full exchange → MinIO (history, playback)
+                                                        └─ moderation-queue projection → OpenSearch
+                                                           (the facilitator queue's real data source)
 ```
 
 ### The guardrail stack, and why each piece
@@ -146,7 +175,17 @@ not a commercial vendor a student's text has to leave the box to reach:
    — regex/keyword-based, zero external dependencies, ships with LiteLLM
    itself. Cheapest possible first layer; catches the unambiguous cases
    (explicit slurs, obvious phone-number patterns) before anything else
-   even runs.
+   even runs. **Deliberately does not cover self-harm/child-safety
+   categories**, even though the filter ships them — that's item 4's job
+   (crisis/self-harm needs the escalation-routing behavior, not a block),
+   and shipping Phase 1 with `harmful_self_harm` on this filter's BLOCK
+   list — before item 4 existed to replace it — produced exactly the wrong
+   behavior in testing: it silenced B1llbot's crisis-redirect instead of
+   escalating it. Fixed; see `SAFETY.md` §6 and
+   `evoke-infra/litellm/config.yaml`'s comment on `content-filter-pre` for
+   the full incident. Until item 4 is actually built, self-harm/child-safety
+   language reaches B1llbot exactly as it did before this gateway existed —
+   a known gap, not a silent one.
 2. **[Presidio](https://docs.litellm.ai/docs/tutorials/presidio_pii_masking)**
    (Microsoft, open source) — real PII detection/masking, configurable to
    block or redact. Directly implements `SAFETY.md` §2's "keep your real
@@ -192,21 +231,53 @@ state.
   the case pre-call can't catch — a clean input that still produces an
   unsafe reply, whether from a jailbreak attempt or a model mistake.
 
-### Logging and retention
+### Logging and retention — revised: the app's own event bus, not a second logging system
 
-Every request/response the gateway sees gets logged to Postgres — the
-**same Postgres instance already running in `evoke-infra`**, not a new
-database. This log is what `COMPLIANCE_TODO.md`'s P1 item ("pick and
-document an actual chat-retention window") actually needs to exist before
-that policy can be anything but a number on paper — the retention window
-becomes a real, enforceable deletion job against this table, not a
-promise with nothing behind it.
+The original version of this section proposed logging every
+request/response inside LiteLLM's own optional Postgres-backed mode. On
+reconsideration, that's the wrong home for it: this app already has a
+durable, replayable, audited event log for everything else that happens
+in it — Redpanda topics (`evoke-events`/`minecraft-events`) consumed by
+`workers.py`, with results written to OpenSearch projections and MinIO
+object storage. Building a *second*, parallel logging system inside
+LiteLLM duplicates infrastructure this repo already runs and already
+knows how to operate, for no real benefit.
 
-**Not live yet.** The Phase 0/1 deployment runs LiteLLM in database-free
-mode (no `DATABASE_URL` set on the container) — leaner to stand up, but it
-means there is no Postgres-backed request log today. The `litellm` service
-in `evoke-infra/docker-compose.yml` needs a `DATABASE_URL` and LiteLLM's
-own migration run before this section is true rather than aspirational.
+**Revised plan:** every real AI call site publishes a `ChatMessageLogged`
+event (matching the existing `publish_event()`/`topic_for_event()`
+pattern already used for `EvidenceSubmitted`, `ReflectionFiled`,
+`WisdomReady`, etc.) once a request/response round-trip completes. A new
+`workers.py` consumer — call it the **CHAT ARCHIVE WORKER**, the same
+shape as every other numbered worker block in that file — does two
+things per event, both following patterns already proven elsewhere in
+this exact codebase:
+
+1. Writes the full exchange to MinIO (`s3_client.put_object(...)`,
+   the same client `AI COACH WORKER` already uses to read evidence) —
+   durable storage, full history, real playback, not a log line that
+   scrolls away.
+2. Indexes it into a new `moderation-queue` OpenSearch projection
+   (`os_client.index(...)`, the same pattern that already builds
+   `player-profile`/`team-profile`/`activity-feed`) — which is also the
+   real data source the facilitator moderation queue (§IV of the
+   companion artifact) needs to exist before it can show a human
+   anything.
+
+This is real, unstarted work — not done by writing this paragraph — but
+it is *not* a re-architecture. Every piece of the pattern (an event type,
+a `publish_event()` call, a `workers.py` consumer block, an S3 write, an
+OpenSearch projection write) already exists at least once in this
+codebase today; this is applying a proven pattern to a new event type,
+not inventing a new one. It also directly resolves the "B1llBot can't
+notice an escalating distress pattern across a sitting" gap (`SAFETY.md`
+§6): once messages are events, "the last N messages for this user" is a
+projection query, not a missing architecture.
+
+This is also what `COMPLIANCE_TODO.md`'s P1 item ("pick and document an
+actual chat-retention window") actually needs to exist before that
+policy can be anything but a number on paper — and, per that list's
+newly-added COPPA finding, the FTC's amended Rule makes that retention
+window a real compliance deadline, not just good practice.
 
 **Found during verification, worth remembering:** `LITELLM_LOG=DEBUG`
 prints the *pre-mask* request text to container stdout — including the
@@ -235,7 +306,7 @@ de-risks the one after it.
 | **0. Pass-through** ✅ | LiteLLM proxy stood up, zero guardrails active, every call site repointed at it | Proves the plumbing (routing, latency, container health) with no behavior change — if something breaks, it's the gateway, not a guardrail |
 | **1. Cheap wins** ✅ | LiteLLM's built-in content filter + Presidio | Fast, no model inference needed, closes the PII gap immediately |
 | **2. Content safety** | Llama Guard 3, pre- and post-call | Needs a model pull + real latency/perf validation against B1llBot's existing response-time expectations |
-| **3. Escalation routing** | The custom guardrail for crisis-language routing | Depends on the facilitator queue UI existing somewhere to route *to* — sequencing note, not just a nice-to-have |
+| **3. Escalation routing** | The custom guardrail for crisis-language routing | Depends on the facilitator queue existing somewhere to route *to* — and, corrected during this reconciliation, that means the `moderation-queue` projection and the `CHAT ARCHIVE WORKER` that builds it, not just a missing page on an already-built backend |
 | **4. Retention + tuning** | Formal retention window enforced against the log table; rate limits/budgets tuned from real usage | Needs real traffic data from phases 0–2 to set sane numbers, not guesses |
 
 ---

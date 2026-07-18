@@ -154,11 +154,18 @@ Under this model:
 2. AI classifier runs first-pass triage per §4. Clean → **queued, not yet
    visible**. Clearly disallowed → rejected immediately, learner told why,
    never enters the queue at all.
-3. **Facilitator queue** — the existing `instructor-dashboard` projection
-   (`GAPS.md` line 56, currently built with no page on it) is the natural
-   home for this: a facilitator/instructor sees pending items for their own
-   cohort, approves or rejects, in the same visit where they're already
-   looking at who's stuck and what's pending review.
+3. **Facilitator queue** — an `instructor-dashboard` projection is the
+   natural home for this: a facilitator/instructor sees pending items for
+   their own cohort, approves or rejects, in the same visit where they're
+   already looking at who's stuck and what's pending review. **Correction,
+   checked while reconciling `GUARDRAILS_PLAN.md`:** this doc previously
+   claimed that projection "existing... with no page on it" — it doesn't
+   exist either. `ARCHITECTURE.md`/`BUILD_PLAN.md` named it as planned;
+   `workers.py` never actually writes to an index by that name (`GAPS.md`
+   line 63). Not a re-architecture to build — the exact same
+   event-consumer-writes-a-projection pattern already proven for
+   `player-profile`/`team-profile`/`activity-feed` applies directly — but
+   it is real, unstarted work, not a missing page on a finished backend.
 4. Only on facilitator approval does content become visible to the class
    (activity feed, gallery, profile). Rejection removes it from the queue
    and notifies the learner, same plain-language pattern as an AI
@@ -220,6 +227,35 @@ protection the second time. Required before "B1llbot never handles this
 alone" (above) can be trusted as actually true, not just true in the single
 conversation it's usually tested in.
 
+**Reconciled against `GUARDRAILS_PLAN.md`'s Phase 0/1 build.** Two findings,
+one good and one that reframes the question above rather than answering it:
+
+- **A real regression, found and fixed, not hypothetical.** The gateway's
+  first-pass content filter had `harmful_self_harm` set to `BLOCK` on both
+  the way in and the way out. Live-tested: a message like "I've been
+  thinking about hurting myself" got blocked at the gateway *before*
+  B1llbot ever saw it, and the learner got `main.py`'s generic "I'm having
+  trouble responding right now" instead of the crisis-redirect this section
+  requires. `harmful_self_harm` and `harmful_child_safety` are now excluded
+  from both filter passes specifically so this can't happen — see
+  `evoke-infra/litellm/config.yaml`'s comment on `content-filter-pre` for
+  the full reasoning. Re-tested after the fix: the crisis-redirect fires
+  correctly.
+- **The "resets across conversation" framing doesn't map cleanly onto
+  B1llbot's architecture — for a different reason than "untested."**
+  `billbot_chat()` (`evoke/main.py`) sends only the current message on every
+  call, no prior turns — B1llbot has no cross-message memory at all today,
+  in either direction. It can't "reset" a crisis-guardrail state between
+  conversations because it never carries state *within* one either; the
+  system prompt is evaluated identically, fresh, on every single message.
+  That rules out Claude's specific failure mode (a refusal that only holds
+  for the rest of one session). It does **not** rule out the more basic gap
+  this replaces: B1llbot cannot notice an *escalating* pattern across
+  several messages in the same sitting ("I've been really down" → "I don't
+  want to be here anymore"), because it never sees message 1 while
+  answering message 2. Still open, still worth a real test pass — just a
+  different question than the one Common Sense Media's finding posed.
+
 ---
 
 ## 7. What this resolves, what's still open
@@ -237,11 +273,14 @@ conversation it's usually tested in.
 Still genuinely open, not resolved by writing this doc:
 - Building the classifier(s) themselves (toxicity, image moderation,
   jailbreak-attempt detection on B1llbot transcripts)
-- Building the facilitator queue UI (the `instructor-dashboard` page that
-  doesn't exist yet)
+- Building the facilitator queue — the `instructor-dashboard` projection
+  *and* its page, neither of which exists yet (§5's correction above)
 - A learner/classmate-facing "report" action anywhere in the product
 - The district consent-agreement template and the account/data deletion
   tooling
-- Testing whether B1llbot's crisis guardrail (`GAME_DESIGN.md` §10) survives
-  a new conversation after a crisis-language refusal, per §6's finding above
+- Testing whether B1llbot can recognize an *escalating* distress pattern
+  across several messages in one sitting — not the cross-conversation
+  reset Common Sense Media found in Claude (ruled out for B1llbot, §6
+  above, since it has no cross-message memory to reset in the first place)
+  but the more basic gap that ruling it out exposed
 - The actual vendor DPA, if a hosted (non-self-hosted) LLM backend is used

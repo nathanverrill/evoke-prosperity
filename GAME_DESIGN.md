@@ -456,6 +456,13 @@ opening a new chat after a refusal. **Needs an explicit test before this
 guardrail can be trusted**, not assumed to hold because the single-conversation
 behavior is correct. See `SAFETY.md` §6.
 
+**Update, reconciled against `GUARDRAILS_PLAN.md`'s Phase 0/1 build:** this
+finding also caught a real regression in the new gateway's first-pass content
+filter, which would have blocked crisis-language messages *before* this
+prompt ever saw them — fixed, live-tested, and written up in full in
+`SAFETY.md` §6, including why the "resets across conversation" framing turns
+out not to be quite the right question for B1llbot specifically.
+
 ---
 
 ## 11. B1llbot — recommended RAG knowledge bases

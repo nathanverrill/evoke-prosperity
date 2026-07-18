@@ -48,6 +48,7 @@ scripts/        Deployment/setup shell scripts, plus minecraft-world-tools/ -- s
 - [`SAFETY.md`](SAFETY.md) — code of conduct, COPPA/FERPA posture, and an AI-reject/human-approve content moderation model — a real policy draft, explicitly not a substitute for legal counsel
 - [`COMPLIANCE_TODO.md`](COMPLIANCE_TODO.md) — sequenced P0/P1/P2 compliance action list for a real Colorado pilot
 - [`WHITELIST.md`](WHITELIST.md) — confirmed (not hypothetical) evidence the Minecraft server has been reached by non-project entities, who's verified and cleared to whitelist, and the server-config changes required to close the exposure
+- [`GUARDRAILS_PLAN.md`](GUARDRAILS_PLAN.md) — AI gateway build spec (LiteLLM + Presidio + content filter) in front of every real AI call site; Phase 0/1 is live
 - [`docs/README.md`](docs/README.md) — index of narrative/curriculum docs, split into `canon/` (current source of truth), `legacy/` (superseded drafts), and `process/` (meeting notes, planning chats)
 
 ## Status

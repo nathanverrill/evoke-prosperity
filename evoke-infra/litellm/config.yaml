@@ -30,20 +30,30 @@ guardrails:
   # this app's entire premise is teaching financial literacy, so blocking
   # financial-advice-shaped replies would fight the product, not protect
   # students.
+  #
+  # harmful_self_harm and harmful_child_safety are deliberately NOT enabled
+  # here, on both pre_call and post_call -- reconciled against GAME_DESIGN.md
+  # SS10 / SAFETY.md SS6 after the fact, not decided fresh. B1llbot's system
+  # prompt already has a specific, tested-by-design behavior for exactly this
+  # case: "drop character immediately, respond plainly and kindly, and point
+  # them to a trusted adult." A BLOCK action at the gateway would fire
+  # *before* B1llbot ever sees the message, replacing that crisis-redirect
+  # reply with main.py's generic "I'm having trouble responding right now" --
+  # actively worse than doing nothing at the exact moment it matters most.
+  # Enabling it on post_call would be worse still: B1llbot's own redirect
+  # reply necessarily *discusses* self-harm/crisis to redirect away from it,
+  # which is exactly the shape of text this filter is built to catch --
+  # self-blocking the safety response is not a hypothetical, it's what the
+  # keyword match would do on the first word. Real defense-in-depth for this
+  # category is a human-facilitator alert (GUARDRAILS_PLAN.md Phase 3,
+  # SAFETY.md SS6's escalation SLA), not a gateway block -- not built yet;
+  # tracked as an open gap, not silently dropped.
   - guardrail_name: "content-filter-pre"
     litellm_params:
       guardrail: litellm_content_filter
       mode: "pre_call"
       default_on: true
       categories:
-        - category: "harmful_child_safety"
-          enabled: true
-          action: "BLOCK"
-          severity_threshold: "low"
-        - category: "harmful_self_harm"
-          enabled: true
-          action: "BLOCK"
-          severity_threshold: "low"
         - category: "harmful_violence"
           enabled: true
           action: "BLOCK"
@@ -63,14 +73,6 @@ guardrails:
       mode: "post_call"
       default_on: true
       categories:
-        - category: "harmful_child_safety"
-          enabled: true
-          action: "BLOCK"
-          severity_threshold: "low"
-        - category: "harmful_self_harm"
-          enabled: true
-          action: "BLOCK"
-          severity_threshold: "low"
         - category: "harmful_violence"
           enabled: true
           action: "BLOCK"
