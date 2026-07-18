@@ -59,8 +59,12 @@ PRESENCE_KEEPALIVE = 60
 # structure.
 KEEL_BEACON_POS = os.getenv("KEEL_BEACON_POS", "")
 
-OPENWEBUI_URL = os.getenv("OPENWEBUI_URL", "http://open-webui:8080")
-OPENWEBUI_API_KEY = os.getenv("OPENWEBUI_API_KEY", "")
+# Routed through the LiteLLM gateway (GUARDRAILS_PLAN.md Phase 0/1), not
+# straight at OpenWebUI -- same content-filter/Presidio guardrails as every
+# other real AI call site in the app, since this one talks to a student's
+# actual Minecraft chat.
+AI_GATEWAY_URL = os.getenv("AI_GATEWAY_URL", "http://litellm:4000")
+AI_GATEWAY_KEY = os.getenv("AI_GATEWAY_KEY", "sk-devsecret123")
 
 # Database pool
 db_pool = SimpleConnectionPool(1, 5, DATABASE_URL)
@@ -627,8 +631,8 @@ def generate_lore_message() -> str:
     fallback = "Every drop counts. Even the small ones."
     try:
         r = requests.post(
-            f"{OPENWEBUI_URL}/api/chat/completions",
-            headers={"Authorization": f"Bearer {OPENWEBUI_API_KEY}"} if OPENWEBUI_API_KEY else {},
+            f"{AI_GATEWAY_URL}/chat/completions",
+            headers={"Authorization": f"Bearer {AI_GATEWAY_KEY}"},
             json={
                 "model": "billbot",
                 "messages": [{

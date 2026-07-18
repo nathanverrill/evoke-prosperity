@@ -204,6 +204,51 @@ services:
       ollama:
         condition: service_healthy
 
+  # Presidio: Microsoft's open-source PII detector. Two services -- analyzer
+  # finds PII spans, anonymizer masks/replaces them -- both called by
+  # litellm's "presidio" guardrail below. No student data leaves the
+  # network for this check.
+  presidio-analyzer:
+    image: mcr.microsoft.com/presidio-analyzer:latest
+    networks:
+      - evoke-infra-network
+    environment:
+      GRPC_PORT: "5001"
+
+  presidio-anonymizer:
+    image: mcr.microsoft.com/presidio-anonymizer:latest
+    networks:
+      - evoke-infra-network
+
+  # The thin gateway (GUARDRAILS_PLAN.md): every real AI call site in the
+  # app points here instead of straight at open-webui. Phase 0 is pure
+  # pass-through routing; Phase 1 turns on the guardrails in config.yaml.
+  litellm:
+    image: docker.litellm.ai/berriai/litellm:latest
+    networks:
+      - evoke-infra-network
+    environment:
+      LITELLM_MASTER_KEY: ${LITELLM_MASTER_KEY:-sk-devsecret123}
+      OPENWEBUI_API_KEY: ${OPENWEBUI_API_KEY:-}
+      PRESIDIO_ANALYZER_API_BASE: http://presidio-analyzer:3000
+      PRESIDIO_ANONYMIZER_API_BASE: http://presidio-anonymizer:3000
+    command: ["--config", "/app/config.yaml", "--port", "4000"]
+    ports:
+      - "${PORT_LITELLM:-4000}:4000"
+    volumes:
+      - ./litellm/config.yaml:/app/config.yaml:ro
+    depends_on:
+      presidio-analyzer:
+        condition: service_started
+      presidio-anonymizer:
+        condition: service_started
+    healthcheck:
+      test: ["CMD-SHELL", "python3 -c \"import urllib.request; urllib.request.urlopen('http://localhost:4000/health/liveliness')\" || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+
   minecraft:
     build:
       context: ./minecraft

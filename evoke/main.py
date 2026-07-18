@@ -31,13 +31,14 @@ logger = logging.getLogger(__name__)
 # ========== Configuration ==========
 DATABASE_URL = os.getenv("DATABASE_URL", "postgresql://evoke:devsecret123@localhost:5432/evoke")
 BRIGHTSPACE_SIM_URL = os.getenv("BRIGHTSPACE_SIM_URL", "http://brightspace-sim:8001")
-OPENWEBUI_URL = os.getenv("OPENWEBUI_URL", "http://open-webui:8080")
-# OpenWebUI requires auth on every API call (this wasn't true when
-# billbot_chat() below was first written, which is why it originally sent
-# none -- it silently 401'd until evoke-infra/openwebui-bootstrap.py's
-# smoke test surfaced it). A per-instance service API key, not a user
-# session JWT (which expires) -- generate one via that bootstrap script.
-OPENWEBUI_API_KEY = os.getenv("OPENWEBUI_API_KEY", "")
+# billbot_chat() below no longer talks to OpenWebUI directly -- it points
+# at the LiteLLM gateway (GUARDRAILS_PLAN.md Phase 0/1), which forwards to
+# OpenWebUI as its one real backend and applies the content-filter/Presidio
+# guardrails in evoke-infra/litellm/config.yaml on the way through.
+# LITELLM_MASTER_KEY is the gateway's own auth, not a user session JWT
+# (which expires) -- it's a static secret shared with the gateway container.
+AI_GATEWAY_URL = os.getenv("AI_GATEWAY_URL", "http://litellm:4000")
+AI_GATEWAY_KEY = os.getenv("AI_GATEWAY_KEY", "sk-devsecret123")
 AI_ENABLED = os.getenv("AI_ENABLED", "false").lower() == "true"
 # The internal container hostname (MINECRAFT_HOST) is for the app/bridge's
 # own RCON traffic -- not reachable from a learner's actual Minecraft
@@ -2583,8 +2584,8 @@ async def billbot_chat(user_id: str, message: str):
 
         async with httpx.AsyncClient() as client:
             response = await client.post(
-                f"{OPENWEBUI_URL}/api/chat/completions",
-                headers={"Authorization": f"Bearer {OPENWEBUI_API_KEY}"} if OPENWEBUI_API_KEY else {},
+                f"{AI_GATEWAY_URL}/chat/completions",
+                headers={"Authorization": f"Bearer {AI_GATEWAY_KEY}"},
                 json={
                     "model": "billbot",
                     "messages": [

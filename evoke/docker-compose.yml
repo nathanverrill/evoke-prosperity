@@ -24,8 +24,8 @@ services:
       MINIO_ACCESS_KEY: admin
       MINIO_SECRET_KEY: devsecret123
       BRIGHTSPACE_SIM_URL: http://brightspace-sim:8001
-      OPENWEBUI_URL: http://open-webui:8080
-      OPENWEBUI_API_KEY: ${OPENWEBUI_API_KEY:-}
+      AI_GATEWAY_URL: http://litellm:4000
+      AI_GATEWAY_KEY: ${LITELLM_MASTER_KEY:-sk-devsecret123}
       AI_ENABLED: "true"
       MINECRAFT_PUBLIC_HOST: ${MINECRAFT_PUBLIC_HOST:-localhost}
       # These previously aliased PORT_MINECRAFT/PORT_MINECRAFT_BEDROCK (the
@@ -81,8 +81,8 @@ services:
       MINECRAFT_HOST: ${MINECRAFT_BRIDGE_HOST:-minecraft}
       MINECRAFT_RCON_PORT: ${MINECRAFT_BRIDGE_RCON_PORT:-25575}
       RCON_PASSWORD: ${MINECRAFT_BRIDGE_RCON_PASSWORD:-devsecret123}
-      OPENWEBUI_URL: http://open-webui:8080
-      OPENWEBUI_API_KEY: ${OPENWEBUI_API_KEY:-}
+      AI_GATEWAY_URL: http://litellm:4000
+      AI_GATEWAY_KEY: ${LITELLM_MASTER_KEY:-sk-devsecret123}
       AUTO_LINK_PLAYER_ONE: ${AUTO_LINK_PLAYER_ONE:-true}
     healthcheck:
       # No HTTP server in this service (a Kafka consumer loop) — process-liveness
