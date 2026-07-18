@@ -25,10 +25,24 @@ careful, small pilot. P2 is ongoing process, never "done."
 ## P0 — Blocking before any real student data is collected
 
 - [ ] **Sign a Colorado Student Data Transparency and Security Act
-      agreement with the pilot district** (C.R.S. §§ 22-16-101–113) — almost
-      certainly the multi-state Student Data Privacy Consortium (NDPA)
-      template plus Colorado's exhibit, since that's what CO districts
-      generally expect rather than a custom contract.
+      agreement with the pilot district** (C.R.S. §§ 22-16-101–113) — the
+      multi-state Student Data Privacy Consortium's National Data Privacy
+      Agreement (NDPA) plus Colorado's exhibit, confirmed as the actual
+      mechanism CO districts use (SDPC's registry at `privacy.a4l.org`, 275,000+
+      signed agreements to date) — not a custom contract. Worth knowing there
+      is no separate state or federal "approved AI model/vendor whitelist" to
+      check against instead — CDE has not issued its own AI policy (its
+      Colorado Roadmap for AI in K-12 Education is voluntary guidance, not a
+      mandate); the NDPA/exhibit *is* the compliance mechanism, not a
+      substitute for one.
+- [ ] **Test whether B1llbot's crisis guardrail survives a new
+      conversation.** Common Sense Media's Youth AI Safety Institute found
+      Claude's own in-conversation crisis handling strong but resettable —
+      a refused request in one chat can succeed in a fresh one. B1llbot's
+      identical-shaped guardrail (`GAME_DESIGN.md` §10, `SAFETY.md` §6) has
+      never been tested against this. Blocking because B1llbot chat is
+      already a shipped, live feature today, same reasoning as the LLM
+      no-training item below.
 - [ ] **Decide and document the COPPA consent path per cohort** — for this
       pilot specifically, that's the FTC school-official exception via the
       same district agreement above, not verifiable parental consent
@@ -82,9 +96,16 @@ careful, small pilot. P2 is ongoing process, never "done."
 - [ ] **Write the Colorado 30-day breach-notification runbook** — named
       responsible party, and the CO Attorney General notification trigger
       at 500+ affected Colorado residents (C.R.S. § 6-1-716).
-- [ ] **Verify the Minecraft server isn't publicly discoverable/joinable**
-      outside the enrolled cohort — a "should already be true" item that
-      needs an actual check, not an assumption.
+- [ ] **Fix the Minecraft server's exposure — confirmed, not hypothetical.**
+      `WHITELIST.md` checked: `white-list=false` and `online-mode=false` are
+      still today's defaults, and the historical server logs show real
+      consequences, not a theoretical risk — a self-identifying scanner bot,
+      a confirmed uninvited human who joined and left within 25 seconds, and
+      ~45 other single-join names with IPs scattered across the open
+      internet. `WHITELIST.md` §3 names the four required changes
+      (`online-mode=true`, `white-list=true`, `enforce-whitelist=true`, and
+      a chat-disable mechanism vanilla doesn't provide by default) — none
+      are made yet.
 - [ ] **Review the deployment against Microsoft's Minecraft Usage
       Guidelines** — the Geyser/Floodgate bridge means this server sits
       outside Xbox Live's own moderation scope entirely; confirm the
@@ -118,12 +139,23 @@ careful, small pilot. P2 is ongoing process, never "done."
 
 - `SAFETY.md` — code of conduct, COPPA/FERPA posture, AI-reject/human-approve
   moderation model, the queue, escalation SLA.
+- `WHITELIST.md` — confirmed evidence the Minecraft server has been reached
+  by non-project entities (scanner bot, at least one uninvited stranger),
+  the six team members verified and cleared to whitelist, and the four
+  server-config changes required to close the exposure.
 - Published artifact: *EVOKE — Minor Safety & Legal Requirements Checklist*
   — full US legal scope (COPPA, FERPA/state law, CIPA, CSAM reporting,
   Minecraft/platform safety, chat safety, content submission, data
   security, accessibility, governance).
 - This thread's Colorado-specific findings: Student Data Transparency and
   Security Act, Colorado Privacy Act, Colorado breach-notification law.
+- Student Data Privacy Consortium / NDPA registry (`privacy.a4l.org`),
+  Colorado Department of Education's AI page and the Colorado Roadmap for AI
+  in K-12 Education, and Common Sense Media's Youth AI Safety Institute risk
+  assessments (Claude, Gemini K-12, ChatGPT) — confirmed live 2026-07-18: no
+  state/federal AI model whitelist exists; the NDPA+exhibit path is the real
+  mechanism; Claude's crisis guardrail is known to reset across conversations,
+  untested for B1llbot.
 - `GAPS.md` lines 31, 33, 35, 37, 56, 101, 116, 121, 123, 146 — the
   originally-flagged, previously-undecided items this list resolves into
   concrete actions.

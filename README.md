@@ -45,6 +45,9 @@ scripts/        Deployment/setup shell scripts, plus minecraft-world-tools/ -- s
 - [`UI_SPEC.md`](UI_SPEC.md) — the gamified web experience: mission loop, profile pages, Companion Mode, and the wireframe skinning contract
 - [`UX_HANDOFF.md`](UX_HANDOFF.md) — handoff doc for a UX designer restyling the app (which files are safe to edit, how to run it)
 - [`HOSTING_COST_MODEL.md`](HOSTING_COST_MODEL.md) — per-cohort AWS sizing/cost framework for real deployment
+- [`SAFETY.md`](SAFETY.md) — code of conduct, COPPA/FERPA posture, and an AI-reject/human-approve content moderation model — a real policy draft, explicitly not a substitute for legal counsel
+- [`COMPLIANCE_TODO.md`](COMPLIANCE_TODO.md) — sequenced P0/P1/P2 compliance action list for a real Colorado pilot
+- [`WHITELIST.md`](WHITELIST.md) — confirmed (not hypothetical) evidence the Minecraft server has been reached by non-project entities, who's verified and cleared to whitelist, and the server-config changes required to close the exposure
 - [`docs/README.md`](docs/README.md) — index of narrative/curriculum docs, split into `canon/` (current source of truth), `legacy/` (superseded drafts), and `process/` (meeting notes, planning chats)
 
 ## Status

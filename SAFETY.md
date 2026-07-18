@@ -208,6 +208,18 @@ Two things this doc can specify; one it can't:
   named responsible person is. That's a per-district staffing commitment —
   a decision this repo can require exist, not one it can make for a school.
 
+**Not yet verified: does the crisis guardrail survive a new conversation?**
+Common Sense Media's Youth AI Safety Institute evaluated Claude and found its
+in-conversation crisis handling strong (surfaces 988 on self-harm language),
+but the guardrail resets the moment a new chat starts — a request refused in
+one conversation can succeed in the next, since nothing carries the prior
+signal forward. B1llbot's crisis guardrail (`GAME_DESIGN.md` §10) has never
+been tested against exactly this — whether a learner who triggers the
+crisis-redirect once, then opens a fresh B1llbot conversation, gets the same
+protection the second time. Required before "B1llbot never handles this
+alone" (above) can be trusted as actually true, not just true in the single
+conversation it's usually tested in.
+
 ---
 
 ## 7. What this resolves, what's still open
@@ -230,4 +242,6 @@ Still genuinely open, not resolved by writing this doc:
 - A learner/classmate-facing "report" action anywhere in the product
 - The district consent-agreement template and the account/data deletion
   tooling
+- Testing whether B1llbot's crisis guardrail (`GAME_DESIGN.md` §10) survives
+  a new conversation after a crisis-language refusal, per §6's finding above
 - The actual vendor DPA, if a hosted (non-self-hosted) LLM backend is used

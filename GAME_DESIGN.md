@@ -443,6 +443,19 @@ GUARDRAILS (non-negotiable)
   essay.
 ```
 
+**Untested, real risk found in a comparable product, not hypothetical:** Common
+Sense Media's Youth AI Safety Institute evaluated Claude specifically and found
+strong in-conversation crisis handling (surfaces 988 when self-harm language
+appears) — but the guardrail **resets when a new conversation starts**: a
+request refused in one chat can succeed in a fresh one, since the model has no
+memory of the prior session's crisis signal. B1llbot's crisis-redirect rule
+above has the identical shape of vulnerability — "drop character... point them
+to a trusted adult" is a per-conversation behavior, and nothing in this prompt
+or `SAFETY.md` §6 currently addresses whether that holds across a learner
+opening a new chat after a refusal. **Needs an explicit test before this
+guardrail can be trusted**, not assumed to hold because the single-conversation
+behavior is correct. See `SAFETY.md` §6.
+
 ---
 
 ## 11. B1llbot — recommended RAG knowledge bases

@@ -149,6 +149,9 @@ SAFETY.md                Code of conduct + COPPA/FERPA posture + AI-reject/human
                          model — a real policy draft, explicitly not a substitute for legal counsel
 COMPLIANCE_TODO.md       Sequenced P0/P1/P2 compliance action list for a real Colorado pilot, synthesizing
                          SAFETY.md + a published legal-requirements checklist + Colorado-specific research
+WHITELIST.md             Confirmed (not hypothetical) evidence the Minecraft server has been reached by
+                         non-project entities, the team members verified and cleared to whitelist, and
+                         the server-config changes required to close the exposure
 CONCEPTS.md              This file
 ```
 
