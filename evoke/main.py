@@ -1309,10 +1309,10 @@ async def _complete_mission_for_user(user_id: str, mission_id: str, team_id: str
     })
 
     # Team evidence + your own reflection is what "completes" a mission for
-    # badge/count purposes -- later AI/teacher award tiers (trigger_ai_review/
-    # brightspace_review) are quality upgrades on an already-completed
-    # mission, not separate completions, so MissionCompleted/BadgeAwarded
-    # only fire here.
+    # badge/count purposes -- later AI/teacher award tiers (the AI COACH
+    # WORKER's epic-tier upgrade in workers.py, brightspace_review) are
+    # quality upgrades on an already-completed mission, not separate
+    # completions, so MissionCompleted/BadgeAwarded only fire here.
     await publish_event("MissionCompleted", {
         "user_id": user_id,
         "mission_id": mission_id
@@ -1549,20 +1549,24 @@ async def submit_evidence(
             "filename": file.filename
         })
 
+        # AI review is event-based now, not an inline blocking call here --
+        # the TeamEvidenceSubmitted event published just above is already
+        # consumed by workers.py's AI COACH WORKER, which grants the epic-
+        # tier award itself once its own AI pass completes (same worker
+        # that already fetches the real file and extracts real text, so
+        # this also removes what used to be a second, redundant OpenWebUI
+        # call that only ever got a filename, not the actual content).
+        # This request no longer blocks on an AI call that measured up to
+        # ~90s cold -- resubmission and first-time paths both just return
+        # once the event's published; the upgrade lands async, same as
+        # every other award in this app.
         if is_resubmission:
-            # Re-run the AI review (the upgrade path), skip every one-time
-            # completion effect, and tell the client which case this was.
-            if AI_ENABLED:
-                await trigger_ai_review(team_id, mission_id, object_key)
             return {"status": "success", "submission_id": submission_id, "resubmission": True}
 
         # Evidence alone doesn't complete anyone's mission -- only close the
         # gate for teammates who already reflected before this landed.
         # Teammates who haven't reflected yet complete later, from
         # submit-reflection, when they do.
-        if AI_ENABLED:
-            await trigger_ai_review(team_id, mission_id, object_key)
-
         for member_id in team_members:
             await _complete_mission_for_user(member_id, mission_id, team_id)
 
@@ -1847,72 +1851,9 @@ async def submit_reflection(
         raise HTTPException(status_code=400, detail=str(e))
 
 
-async def trigger_ai_review(team_id: str, mission_id: str, object_key: str):
-    """Trigger AI review of the team's shared evidence. One judgment for
-    the team; the resulting epic-tier award fans out to every member who's
-    actually completed the mission (has a common/submission award) --
-    members who haven't reflected yet aren't awarded anything here either,
-    same AND-gate as the common tier."""
-    try:
-        async with httpx.AsyncClient() as client:
-            response = await client.post(
-                f"{OPENWEBUI_URL}/api/chat/completions",
-                headers={"Authorization": f"Bearer {OPENWEBUI_API_KEY}"} if OPENWEBUI_API_KEY else {},
-                json={
-                    "model": "billbot",
-                    "messages": [
-                        {"role": "user", "content": f"Review this mission submission for consistency: {object_key}"}
-                    ]
-                },
-                # See billbot_chat()'s identical timeout note -- a cold model
-                # load on this same backend measured up to ~60s.
-                timeout=90
-            )
-            if response.status_code != 200:
-                # This exact bug (no auth header sent -> silent 401, this
-                # whole branch skipped, no exception, nothing logged, no
-                # epic award ever granted) went unnoticed here even after
-                # fixing the identical issue in billbot_chat() -- this
-                # sibling function makes the same OpenWebUI call and was
-                # never touched. Logging now so a repeat doesn't stay silent.
-                logger.warning(f"AI review failed: HTTP {response.status_code} {response.text[:300]}")
-
-            if response.status_code == 200:
-                # Assume consistent for now - in real implementation, parse response
-                completed_members = db_fetch_all(
-                    "SELECT DISTINCT user_id FROM awards WHERE mission_id = %s::uuid AND source = 'submission' AND user_id = ANY(SELECT user_id FROM team_members WHERE team_id = %s::uuid)",
-                    (mission_id, team_id)
-                )
-                for (member_id,) in completed_members:
-                    member_id = str(member_id)
-                    award_id = str(uuid.uuid4())
-                    db_execute(
-                        """INSERT INTO awards (id, user_id, mission_id, tier, source, awarded_at)
-                           VALUES (%s::uuid, %s::uuid, %s::uuid, 'epic', 'ai_review', CURRENT_TIMESTAMP)
-                           ON CONFLICT (user_id, mission_id, tier, source) DO NOTHING""",
-                        (award_id, member_id, mission_id)
-                    )
-
-                    await publish_event("AwardGranted", {
-                        "award_id": award_id,
-                        "user_id": member_id,
-                        "mission_id": mission_id,
-                        "tier": "epic",
-                        "source": "ai_review"
-                    })
-
-                    notification_id = str(uuid.uuid4())
-                    award_id_from_db = db_fetch_one(
-                        "SELECT id FROM awards WHERE user_id = %s::uuid AND mission_id = %s::uuid AND tier = 'epic' AND source = 'ai_review' LIMIT 1",
-                        (member_id, mission_id)
-                    )
-                    if award_id_from_db:
-                        db_execute(
-                            "INSERT INTO notifications (id, user_id, award_id) VALUES (%s::uuid, %s::uuid, %s::uuid)",
-                            (notification_id, member_id, award_id_from_db[0])
-                        )
-    except Exception as e:
-        print(f"AI review error: {e}")
+# AI review moved to workers.py's AI COACH WORKER (event-driven, consumes
+# the TeamEvidenceSubmitted event already published above) -- see that
+# file for the epic-tier award-granting logic that used to live here.
 
 # ========== Teacher Review Webhook ==========
 @app.post("/api/webhooks/brightspace/review")
@@ -3406,21 +3347,21 @@ async def progress_map(user_id: str):
 
 
 # ========== Field Report / Words of Wisdom (BUILD_PLAN_2 §6) ==========
-WISDOM_FALLBACKS = [
-    "Every drop counts. Even the small ones.",
-    "The mountain doesn't move for anyone. Water finds a way around it anyway.",
-    "Budget today's water so tomorrow still exists.",
-    "Assets create value long after they're built. So does showing up.",
-]
-
-
+# Wisdom generation moved to workers.py's FIELD REPORT WORKER (event-based,
+# same reasoning/pattern as the AI Coach Worker's epic-tier award move):
+# this endpoint used to block the learner's HTTP response on a synchronous
+# OpenWebUI call with the same timeout=90 cold-start risk trigger_ai_review
+# had. Everything else here (the row itself, the checkin XP, the
+# Transformation badge check) is fast and local, so it still happens
+# inline -- only the AI call moved off the request path.
 @app.post("/api/reflection")
 async def post_reflection(user_id: str, text: str = Form(...)):
     """The daily Field Report: one reflection a day, answered with a Word
-    of Wisdom in B1llbot's voice. Doubles as the daily check-in (grants
-    that XP if today's hasn't happened) and, at 10 lifetime reflections,
-    unlocks the Transformation Power (skills_framework.BEHAVIORAL_POWERS,
-    approved trigger)."""
+    of Wisdom in B1llbot's voice, generated async and pushed live once
+    ready (see workers.py's FIELD REPORT WORKER + evoke/live.py). Doubles
+    as the daily check-in (grants that XP if today's hasn't happened) and,
+    at 10 lifetime reflections, unlocks the Transformation Power
+    (skills_framework.BEHAVIORAL_POWERS, approved trigger)."""
     text = text.strip()
     if not text:
         raise HTTPException(status_code=400, detail="Say something — even one line")
@@ -3431,31 +3372,11 @@ async def post_reflection(user_id: str, text: str = Form(...)):
     if already:
         return {"status": "already_filed", "wisdom": already[0]}
 
-    wisdom = None
-    try:
-        async with httpx.AsyncClient() as client:
-            response = await client.post(
-                f"{OPENWEBUI_URL}/api/chat/completions",
-                headers={"Authorization": f"Bearer {OPENWEBUI_API_KEY}"} if OPENWEBUI_API_KEY else {},
-                json={"model": "billbot", "messages": [{
-                    "role": "user",
-                    "content": ("An Agent files their daily field report with you. It says: "
-                                f"\"{text[:600]}\" — Reply with ONE short word of wisdom in your own voice, "
-                                "1-2 sentences, no preamble, that honors what they said."),
-                }]},
-                timeout=90,
-            )
-            if response.status_code == 200:
-                wisdom = response.json().get("choices", [{}])[0].get("message", {}).get("content") or None
-    except Exception as e:
-        logger.warning(f"Wisdom generation failed: {e}")
-    if not wisdom:
-        wisdom = random.choice(WISDOM_FALLBACKS)
-
     db_execute(
-        "INSERT INTO daily_reflections (user_id, text, wisdom) VALUES (%s::uuid, %s, %s) ON CONFLICT DO NOTHING",
-        (user_id, text, wisdom)
+        "INSERT INTO daily_reflections (user_id, text, wisdom) VALUES (%s::uuid, %s, NULL) ON CONFLICT DO NOTHING",
+        (user_id, text)
     )
+    await publish_event("ReflectionFiled", {"user_id": user_id, "text": text})
 
     # Doubles as the daily check-in (same XP, never double-granted).
     checked = db_fetch_one(
@@ -3481,7 +3402,7 @@ async def post_reflection(user_id: str, text: str = Form(...)):
             "mission_id": None,
         })
 
-    return {"status": "filed", "wisdom": wisdom, "reflections_total": count}
+    return {"status": "filed", "wisdom": None, "wisdom_pending": True, "reflections_total": count}
 
 
 @app.get("/api/reflections/{user_id}")

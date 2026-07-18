@@ -1,5 +1,6 @@
 import json
 import os
+import uuid
 import datetime
 import asyncio
 from io import BytesIO
@@ -40,10 +41,30 @@ def _db_fetch_all(query: str, params=None):
         _db_pool.putconn(conn)
 
 
+def _db_execute(query: str, params=None):
+    conn = _db_pool.getconn()
+    try:
+        cur = conn.cursor()
+        cur.execute(query, params or ())
+        conn.commit()
+    finally:
+        _db_pool.putconn(conn)
+
+
 # Level curve + rank titles moved to evoke/progression.py (levels now have
 # names and a level-up moment, not just a number); re-exported so anything
 # importing xp_to_level from here keeps working.
 xp_to_level = progression.xp_to_level
+
+
+# Moved from main.py alongside the FIELD REPORT WORKER (below) -- this is
+# the only place that generates wisdom now.
+WISDOM_FALLBACKS = [
+    "Every drop counts. Even the small ones.",
+    "The mountain doesn't move for anyone. Water finds a way around it anyway.",
+    "Budget today's water so tomorrow still exists.",
+    "Assets create value long after they're built. So does showing up.",
+]
 
 
 def generate_ai_insight(preview_text: str) -> str:
@@ -141,6 +162,55 @@ def _process_event(event: dict, producer):
 
         producer.flush()
         print(f"[AI WORKER] Dispatched AI Insights for {len(learners_to_update)} learners.")
+
+        # Epic-tier award upgrade -- moved here from main.py's old
+        # trigger_ai_review(), which fired synchronously inline in the
+        # submit-evidence request (blocking the learner's HTTP response on
+        # an AI call measured up to ~90s cold) and, worse, only ever sent
+        # OpenWebUI the file's storage path, never its content -- this
+        # worker already has the real extracted text and a real ai_response
+        # in hand, from the exact same pass, so this reuses that instead of
+        # making a second, redundant call. Team-scoped only (individual
+        # EvidenceSubmitted events carry no team_id); only upgrades members
+        # who've already closed the common/submission AND-gate, same as
+        # the original -- someone who hasn't reflected yet isn't awarded
+        # here either.
+        if event_type == "TeamEvidenceSubmitted" and AI_ENABLED and ai_response != "Error parsing document. Please confirm it is a readable PDF layout.":
+            team_id = event['data']['team_id']
+            completed_members = _db_fetch_all(
+                "SELECT DISTINCT user_id FROM awards WHERE mission_id = %s::uuid AND source = 'submission' AND user_id = ANY(SELECT user_id FROM team_members WHERE team_id = %s::uuid)",
+                (mission_id, team_id)
+            )
+            for (member_id,) in completed_members:
+                member_id = str(member_id)
+                award_id = str(uuid.uuid4())
+                _db_execute(
+                    """INSERT INTO awards (id, user_id, mission_id, tier, source, awarded_at)
+                       VALUES (%s::uuid, %s::uuid, %s::uuid, 'epic', 'ai_review', CURRENT_TIMESTAMP)
+                       ON CONFLICT (user_id, mission_id, tier, source) DO NOTHING""",
+                    (award_id, member_id, mission_id)
+                )
+                award_row = _db_fetch_one(
+                    "SELECT id FROM awards WHERE user_id = %s::uuid AND mission_id = %s::uuid AND tier = 'epic' AND source = 'ai_review' LIMIT 1",
+                    (member_id, mission_id)
+                )
+                if award_row:
+                    _db_execute(
+                        "INSERT INTO notifications (id, user_id, award_id) VALUES (%s::uuid, %s::uuid, %s::uuid)",
+                        (str(uuid.uuid4()), member_id, award_row[0])
+                    )
+                # One event per member, matching the original -- the
+                # ACTIVITY WORKER (this same file, further down) requires
+                # AwardGranted.data.user_id; a single bundled team-level
+                # event would silently drop this from the class feed.
+                producer.send(topic_for_event("AwardGranted"), value={
+                    "event_type": "AwardGranted",
+                    "version": "1.0.0",
+                    "timestamp": datetime.datetime.now().isoformat(),
+                    "data": {"award_id": award_id, "user_id": member_id, "mission_id": mission_id, "tier": "epic", "source": "ai_review"}
+                })
+            producer.flush()
+            print(f"[AI WORKER] Epic-tier upgrade granted to {len(completed_members)} completed team member(s).")
 
     # -------------------------------------------------------------
     # 2. SEARCH & TIMELINE WORKER
@@ -581,6 +651,53 @@ def _process_event(event: dict, producer):
             "linked_players": event['data'].get('linked_players', {}),
             "updated_at": datetime.datetime.now().isoformat(),
         }, refresh=True)
+
+    # -------------------------------------------------------------
+    # 7. FIELD REPORT WORKER — Word of Wisdom, generated async
+    # -------------------------------------------------------------
+    # Moved off /api/reflection's request path for the same reason the AI
+    # Coach Worker's epic-tier award was: it used to block the learner's
+    # HTTP response on a synchronous OpenWebUI call (timeout=90, same
+    # cold-start risk). main.py now saves the reflection with wisdom=NULL,
+    # returns immediately, and publishes this event; the real wisdom lands
+    # here, gets written back, and reaches the browser live (WisdomReady
+    # rides the generic broadcast at the bottom of this function -- no
+    # separate live.py wiring needed for it).
+    if event_type == "ReflectionFiled":
+        user_id = event['data']['user_id']
+        text = event['data']['text']
+        wisdom = None
+        try:
+            if AI_ENABLED and ai_client is not None:
+                response = ai_client.chat.completions.create(
+                    model=AI_MODEL,
+                    messages=[{
+                        "role": "user",
+                        "content": ("An Agent files their daily field report with you. It says: "
+                                    f"\"{text[:600]}\" — Reply with ONE short word of wisdom in your own voice, "
+                                    "1-2 sentences, no preamble, that honors what they said."),
+                    }],
+                    max_tokens=150,
+                )
+                wisdom = response.choices[0].message.content.strip()
+        except Exception as e:
+            print(f"[FIELD REPORT WORKER] Wisdom generation failed: {e}")
+        if not wisdom:
+            import random
+            wisdom = random.choice(WISDOM_FALLBACKS)
+
+        _db_execute(
+            "UPDATE daily_reflections SET wisdom = %s WHERE user_id = %s::uuid AND reflection_date = CURRENT_DATE",
+            (wisdom, user_id)
+        )
+        producer.send(topic_for_event("WisdomReady"), value={
+            "event_type": "WisdomReady",
+            "version": "1.0.0",
+            "timestamp": datetime.datetime.now().isoformat(),
+            "data": {"user_id": user_id, "wisdom": wisdom}
+        })
+        producer.flush()
+        print(f"[FIELD REPORT WORKER] Wisdom ready for {user_id}.")
 
     # -------------------------------------------------------------
     # Live push — every processed event goes to connected browsers

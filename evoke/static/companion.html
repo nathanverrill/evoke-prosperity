@@ -217,13 +217,20 @@
     }
 
     // ---- Daily Field Report (the Notebook tab's real content) ----
+    // Wisdom generates async now (workers.py's FIELD REPORT WORKER) and
+    // arrives live over the /ws socket (see connectLive()'s WisdomReady
+    // case) -- "Filed" shows instantly instead of waiting on the AI call.
+    function showWisdom(wisdom) {
+      const el = document.getElementById("reflect-wisdom");
+      if (el) el.outerHTML = `<p id="reflect-wisdom" class="empty-state">"${escapeHtml(wisdom)}" — B1llBot</p>`;
+    }
     async function loadReflect() {
       const body = document.getElementById("reflect-body");
       try {
         const r = await fetch(`/api/reflections/${userId}`).then(r => r.json());
         if (r.filed_today) {
           const latest = (r.journal || [])[0];
-          body.innerHTML = `<p>Filed today ✓</p>${latest && latest.wisdom ? `<p class="empty-state">"${escapeHtml(latest.wisdom)}" — B1llBot</p>` : ""}`;
+          body.innerHTML = `<p>Filed today ✓</p><p id="reflect-wisdom" class="empty-state">${latest && latest.wisdom ? `"${escapeHtml(latest.wisdom)}" — B1llBot` : "B1llBot's still thinking of a word of wisdom…"}</p>`;
           return;
         }
       } catch (e) {}
@@ -237,12 +244,12 @@
         e.preventDefault();
         const text = document.getElementById("reflect-text").value.trim();
         if (!text) return;
-        document.getElementById("reflect-status").textContent = "Filing… B1llBot is thinking (~20s).";
+        document.getElementById("reflect-status").textContent = "Filing…";
         try {
           const fd = new FormData();
           fd.append("text", text);
-          const res = await fetch(`/api/reflection?user_id=${userId}`, { method: "POST", body: fd }).then(r => r.json());
-          body.innerHTML = `<p>Filed ✓</p><p class="empty-state">"${escapeHtml(res.wisdom)}" — B1llBot</p>`;
+          await fetch(`/api/reflection?user_id=${userId}`, { method: "POST", body: fd });
+          body.innerHTML = `<p>Filed ✓</p><p id="reflect-wisdom" class="empty-state">B1llBot's thinking of a word of wisdom…</p>`;
         } catch (err) {
           document.getElementById("reflect-status").textContent = "Couldn't file that — try again.";
         }
@@ -412,6 +419,10 @@
           try { msg = JSON.parse(e.data); } catch { return; }
           if (msg.type === "MinecraftLinkRequested" && msg.data && msg.data.user_id === userId) {
             showLinkConfirm(msg.data.minecraft_username);
+            return;
+          }
+          if (msg.type === "WisdomReady" && msg.data && msg.data.user_id === userId) {
+            showWisdom(msg.data.wisdom);
             return;
           }
           if (["MinecraftPresence", "WorldStateAdvanced", "AwardGranted", "MissionCompleted"].includes(msg.type)) loadData();
