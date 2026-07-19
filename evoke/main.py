@@ -68,6 +68,8 @@ BRIGHTSPACE_ORG_UNIT_ID = os.getenv("BRIGHTSPACE_ORG_UNIT_ID")
 # ========== Database Pool ==========
 db_pool = SimpleConnectionPool(1, 20, DATABASE_URL)
 async_db_pool: Optional[asyncpg.Pool] = None
+# Test-harness only -- see auth_brightspace_callback and /api/test/brightspace/*.
+_test_brightspace_tokens: dict = {}
 brightspace_lms = None
 brightspace_lti: Optional[BrightspaceLTIProvider] = None
 
@@ -870,9 +872,55 @@ async def auth_brightspace_callback(request: Request, code: str = None, state: s
     if org_row and profile.get("team_name"):
         await sync_team_membership(async_db_pool, str(org_row["id"]), evoke_user_id, profile["team_name"])
 
+    # Test-harness only (see /api/test/brightspace/* and
+    # static/test-brightspace.html below) -- caches this OAuth session's
+    # access token in memory so the test page can make real Dropbox calls
+    # without a second Brightspace redirect-URI registration. Never read by
+    # the production login/session path.
+    _test_brightspace_tokens[evoke_user_id] = profile.get("access_token")
+
     redirect_response = RedirectResponse(url="/?" + urlencode({"login": profile["email"]}), status_code=302)
     redirect_response.delete_cookie("oauth_state")
     return redirect_response
+
+# ========== Brightspace real-API test harness (static/test-brightspace.html) ==========
+# Confirms mission-pulling and evidence-submission are technically possible
+# against the real tenant, using the access token from the last real OAuth
+# login above -- deliberately NOT wired into sync_missions_from_lms or
+# submit_evidence. Real Brightspace DropboxFolders have no field for
+# Evoke's curriculum metadata (arc, superpower, skills, PFL domain, the
+# "Your Mission" narrative, the Evidence checklist -- see CONCEPTS.md's
+# Mission glossary entry), so a real integration there needs its own design
+# (keep Evoke's own mission catalog, matched to a real folder only by
+# lms_assignment_ref), not a drop-in replacement of the sim-based sync.
+
+@app.get("/api/test/brightspace/assignments")
+async def test_brightspace_assignments(user_id: str):
+    token = _test_brightspace_tokens.get(user_id)
+    if not token:
+        raise HTTPException(status_code=400, detail="No cached Brightspace token for this user -- log in again via Login with Central Registry, then reload this page")
+    provider = get_auth_provider()
+    if not provider:
+        raise HTTPException(status_code=503, detail="No OAuth login provider configured")
+    try:
+        folders = await provider.list_dropbox_folders(token)
+    except OAuthLoginError as e:
+        raise HTTPException(status_code=502, detail=str(e))
+    return {"folders": folders}
+
+@app.post("/api/test/brightspace/submit")
+async def test_brightspace_submit(user_id: str = Form(...), folder_id: int = Form(...), text: str = Form(...)):
+    token = _test_brightspace_tokens.get(user_id)
+    if not token:
+        raise HTTPException(status_code=400, detail="No cached Brightspace token for this user -- log in again via Login with Central Registry, then reload this page")
+    provider = get_auth_provider()
+    if not provider:
+        raise HTTPException(status_code=503, detail="No OAuth login provider configured")
+    try:
+        result = await provider.submit_test_file(token, folder_id, text)
+    except OAuthLoginError as e:
+        raise HTTPException(status_code=502, detail=str(e))
+    return {"status": "ok", "result": result}
 
 @app.get("/api/session/validate")
 async def validate_session(session_token: str = None):

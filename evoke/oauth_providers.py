@@ -75,6 +75,9 @@ class BrightspaceOAuthProvider(AuthProvider):
         # shape hasn't changed since.
         self.whoami_base = os.getenv("BRIGHTSPACE_TENANT_URL")
         self.whoami_version = os.getenv("BRIGHTSPACE_WHOAMI_VERSION", "1.43")
+        # Dropbox (assignments/submissions) lives under the `le` product,
+        # not `lp` -- same real-tenant version-lock caveat as whoami.
+        self.le_version = os.getenv("BRIGHTSPACE_LE_VERSION", "1.43")
         # Team sync (Brightspace Groups -> Evoke teams) is optional -- a
         # login still succeeds without it, just with no team assigned, same
         # as a group-lookup failure below. Set to the course's org unit ID
@@ -147,6 +150,9 @@ class BrightspaceOAuthProvider(AuthProvider):
             # BrightspaceLTIProvider._map_lti_roles uses when a launch has none.
             "role": "learner",
             "team_name": team_name,
+            # Test-harness use only (see /api/test/brightspace/* in main.py) --
+            # the production login flow never reads this back out.
+            "access_token": access_token,
         }
 
     async def _resolve_team_name(self, client: httpx.AsyncClient, access_token: str, brightspace_user_id: int):
@@ -177,6 +183,60 @@ class BrightspaceOAuthProvider(AuthProvider):
         except (httpx.HTTPError, KeyError, ValueError) as e:
             logger.warning(f"Brightspace group lookup failed for user {brightspace_user_id}: {e}")
         return None
+
+    async def list_dropbox_folders(self, access_token: str) -> list:
+        """Real Brightspace Dropbox Folders (assignments) for the configured
+        course. Test-harness use only (see /api/test/brightspace/* in
+        main.py) -- NOT wired into the production mission catalog
+        (sync_missions_from_lms), because a real DropboxFolder has no field
+        for Evoke's curriculum metadata (arc, superpower, skills, PFL
+        domain, etc. -- see CONCEPTS.md's Mission glossary entry). That
+        metadata stays Evoke's own data either way; this only confirms the
+        real assignment list itself is reachable."""
+        if not self.org_unit_id:
+            raise OAuthLoginError("BRIGHTSPACE_ORG_UNIT_ID not configured")
+        async with httpx.AsyncClient() as client:
+            resp = await client.get(
+                f"{self.whoami_base}/d2l/api/le/{self.le_version}/{self.org_unit_id}/dropbox/folders/",
+                headers={"Authorization": f"Bearer {access_token}"},
+            )
+            if resp.status_code != 200:
+                raise OAuthLoginError(f"Brightspace dropbox folders lookup failed: {resp.status_code} {resp.text}")
+            return resp.json()
+
+    async def submit_test_file(self, access_token: str, folder_id: int, text: str) -> dict:
+        """Submits a small generated .txt file to a real dropbox folder.
+        Test-harness use only, same scope note as list_dropbox_folders.
+        Brightspace's submission endpoint requires multipart/mixed (a JSON
+        RichText part, then the file part) -- httpx has no high-level
+        support for that content type, so the body is assembled by hand per
+        https://docs.valence.desire2learn.com/basic/fileupload.html."""
+        if not self.org_unit_id:
+            raise OAuthLoginError("BRIGHTSPACE_ORG_UNIT_ID not configured")
+        boundary = "EvokeTestBoundary123456"
+        json_part = '{"Text": "Submitted from the EVOKE Brightspace test page", "Html": null}'
+        body = (
+            f"--{boundary}\r\n"
+            f"Content-Type: application/json\r\n\r\n"
+            f"{json_part}\r\n"
+            f"--{boundary}\r\n"
+            f'Content-Disposition: form-data; name=""; filename="evoke-test-submission.txt"\r\n'
+            f"Content-Type: text/plain\r\n\r\n"
+        ).encode("utf-8") + text.encode("utf-8") + f"\r\n--{boundary}--\r\n".encode("utf-8")
+
+        async with httpx.AsyncClient() as client:
+            resp = await client.post(
+                f"{self.whoami_base}/d2l/api/le/{self.le_version}/{self.org_unit_id}"
+                f"/dropbox/folders/{folder_id}/submissions/mysubmissions/",
+                content=body,
+                headers={
+                    "Authorization": f"Bearer {access_token}",
+                    "Content-Type": f"multipart/mixed; boundary={boundary}",
+                },
+            )
+            if resp.status_code not in (200, 201):
+                raise OAuthLoginError(f"Brightspace submission failed: {resp.status_code} {resp.text}")
+            return resp.json() if resp.content else {"status": resp.status_code}
 
 
 _PROVIDERS = {"brightspace": BrightspaceOAuthProvider}
