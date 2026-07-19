@@ -17,13 +17,13 @@
 <p class="muted">Confirms mission-pulling (real Dropbox Folders) and evidence submission work against the real Brightspace tenant. Test harness only -- not wired into the production mission page or evidence-submission flow.</p>
 
 <div id="no-login" style="display:none;">
-  <p>No cached login found in this browser.</p>
+  <p>No active session in this browser.</p>
   <button id="login-btn">Login with Central Registry</button>
   <p class="muted">After logging in, come back to this page (/test-brightspace.html).</p>
 </div>
 
 <div id="logged-in" style="display:none;">
-  <p class="muted">Using cached login for user_id: <code id="uid"></code></p>
+  <p class="muted">Using your real session -- user_id: <code id="uid"></code></p>
 
   <h2>Real assignments (Dropbox Folders)</h2>
   <button id="reload-folders">Reload assignment list</button>
@@ -38,56 +38,61 @@
 
 <script>
 (function(){
-  var uid = null;
-  try{ uid = localStorage.getItem('evoke_user_id'); }catch(e){}
-
-  if(!uid){
-    document.getElementById('no-login').style.display = 'block';
-    document.getElementById('login-btn').addEventListener('click', function(){ location.href = '/api/auth/login'; });
-    return;
-  }
-
-  document.getElementById('logged-in').style.display = 'block';
-  document.getElementById('uid').textContent = uid;
-
-  function loadFolders(){
-    var out = document.getElementById('folders-out');
-    out.textContent = 'Loading...';
-    fetch('/api/test/brightspace/assignments?user_id=' + encodeURIComponent(uid))
-      .then(function(r){ return r.json().then(function(d){ return {ok: r.ok, d: d}; }); })
-      .then(function(res){
-        out.textContent = JSON.stringify(res.d, null, 2);
-        var sel = document.getElementById('folder-select');
-        sel.innerHTML = '';
-        if(res.ok && res.d.folders){
-          res.d.folders.forEach(function(f){
-            var opt = document.createElement('option');
-            opt.value = f.Id;
-            opt.textContent = f.Id + ' -- ' + f.Name;
-            sel.appendChild(opt);
-          });
-        }
-      })
-      .catch(function(e){ out.textContent = 'Error: ' + e; });
-  }
-  document.getElementById('reload-folders').addEventListener('click', loadFolders);
-  loadFolders();
-
-  document.getElementById('submit-btn').addEventListener('click', function(){
-    var folderId = document.getElementById('folder-select').value;
-    var text = document.getElementById('submit-text').value;
-    var out = document.getElementById('submit-out');
-    if(!folderId){ out.textContent = 'No folder selected -- reload the assignment list first.'; return; }
-    out.textContent = 'Submitting...';
-    var fd = new FormData();
-    fd.append('user_id', uid);
-    fd.append('folder_id', folderId);
-    fd.append('text', text);
-    fetch('/api/test/brightspace/submit', {method: 'POST', body: fd})
-      .then(function(r){ return r.json().then(function(d){ return {ok: r.ok, d: d}; }); })
-      .then(function(res){ out.textContent = JSON.stringify(res.d, null, 2); })
-      .catch(function(e){ out.textContent = 'Error: ' + e; });
+  // Identity now comes from the real httponly session cookie (see
+  // evoke/auth_session.py) -- no more reading a raw user_id out of
+  // localStorage, which stopped being set once sessions became cookie-based.
+  fetch('/api/session/validate').then(function(r){
+    if(!r.ok){
+      document.getElementById('no-login').style.display = 'block';
+      document.getElementById('login-btn').addEventListener('click', function(){ location.href = '/api/auth/login'; });
+      return;
+    }
+    return r.json().then(function(session){
+      document.getElementById('logged-in').style.display = 'block';
+      document.getElementById('uid').textContent = session.user_id;
+      init();
+    });
   });
+
+  function init(){
+    function loadFolders(){
+      var out = document.getElementById('folders-out');
+      out.textContent = 'Loading...';
+      fetch('/api/test/brightspace/assignments')
+        .then(function(r){ return r.json().then(function(d){ return {ok: r.ok, d: d}; }); })
+        .then(function(res){
+          out.textContent = JSON.stringify(res.d, null, 2);
+          var sel = document.getElementById('folder-select');
+          sel.innerHTML = '';
+          if(res.ok && res.d.folders){
+            res.d.folders.forEach(function(f){
+              var opt = document.createElement('option');
+              opt.value = f.Id;
+              opt.textContent = f.Id + ' -- ' + f.Name;
+              sel.appendChild(opt);
+            });
+          }
+        })
+        .catch(function(e){ out.textContent = 'Error: ' + e; });
+    }
+    document.getElementById('reload-folders').addEventListener('click', loadFolders);
+    loadFolders();
+
+    document.getElementById('submit-btn').addEventListener('click', function(){
+      var folderId = document.getElementById('folder-select').value;
+      var text = document.getElementById('submit-text').value;
+      var out = document.getElementById('submit-out');
+      if(!folderId){ out.textContent = 'No folder selected -- reload the assignment list first.'; return; }
+      out.textContent = 'Submitting...';
+      var fd = new FormData();
+      fd.append('folder_id', folderId);
+      fd.append('text', text);
+      fetch('/api/test/brightspace/submit', {method: 'POST', body: fd})
+        .then(function(r){ return r.json().then(function(d){ return {ok: r.ok, d: d}; }); })
+        .then(function(res){ out.textContent = JSON.stringify(res.d, null, 2); })
+        .catch(function(e){ out.textContent = 'Error: ' + e; });
+    });
+  }
 })();
 </script>
 </body>

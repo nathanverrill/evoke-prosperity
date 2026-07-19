@@ -74,38 +74,21 @@
   }
 
   function seedFromBackend(){
-    // Playtest magic link: ?login=<email> always wins over whatever dev-login
-    // would otherwise default to (the earliest-created learner -- "Player
-    // One"), so a shared/reused device or a stale prior session can't leave
-    // a tester looking at the wrong person's progress. Same pattern as
-    // app.js's ensureLoggedIn()/companion.html's init() -- this file just
-    // never had it, since it calls dev-login with no params at all. The
-    // Brightspace OAuth callback (evoke/main.py's auth_brightspace_callback)
-    // hands off through this exact same param after a real login, rather
-    // than inventing a second identity hand-off mechanism.
-    var loginEmail = new URLSearchParams(location.search).get('login');
-    var loginQS = loginEmail ? ('?email=' + encodeURIComponent(loginEmail)) : '';
-    if(loginEmail){
-      var url = new URL(location.href);
-      url.searchParams.delete('login');
-      history.replaceState({}, '', url);
-    }
-    // A previously-established real login, cached across reloads so a
-    // returning learner doesn't have to click through Central Registry every
-    // page load.
-    var cachedUserId = null;
-    if(!loginEmail){ try{ cachedUserId = localStorage.getItem('evoke_user_id'); }catch(e){} }
-    if(cachedUserId) loginQS = '?user_id=' + encodeURIComponent(cachedUserId);
-
+    // A page reload's identity now comes from the httponly session cookie
+    // itself (see evoke/auth_session.py) via /api/session/validate -- no
+    // more caching a raw user_id in localStorage and replaying it through
+    // dev-login on every load, which was really just a second, weaker
+    // login path sitting next to the real one. /api/dev-login now only
+    // exists for a fresh local clone with no AUTH_PROVIDER configured, and
+    // only takes an email (never an arbitrary id).
     function establishIdentity(){
-      return postJSON('/api/dev-login' + loginQS).then(function(d){
-      STATE.userId = d.user_id; STATE.displayName = d.display_name;
-      try{ localStorage.setItem('evoke_user_id', STATE.userId); }catch(e){}
-      return Promise.all([
-        getJSON('/api/missions?user_id='+STATE.userId).catch(function(){ return {missions:[]}; }),
-        getJSON('/api/profile/player/'+STATE.userId).catch(function(){ return null; })
-      ]);
-    }).then(function(res){
+      return getJSON('/api/session/validate').then(function(d){
+        STATE.userId = d.user_id; STATE.displayName = d.display_name;
+        return Promise.all([
+          getJSON('/api/missions?user_id='+STATE.userId).catch(function(){ return {missions:[]}; }),
+          getJSON('/api/profile/player/'+STATE.userId).catch(function(){ return null; })
+        ]);
+      }).then(function(res){
       var missions = (res[0] && res[0].missions) || [];
       STATE.profile = res[1];
       STATE.missionIds = missions.map(function(m){ return m.id; });
@@ -134,17 +117,30 @@
         var host = ci && (ci.server || ci.host || ci.address);
         if(host && !/^(localhost|127\.|0\.0\.0\.0)/.test(host)){ var el2=document.getElementById('mc-server'); if(el2) el2.textContent = host; }
       }).catch(function(){});
-    }).catch(function(e){ console.warn('backend seed failed; using local demo state', e); });
+      // No trailing .catch() here on purpose: the missions/profile calls
+      // above already self-heal via their own .catch() fallbacks, so the
+      // only way this chain can still reject is the /api/session/validate
+      // call at the top actually having no session -- that MUST propagate
+      // to seedFromBackend's own .catch() below, or an unauthenticated
+      // visitor silently gets STATE.userId=null and a broken-looking app
+      // instead of the logged-out gate (a real bug this exact structure
+      // caused once already -- verified live).
+    });
     }
 
-    if(loginEmail || cachedUserId) return establishIdentity();
-
-    // Neither a magic link nor a cached identity -- ask the backend whether
-    // real login is actually required before defaulting to today's dev
-    // auto-login (what happens when no AUTH_PROVIDER is configured).
-    return getJSON('/api/auth/config').catch(function(){ return {login_required:false}; }).then(function(cfg){
-      if(cfg && cfg.login_required){ showLoggedOutHome(); return null; }
-      return establishIdentity();
+    // Try the real session first (covers Brightspace OAuth, LTI launch, and
+    // Evoke Admin -- anything that already set the cookie). Only fall back
+    // to dev-login if there's no session AND the backend confirms no real
+    // login is required (local clone, no AUTH_PROVIDER); otherwise show the
+    // logged-out gate rather than silently defaulting to some other player.
+    return establishIdentity().catch(function(){
+      return getJSON('/api/auth/config').catch(function(){ return {login_required:false}; }).then(function(cfg){
+        if(cfg && cfg.login_required){ showLoggedOutHome(); return null; }
+        return postJSON('/api/dev-login').then(function(d){
+          STATE.userId = d.user_id; STATE.displayName = d.display_name;
+          return establishIdentity();
+        });
+      });
     });
   }
 

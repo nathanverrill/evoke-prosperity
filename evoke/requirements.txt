@@ -11,3 +11,5 @@ httpx==0.25.2
 asyncpg==0.29.0
 PyJWT==2.13.0
 qrcode==7.4.2
+itsdangerous==2.2.0
+bcrypt==4.2.0

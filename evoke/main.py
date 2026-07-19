@@ -6,7 +6,6 @@ import random
 import re
 import uuid
 import hashlib
-from urllib.parse import urlencode
 from typing import Optional, List
 from fastapi import FastAPI, HTTPException, File, UploadFile, Form, Depends, Response, Request, WebSocket, WebSocketDisconnect
 from fastapi.staticfiles import StaticFiles
@@ -27,6 +26,10 @@ from evoke import skills_framework, progression, world_state, gear as gear_catal
 from evoke.live import live_hub
 from evoke.identity import get_or_create_evoke_player, sync_team_membership
 from evoke.oauth_providers import get_auth_provider, OAuthLoginError
+from evoke.auth_session import (
+    issue_session, clear_session, get_current_user, get_current_user_optional,
+    get_current_admin, require_self, verify_admin_password,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -524,41 +527,22 @@ async def health_opensearch():
         return JSONResponse({"status": "error"}, status_code=500)
 
 # ========== Session Management ==========
-@app.post("/api/login")
-async def login(email: str, password: str):
-    """Dev login - returns a session token"""
-    # Simple dev auth
-    try:
-        result = db_fetch_one(
-            "SELECT u.id, u.display_name FROM users u JOIN auth_identities ai ON u.id = ai.user_id WHERE u.email = %s AND ai.provider = 'local'",
-            (email,)
-        )
-        if result:
-            user_id, display_name = result
-            return {
-                "user_id": str(user_id),
-                "display_name": display_name,
-                "email": email,
-                "session_token": str(uuid.uuid4())
-            }
-        raise HTTPException(status_code=401, detail="Invalid credentials")
-    except Exception as e:
-        raise HTTPException(status_code=400, detail=str(e))
-
+# The old /api/login and /api/dev-login let an unauthenticated caller become
+# ANY user by passing their email or id -- not a dev convenience, an open
+# impersonation endpoint, reachable even with real Brightspace auth
+# configured. Both routes below are now hard-disabled the moment
+# AUTH_PROVIDER is set; with no AUTH_PROVIDER (fresh local clone), dev-login
+# still exists for convenience, but now mints the same signed, httponly
+# session cookie every other route relies on -- no longer a JSON payload
+# the frontend chooses to trust, and no longer accepts an arbitrary user_id.
 @app.post("/api/dev-login")
-async def dev_login(user_id: Optional[str] = None, email: Optional[str] = None):
-    """Dev mode auto-login. No params: deterministically Player One, the
-    default learner-facing identity -- previously `LIMIT 1` with no
-    ORDER BY, which picked "whichever row sorts first" rather than a
-    specific, intentional user. `email` param: an explicit way to log in
-    as a specific seeded user (e.g. ?email=admin@evoke.local for Admin,
-    which has no in-app UI switcher and no role check on #/admin yet)."""
-    if user_id:
-        result = db_fetch_one("SELECT display_name, email FROM users WHERE id = %s::uuid", (user_id,))
-        if not result:
-            raise HTTPException(status_code=404, detail="User not found")
-        display_name, email = result
-    elif email:
+async def dev_login(response: Response, email: Optional[str] = None):
+    """Local-dev-only auto-login. Disabled entirely once AUTH_PROVIDER is
+    configured -- see the Brightspace OAuth callback below for how real
+    logins work instead."""
+    if get_auth_provider():
+        raise HTTPException(status_code=404, detail="Not available -- real login is configured")
+    if email:
         result = db_fetch_one("SELECT id, display_name FROM users WHERE email = %s", (email,))
         if not result:
             raise HTTPException(status_code=404, detail="User not found")
@@ -571,12 +555,36 @@ async def dev_login(user_id: Optional[str] = None, email: Optional[str] = None):
             raise HTTPException(status_code=404, detail="No users found")
         user_id, display_name, email = result
 
-    return {
-        "user_id": user_id,
-        "display_name": display_name,
-        "email": email,
-        "session_token": str(uuid.uuid4())
-    }
+    issue_session(response, str(user_id), role="learner")
+    return {"user_id": str(user_id), "display_name": display_name, "email": email}
+
+
+@app.post("/api/admin/login")
+async def admin_login(response: Response, username: str = Form(...), password: str = Form(...)):
+    """The one non-Brightspace login: a human ops/instructor reaching
+    #/admin. Everything about *students* -- roster, teams, roles -- is
+    Brightspace's job now (OAuth login + Groups sync); this exists only so
+    someone can reach mission release gating and the Ops Deck without an
+    LMS account. Disabled unless EVOKE_ADMIN_PASSWORD_HASH is set."""
+    if not verify_admin_password(username, password):
+        raise HTTPException(status_code=401, detail="Invalid admin credentials")
+    org_row = db_fetch_one("SELECT id FROM organizations LIMIT 1")
+    org_id = org_row[0] if org_row else None
+    admin_email = f"{username}@evoke.local"
+    admin_row = db_fetch_one("SELECT id FROM users WHERE email = %s", (admin_email,))
+    if admin_row:
+        admin_user_id = str(admin_row[0])
+    else:
+        admin_user_id = str(uuid.uuid4())
+        db_execute(
+            """INSERT INTO users (id, org_id, display_name, email, role)
+               VALUES (%s::uuid, %s::uuid, %s, %s, 'admin')
+               ON CONFLICT (email, org_id) DO NOTHING""",
+            (admin_user_id, org_id, f"Evoke Admin ({username})", admin_email),
+        )
+    issue_session(response, admin_user_id, role="admin")
+    return {"user_id": admin_user_id, "role": "admin"}
+
 
 # ========== Identity Management ==========
 class LinkBrightspaceRequest(BaseModel):
@@ -644,7 +652,7 @@ async def link_minecraft_identity(request: LinkMinecraftRequest):
         raise HTTPException(status_code=400, detail=f"Minecraft linking failed: {str(e)}")
 
 @app.get("/api/identity/{evoke_user_id}")
-async def get_identity(evoke_user_id: str):
+async def get_identity(evoke_user_id: str = Depends(require_self)):
     """Get cross-system identity mapping for a user"""
     try:
         result = db_fetch_one(
@@ -734,66 +742,19 @@ async def lti_launch(
             status_code=302
         )
 
-        # Set session token in HTTP-only cookie
-        # Browser will include this in all subsequent requests
-        redirect_response.set_cookie(
-            key="session_token",
-            value=session_token,
-            httponly=True,  # Prevent JavaScript access (XSS protection)
-            secure=True,    # HTTPS only (enforce in production)
-            samesite="Lax", # CSRF protection
-            max_age=86400,  # 24 hours
-        )
-
-        # Also set user info cookie (readable by frontend)
-        redirect_response.set_cookie(
-            key="user_id",
-            value=user_dict["user_id"],
-            httponly=False,  # Allow frontend to read
-            secure=True,
-            samesite="Lax",
-            max_age=86400,
-        )
-
-        redirect_response.set_cookie(
-            key="user_display_name",
-            value=user_dict["display_name"],
-            httponly=False,
-            secure=True,
-            samesite="Lax",
-            max_age=86400,
-        )
+        # Same signed, httponly session cookie as the Brightspace OAuth
+        # login and Evoke Admin login use -- no more separate
+        # readable-by-JS user_id/user_display_name cookies a script (or a
+        # forged request) could set to any value. brightspace_lti's own
+        # session_token isn't used as the app session; it's discarded here
+        # once the identity it verified has been folded into our cookie.
+        issue_session(redirect_response, user_dict["user_id"], role=user_dict.get("role", "learner"))
 
         return redirect_response
 
     except Exception as e:
         logger.error(f"LTI launch error: {e}")
         raise HTTPException(status_code=400, detail=f"LTI launch failed: {str(e)}")
-
-@app.get("/api/lti/launch/callback")
-async def lti_launch_callback(session_token: str = None):
-    """
-    Optional callback endpoint after LTI launch.
-
-    If the client needs JSON instead of redirect, call this endpoint
-    with the session_token received from the launch form submission.
-
-    Returns:
-    {
-        "status": "success",
-        "session_token": "...",
-        "redirect_to": "/api/missions"
-    }
-    """
-    if not session_token:
-        raise HTTPException(status_code=400, detail="Missing session_token")
-
-    # Could validate the token here if needed
-    return {
-        "status": "success",
-        "session_token": session_token,
-        "redirect_to": "/api/missions"
-    }
 
 # ========== OAuth 2.0 Login (swappable provider) ==========
 # A real user clicking "Login with Central Registry" and authorizing as
@@ -879,7 +840,12 @@ async def auth_brightspace_callback(request: Request, code: str = None, state: s
     # the production login/session path.
     _test_brightspace_tokens[evoke_user_id] = profile.get("access_token")
 
-    redirect_response = RedirectResponse(url="/?" + urlencode({"login": profile["email"]}), status_code=302)
+    # No more ?login=<email> round-trip: the callback itself is the only
+    # place that ever saw a verified identity, so it's the only place that
+    # should ever mint a session for it. Nothing (query string, browser
+    # history, referrer headers, server logs) carries the email anymore.
+    redirect_response = RedirectResponse(url="/", status_code=302)
+    issue_session(redirect_response, evoke_user_id, role=profile["role"])
     redirect_response.delete_cookie("oauth_state")
     return redirect_response
 
@@ -895,7 +861,7 @@ async def auth_brightspace_callback(request: Request, code: str = None, state: s
 # lms_assignment_ref), not a drop-in replacement of the sim-based sync.
 
 @app.get("/api/test/brightspace/assignments")
-async def test_brightspace_assignments(user_id: str):
+async def test_brightspace_assignments(user_id: str = Depends(get_current_user)):
     token = _test_brightspace_tokens.get(user_id)
     if not token:
         raise HTTPException(status_code=400, detail="No cached Brightspace token for this user -- log in again via Login with Central Registry, then reload this page")
@@ -909,7 +875,7 @@ async def test_brightspace_assignments(user_id: str):
     return {"folders": folders}
 
 @app.post("/api/test/brightspace/submit")
-async def test_brightspace_submit(user_id: str = Form(...), folder_id: int = Form(...), text: str = Form(...)):
+async def test_brightspace_submit(folder_id: int = Form(...), text: str = Form(...), user_id: str = Depends(get_current_user)):
     token = _test_brightspace_tokens.get(user_id)
     if not token:
         raise HTTPException(status_code=400, detail="No cached Brightspace token for this user -- log in again via Login with Central Registry, then reload this page")
@@ -923,51 +889,28 @@ async def test_brightspace_submit(user_id: str = Form(...), folder_id: int = For
     return {"status": "ok", "result": result}
 
 @app.get("/api/session/validate")
-async def validate_session(session_token: str = None):
-    """
-    Validate and get session info.
-
-    Called by frontend to check if session is valid and get user info.
-
-    Returns user info if valid, 401 if invalid.
-    """
-    if not session_token:
-        raise HTTPException(status_code=401, detail="No session token")
-
-    # In production, would validate token against database/cache
-    # For now, accept any non-empty token as valid
-    # Could enhance with session store (Redis, DB, etc.)
-
-    logger.debug(f"Session validated for token {session_token[:8]}...")
-
+async def validate_session(user_id: str = Depends(get_current_user)):
+    """Validates the real session cookie (see auth_session.py) -- replaces
+    the old version, which accepted any non-empty string as a valid
+    session. 401s via get_current_user if there's no valid session."""
+    row = db_fetch_one("SELECT display_name, email FROM users WHERE id = %s::uuid", (user_id,))
     return {
         "status": "valid",
-        "session_token": session_token,
-        "message": "Session is active"
+        "user_id": user_id,
+        "display_name": row[0] if row else None,
+        "email": row[1] if row else None,
     }
 
 @app.post("/api/session/logout")
 async def logout_session(response: Response):
-    """
-    Logout and clear session cookies.
-
-    Returns:
-    {
-        "status": "success",
-        "message": "Logged out"
-    }
-    """
-    # Clear session cookies
+    """Logout and clear the session cookie, plus the old cookie names in
+    case a browser still has them from before this change."""
+    clear_session(response)
     response.delete_cookie("session_token")
     response.delete_cookie("user_id")
     response.delete_cookie("user_display_name")
-
     logger.info("User logged out")
-
-    return {
-        "status": "success",
-        "message": "Logged out successfully"
-    }
+    return {"status": "success", "message": "Logged out successfully"}
 
 # ========== Brightspace Grade Webhook ==========
 @app.post("/api/webhooks/brightspace/grade")
@@ -1219,7 +1162,7 @@ async def poll_brightspace_grades():
 
 # ========== Mission API ==========
 @app.get("/api/missions")
-async def list_missions(user_id: str):
+async def list_missions(user_id: str = Depends(require_self)):
     """List all missions for a campaign"""
     try:
         # Get organization and campaign for the user
@@ -1278,7 +1221,7 @@ async def list_missions(user_id: str):
 # existing one; real deployment needs an instructor-role check before this
 # ships to a real classroom.
 @app.get("/api/admin/missions")
-async def admin_list_missions(user_id: str):
+async def admin_list_missions(user_id: str = Depends(get_current_admin)):
     """All missions for the caller's campaign, including release state --
     the admin-facing counterpart to GET /api/missions, which only shows
     the learner-relevant fields."""
@@ -1308,7 +1251,7 @@ async def admin_list_missions(user_id: str):
 
 
 @app.post("/api/admin/missions/{mission_id}/release")
-async def admin_release_mission(mission_id: str):
+async def admin_release_mission(mission_id: str, admin_id: str = Depends(get_current_admin)):
     """Console-player feedback (BUILD_PLAN_2's "season drops" gap): a
     stage/mission release is already this campaign's real content-drop
     mechanic, but nothing ever announced it -- CoD frames a season launch
@@ -1339,7 +1282,7 @@ async def admin_release_mission(mission_id: str):
 
 
 @app.post("/api/admin/missions/{mission_id}/unrelease")
-async def admin_unrelease_mission(mission_id: str):
+async def admin_unrelease_mission(mission_id: str, admin_id: str = Depends(get_current_admin)):
     """Puts a mission back behind the gate. Deliberately doesn't touch
     submissions/awards already granted while it was open -- unreleasing is
     about stopping new submissions, not undoing a learner's completed work."""
@@ -1520,10 +1463,10 @@ async def _complete_mission_for_user(user_id: str, mission_id: str, team_id: str
 
 @app.post("/api/submit-evidence")
 async def submit_evidence(
-    user_id: str = Form(...),
     mission_id: str = Form(...),
     file: UploadFile = File(...),
     kind: str = Form("team_product"),
+    user_id: str = Depends(get_current_user),
 ):
     """Submit evidence for a mission. `kind='team_product'` (default) is the
     TEAM's shared artifact -- any member can call it, and it closes the
@@ -1724,7 +1667,7 @@ def _initials(name: Optional[str]) -> str:
 
 
 @app.get("/api/submission-state/{user_id}/{mission_id}")
-async def submission_state(user_id: str, mission_id: str):
+async def submission_state(mission_id: str, user_id: str = Depends(require_self)):
     """Per-member submission state for the requesting learner's team on one
     mission -- drives the submission screen's roster strip, the motivational
     banner, and completion status. Team-product files are hash-checked
@@ -1811,8 +1754,10 @@ class TeamDiscussionPost(BaseModel):
 
 
 @app.post("/api/team-discussion")
-async def post_team_discussion(body: TeamDiscussionPost):
+async def post_team_discussion(body: TeamDiscussionPost, caller: str = Depends(get_current_user)):
     """Add a message to the team's in-app discussion thread for a mission."""
+    if body.user_id != caller:
+        raise HTTPException(status_code=403, detail="Cannot post as another user")
     try:
         msg = (body.message or "").strip()
         if not msg:
@@ -1835,7 +1780,7 @@ async def post_team_discussion(body: TeamDiscussionPost):
 
 
 @app.get("/api/team-discussion/{user_id}/{mission_id}")
-async def get_team_discussion(user_id: str, mission_id: str):
+async def get_team_discussion(mission_id: str, user_id: str = Depends(require_self)):
     """The team's discussion thread for a mission (resolved via the caller's team)."""
     try:
         team_id = _get_user_team(user_id)
@@ -1859,7 +1804,7 @@ async def get_team_discussion(user_id: str, mission_id: str):
 
 
 @app.get("/api/team/{user_id}")
-async def get_team(user_id: str):
+async def get_team(user_id: str = Depends(require_self)):
     """The Team page: team name/motto + each member with their mission progress."""
     try:
         team_id = _get_user_team(user_id)
@@ -1900,8 +1845,10 @@ class TeamMessagePost(BaseModel):
 
 
 @app.post("/api/team-message")
-async def post_team_message(body: TeamMessagePost):
+async def post_team_message(body: TeamMessagePost, caller: str = Depends(get_current_user)):
     """Post to the team-wide message board (not tied to a mission)."""
+    if body.user_id != caller:
+        raise HTTPException(status_code=403, detail="Cannot post as another user")
     try:
         msg = (body.message or "").strip()
         if not msg:
@@ -1923,7 +1870,7 @@ async def post_team_message(body: TeamMessagePost):
 
 
 @app.get("/api/team-messages/{user_id}")
-async def get_team_messages(user_id: str):
+async def get_team_messages(user_id: str = Depends(require_self)):
     """The team-wide message board thread."""
     try:
         team_id = _get_user_team(user_id)
@@ -1947,9 +1894,9 @@ async def get_team_messages(user_id: str):
 
 @app.post("/api/submit-reflection")
 async def submit_reflection(
-    user_id: str = Form(...),
     mission_id: str = Form(...),
     reflection: str = Form(...),
+    user_id: str = Depends(get_current_user),
 ):
     """An individual team member's own reflection on a mission -- always
     personal, always available regardless of who submitted the team's
@@ -2062,7 +2009,7 @@ async def brightspace_review(
 
 # ========== Notifications & Awards ==========
 @app.get("/api/notifications/{user_id}")
-async def get_notifications(user_id: str):
+async def get_notifications(user_id: str = Depends(require_self)):
     """Get notifications for a user"""
     try:
         notifications = db_fetch_all(
@@ -2087,7 +2034,7 @@ async def get_notifications(user_id: str):
 
 
 @app.get("/api/guide-overlay/{user_id}")
-async def get_guide_overlay(user_id: str):
+async def get_guide_overlay(user_id: str = Depends(require_self)):
     """Console-player feedback (BUILD_PLAN_2's "Guide overlay" gap): the
     Xbox-button overlay pattern -- notifications, awards, presence, all from
     wherever you are, without leaving what you're doing. Aggregates three
@@ -2125,7 +2072,7 @@ async def get_guide_overlay(user_id: str):
 
 
 @app.get("/api/awards/{user_id}")
-async def get_awards(user_id: str):
+async def get_awards(user_id: str = Depends(require_self)):
     """Get all awards for a user"""
     try:
         awards = db_fetch_all(
@@ -2151,7 +2098,7 @@ async def get_awards(user_id: str):
         raise HTTPException(status_code=400, detail=str(e))
 
 @app.post("/api/awards/{award_id}/collect")
-async def collect_award(award_id: str, user_id: str):
+async def collect_award(award_id: str, user_id: str = Depends(require_self)):
     """Collect an award - triggers Minecraft delivery"""
     try:
         # Update award with collected_at timestamp
@@ -2183,7 +2130,7 @@ async def collect_award(award_id: str, user_id: str):
 
 # ========== Profiles ==========
 @app.get("/api/profile/player/{user_id}")
-async def get_player_profile(user_id: str):
+async def get_player_profile(user_id: str = Depends(require_self)):
     """Player profile. XP/level/badges/missions/quests come from the
     player-profile projection (built by the worker's PROFILE WORKER branch
     from MissionCompleted/BadgeAwarded/XPGranted/QuestCompleted). Awards are
@@ -2239,7 +2186,7 @@ async def get_player_profile(user_id: str):
 
 
 @app.get("/api/achievements/{user_id}")
-async def get_achievements(user_id: str):
+async def get_achievements(user_id: str = Depends(require_self)):
     """The 16 Powers as individually-unlockable achievements (GAME_DESIGN.md
     §4.1) -- canon's Profile-screen "Achievements" section, distinct from
     the 4 Quality badges. Merges the always-16 static framework (so unearned
@@ -2324,7 +2271,7 @@ async def get_team_profile(team_id: str):
 
 # ========== Check-In & Activity Feed ==========
 @app.post("/api/checkin")
-async def checkin(user_id: str):
+async def checkin(user_id: str = Depends(require_self)):
     """Visiting the Operations Hub is itself a small, repeatable reward loop,
     not just a portal for submitting missions -- missions are paced weekly,
     so personal activity is otherwise sparse most days. One grant per
@@ -2385,7 +2332,7 @@ async def get_activity(limit: int = 30):
 
 # ========== Submissions ==========
 @app.get("/api/submissions/{user_id}/{mission_id}")
-async def get_submission(user_id: str, mission_id: str):
+async def get_submission(mission_id: str, user_id: str = Depends(require_self)):
     """The learner's own reflection for one mission -- text, when it was
     submitted. Feeds the Vault retrospective screen, which needed a way to
     show what the learner actually wrote, not just the timeline's
@@ -2408,7 +2355,7 @@ async def get_submission(user_id: str, mission_id: str):
 
 # ========== Timeline ==========
 @app.get("/api/timeline/{user_id}/{mission_id}")
-async def get_timeline(user_id: str, mission_id: str):
+async def get_timeline(mission_id: str, user_id: str = Depends(require_self)):
     """The learner-timeline projection (submitted/processing/ai_analysis/
     teacher_review steps + insights) that workers.py's SEARCH & TIMELINE
     WORKER maintains -- UI_SPEC.md's mission brief/debrief screens poll this
@@ -2444,8 +2391,8 @@ async def get_timeline(user_id: str, mission_id: str):
 async def add_peer_insight(
     target_user_id: str,
     mission_id: str,
-    from_user_id: str,
     text: str = Form(...),
+    from_user_id: str = Depends(get_current_user),
 ):
     """A classmate leaves feedback on someone else's mission work -- the
     peer half of CONCEPTS.md's Insight concept ("feedback from AI Coach,
@@ -2578,7 +2525,7 @@ async def get_npc_lines():
 
 
 @app.get("/api/minecraft/link/{user_id}")
-async def get_minecraft_link(user_id: str):
+async def get_minecraft_link(user_id: str = Depends(require_self)):
     """Get Minecraft link for a user"""
     try:
         link = db_fetch_one(
@@ -2623,9 +2570,9 @@ async def list_mc_quests(campaign_id: Optional[str] = None):
 @app.post("/api/mc-quests/{quest_id}/submit")
 async def submit_quest_evidence(
     quest_id: str,
-    user_id: str,
     observation_text: str = Form(None),
-    screenshot: UploadFile = File(None)
+    screenshot: UploadFile = File(None),
+    user_id: str = Depends(get_current_user),
 ):
     """Submit evidence for a Minecraft quest"""
     try:
@@ -2688,7 +2635,7 @@ async def submit_quest_evidence(
 
 # ========== B1llbot Chat ==========
 @app.post("/api/billbot/chat")
-async def billbot_chat(user_id: str, message: str):
+async def billbot_chat(message: str, user_id: str = Depends(require_self)):
     """Chat with B1llbot"""
     try:
         # Behavioral achievement trigger (GAME_DESIGN.md §4.1): Curiosity
@@ -2819,7 +2766,7 @@ async def minecraft_status():
 
 
 @app.get("/api/mc-arena/{user_id}")
-async def get_arena_progress(user_id: str):
+async def get_arena_progress(user_id: str = Depends(require_self)):
     """Claude's Halyard Mob Arena best-wave reached -- bridge-owned table
     (see check_arena_progress in bridge.py), read-only here."""
     row = db_fetch_one("SELECT best_wave FROM mc_arena_best WHERE user_id = %s::uuid", (user_id,))
@@ -2827,7 +2774,7 @@ async def get_arena_progress(user_id: str):
 
 
 @app.get("/api/mc-gauntlet/{user_id}")
-async def get_gauntlet_progress(user_id: str):
+async def get_gauntlet_progress(user_id: str = Depends(require_self)):
     """The Mob Gauntlet best-wave reached -- bridge-owned table (see
     check_gauntlet_progress in bridge.py), read-only here."""
     row = db_fetch_one("SELECT best_wave FROM mc_gauntlet_best WHERE user_id = %s::uuid", (user_id,))
@@ -2880,25 +2827,32 @@ def _mint_pairing_token(user_id: str) -> Optional[str]:
 
 
 @app.get("/api/companion/info")
-async def companion_info(request: Request, hint_host: Optional[str] = None, user_id: Optional[str] = None):
+async def companion_info(request: Request, hint_host: Optional[str] = None, user_id: str = Depends(get_current_user)):
+    """user_id now always comes from the caller's own verified session, not
+    a query param -- previously any unauthenticated caller could pass
+    ?user_id=<anyone> and get back a pairing token for that person's
+    account (see companion_qr's docstring)."""
     url = _companion_url(request, hint_host)
-    if user_id:
-        token = _mint_pairing_token(user_id)
-        if token:
-            url += f"?pair={token}"
+    token = _mint_pairing_token(user_id)
+    if token:
+        url += f"?pair={token}"
     return {"url": url, "scannable": not url.startswith("http://localhost") and not url.startswith("http://127.")}
 
 
 @app.get("/api/companion/qr.svg")
-async def companion_qr(request: Request, user_id: Optional[str] = None, hint_host: Optional[str] = None):
+async def companion_qr(request: Request, hint_host: Optional[str] = None, user_id: str = Depends(get_current_user)):
+    """This QR is a pairing token minted for whoever calls it -- previously
+    that was any client-supplied user_id, so anyone who knew or guessed a
+    UUID could render a QR that logged a phone in as that person with no
+    credential check at all. Now it's always the logged-in caller's own
+    session."""
     import io
     import qrcode
     import qrcode.image.svg
     url = _companion_url(request, hint_host)
-    if user_id:
-        token = _mint_pairing_token(user_id)
-        if token:
-            url += f"?pair={token}"
+    token = _mint_pairing_token(user_id)
+    if token:
+        url += f"?pair={token}"
     img = qrcode.make(url, image_factory=qrcode.image.svg.SvgPathImage, box_size=12)
     buf = io.BytesIO()
     img.save(buf)
@@ -2938,7 +2892,7 @@ SIGNAL_UNLOCK_XP = 150
 
 
 @app.post("/api/minigames/{game_key}/score")
-async def submit_minigame_score(game_key: str, user_id: str, score: int = Form(...)):
+async def submit_minigame_score(game_key: str, user_id: str = Depends(require_self), score: int = Form(...)):
     if game_key not in MINIGAME_KEYS:
         raise HTTPException(status_code=404, detail="Unknown training sim")
     try:
@@ -2980,7 +2934,7 @@ async def submit_minigame_score(game_key: str, user_id: str, score: int = Form(.
 
 
 @app.get("/api/minigames/{game_key}/leaderboard")
-async def minigame_leaderboard(game_key: str, user_id: Optional[str] = None, limit: int = 10):
+async def minigame_leaderboard(game_key: str, limit: int = 10, user_id: Optional[str] = Depends(get_current_user_optional)):
     if game_key not in MINIGAME_KEYS:
         raise HTTPException(status_code=404, detail="Unknown training sim")
     rows = db_fetch_all(
@@ -3004,7 +2958,7 @@ async def minigame_leaderboard(game_key: str, user_id: Optional[str] = None, lim
 
 
 @app.post("/api/minigames/signal/fragment")
-async def collect_signal_fragment(user_id: str, fragment: str = Form(...)):
+async def collect_signal_fragment(user_id: str = Depends(require_self), fragment: str = Form(...)):
     """One fragment of the Alchemy Signal found. Server-tracked (not just
     localStorage) so the unlock XP can't be re-farmed by clearing the
     browser, and so finding all 5 lands in the class feed."""
@@ -3052,7 +3006,7 @@ async def collect_signal_fragment(user_id: str, fragment: str = Form(...)):
 
 
 @app.get("/api/minigames/signal/{user_id}")
-async def signal_progress(user_id: str):
+async def signal_progress(user_id: str = Depends(require_self)):
     rows = db_fetch_all(
         "SELECT DISTINCT game_key FROM minigame_scores WHERE user_id = %s::uuid AND game_key LIKE 'signal:%%'",
         (user_id,)
@@ -3110,7 +3064,7 @@ async def team_wheel(team_id: str):
 
 # ========== Instructor Ops Deck ==========
 @app.get("/api/admin/cohort")
-async def admin_cohort(user_id: str):
+async def admin_cohort(user_id: str = Depends(get_current_admin)):
     """Per-learner overview for the instructor: level/XP, missions done,
     last activity, and what's waiting on the teacher. Same unprotected-dev
     status as the rest of /api/admin (see the release routes' note)."""
@@ -3203,183 +3157,17 @@ async def _fetch_classlist():
         return resp.json() if resp.status_code == 200 else None
 
 
-@app.get("/api/admin/roster")
-async def admin_roster():
-    """LMS classlist cross-referenced against evoke_identities and
-    team_members -- who's already an EVOKE Player, and which team (if any)
-    they're on."""
-    try:
-        classlist = await _fetch_classlist()
-        if classlist is None:
-            raise HTTPException(status_code=502, detail="Could not reach the LMS roster")
-
-        out = []
-        for student in classlist:
-            bs_id = int(student["Identifier"])
-            link = db_fetch_one(
-                "SELECT user_id FROM evoke_identities WHERE brightspace_user_id = %s", (bs_id,)
-            )
-            user_id = str(link[0]) if link else None
-            team = None
-            if user_id:
-                team_row = db_fetch_one(
-                    """SELECT t.id, t.name FROM teams t
-                       JOIN team_members tm ON tm.team_id = t.id
-                       WHERE tm.user_id = %s::uuid LIMIT 1""",
-                    (user_id,)
-                )
-                if team_row:
-                    team = {"team_id": str(team_row[0]), "name": team_row[1]}
-            out.append({
-                "brightspace_user_id": bs_id,
-                "display_name": student["DisplayName"],
-                "email": student["Email"],
-                "imported": user_id is not None,
-                "user_id": user_id,
-                "team": team,
-            })
-        return {"roster": out}
-    except HTTPException:
-        raise
-    except Exception as e:
-        raise HTTPException(status_code=400, detail=str(e))
-
-
-@app.post("/api/admin/roster/{brightspace_user_id}/import")
-async def admin_import_student(brightspace_user_id: int):
-    """Provisions an EVOKE Player for this LMS student ahead of their first
-    LTI launch, so an admin can assign them to a team right away.
-    Idempotent -- importing an already-linked student returns their
-    existing user_id, no duplicate row."""
-    try:
-        classlist = await _fetch_classlist()
-        student = next((s for s in (classlist or []) if int(s["Identifier"]) == brightspace_user_id), None)
-        if not student:
-            raise HTTPException(status_code=404, detail="Student not found on LMS roster")
-
-        user_id = await get_or_create_evoke_player(
-            async_db_pool, brightspace_user_id, student["Email"], student["DisplayName"], "learner"
-        )
-        if not user_id:
-            raise HTTPException(status_code=500, detail="Failed to provision EVOKE Player")
-        return {"status": "ok", "user_id": user_id}
-    except HTTPException:
-        raise
-    except Exception as e:
-        raise HTTPException(status_code=400, detail=str(e))
-
-
-@app.get("/api/admin/teams")
-async def admin_list_teams():
-    try:
-        teams = db_fetch_all("SELECT id, name FROM teams ORDER BY name")
-        out = []
-        for tid, name in teams:
-            members = db_fetch_all(
-                """SELECT u.id, u.display_name, u.email FROM team_members tm
-                   JOIN users u ON u.id = tm.user_id WHERE tm.team_id = %s::uuid
-                   ORDER BY u.display_name""",
-                (tid,)
-            )
-            out.append({
-                "team_id": str(tid), "name": name,
-                "members": [{"user_id": str(m[0]), "display_name": m[1], "email": m[2]} for m in members],
-            })
-        return {"teams": out}
-    except Exception as e:
-        raise HTTPException(status_code=400, detail=str(e))
-
-
-@app.post("/api/admin/teams")
-async def admin_create_team(name: str = Form(...)):
-    try:
-        org_row = db_fetch_one("SELECT id FROM organizations LIMIT 1")
-        if not org_row:
-            raise HTTPException(status_code=500, detail="No organization configured")
-        team_id = str(uuid.uuid4())
-        db_execute(
-            "INSERT INTO teams (id, org_id, name) VALUES (%s::uuid, %s::uuid, %s)",
-            (team_id, org_row[0], name)
-        )
-        return {"status": "ok", "team_id": team_id}
-    except HTTPException:
-        raise
-    except Exception as e:
-        raise HTTPException(status_code=400, detail=str(e))
-
-
-@app.post("/api/admin/teams/{team_id}/members")
-async def admin_add_team_member(team_id: str, user_id: str = Form(...)):
-    """A learner belongs to exactly one team (matching how the curriculum
-    is actually run, and what the team-evidence-submission model assumes)
-    -- assigning here always means *moving* them, not adding a second
-    membership, so any prior team_members row is cleared first."""
-    try:
-        db_execute("DELETE FROM team_members WHERE user_id = %s::uuid", (user_id,))
-        db_execute(
-            "INSERT INTO team_members (team_id, user_id) VALUES (%s::uuid, %s::uuid)",
-            (team_id, user_id)
-        )
-        return {"status": "ok"}
-    except Exception as e:
-        raise HTTPException(status_code=400, detail=str(e))
-
-
-@app.delete("/api/admin/teams/{team_id}/members/{user_id}")
-async def admin_remove_team_member(team_id: str, user_id: str):
-    try:
-        db_execute(
-            "DELETE FROM team_members WHERE team_id = %s::uuid AND user_id = %s::uuid",
-            (team_id, user_id)
-        )
-        return {"status": "ok"}
-    except Exception as e:
-        raise HTTPException(status_code=400, detail=str(e))
-
-
-@app.post("/api/admin/playtest-user")
-async def admin_create_playtest_user(
-    email: str = Form(...),
-    display_name: str = Form(...),
-    team_name: str = Form(...),
-):
-    """Direct playtester provisioning -- deliberately bypasses LTI/Brightspace
-    entirely (no evoke_identities row) for cohorts that are just testing the
-    player experience via a magic ?login= link, not the LMS integration.
-    Idempotent on (email, org_id); re-running for the same email just moves
-    them to team_name if it changed."""
-    try:
-        org_row = db_fetch_one("SELECT id FROM organizations LIMIT 1")
-        if not org_row:
-            raise HTTPException(status_code=500, detail="No organization configured")
-        org_id = org_row[0]
-
-        existing = db_fetch_one("SELECT id FROM users WHERE email = %s AND org_id = %s::uuid", (email, org_id))
-        if existing:
-            user_id = str(existing[0])
-            db_execute("UPDATE users SET display_name = %s WHERE id = %s::uuid", (display_name, user_id))
-        else:
-            user_id = str(uuid.uuid4())
-            db_execute(
-                "INSERT INTO users (id, org_id, display_name, email, role) VALUES (%s::uuid, %s::uuid, %s, %s, 'learner')",
-                (user_id, org_id, display_name, email)
-            )
-
-        team_row = db_fetch_one("SELECT id FROM teams WHERE name = %s AND org_id = %s::uuid", (team_name, org_id))
-        if team_row:
-            team_id = str(team_row[0])
-        else:
-            team_id = str(uuid.uuid4())
-            db_execute("INSERT INTO teams (id, org_id, name) VALUES (%s::uuid, %s::uuid, %s)", (team_id, org_id, team_name))
-
-        db_execute("DELETE FROM team_members WHERE user_id = %s::uuid", (user_id,))
-        db_execute("INSERT INTO team_members (team_id, user_id) VALUES (%s::uuid, %s::uuid)", (team_id, user_id))
-
-        return {"status": "ok", "user_id": user_id, "team_id": team_id, "login_param": f"login={email}"}
-    except HTTPException:
-        raise
-    except Exception as e:
-        raise HTTPException(status_code=400, detail=str(e))
+# Manual roster-import (/api/admin/roster*), team CRUD (/api/admin/teams*),
+# and playtest-user provisioning used to live here. Removed: Brightspace is
+# now the sole source of truth for who exists (OAuth login provisioning,
+# evoke/identity.py) and which team they're on (Groups sync at login,
+# oauth_providers.py's _resolve_team_name -> identity.sync_team_membership)
+# -- Evoke Admin no longer manages users or teams directly, and
+# playtest-user's whole purpose (provisioning a non-Brightspace identity via
+# the ?login= magic link) went away with that link. If a non-Brightspace
+# smoke-test identity is ever needed again, that's a seed script run
+# against the database directly, not a live unauthenticated-by-design API
+# route.
 
 
 # ========== Stages & the Campaign Map (BUILD_PLAN_2 §2-3) ==========
@@ -3388,7 +3176,7 @@ STAGE_STARS = {1: "★", 2: "★★", 3: "★★★"}
 
 
 @app.post("/api/admin/missions/{mission_id}/stage")
-async def admin_set_stage(mission_id: str, stage: int = Form(...)):
+async def admin_set_stage(mission_id: str, stage: int = Form(...), admin_id: str = Depends(get_current_admin)):
     """Stages are instructor pedagogy config (Nathan's decision: cadence
     must flex with classes/workshops), decoupled from the LMS week the
     stage column defaults to. Same unprotected-dev status as /api/admin."""
@@ -3399,7 +3187,7 @@ async def admin_set_stage(mission_id: str, stage: int = Form(...)):
 
 
 @app.get("/api/progress-map/{user_id}")
-async def progress_map(user_id: str):
+async def progress_map(user_id: str = Depends(require_self)):
     """The 'what done means' infographic's data: missions grouped by
     admin-configured stage; per stage a completion ring (submitted/total)
     and a quality grade (MIN best-tier across submitted missions -- a
@@ -3487,7 +3275,7 @@ async def progress_map(user_id: str):
 # Transformation badge check) is fast and local, so it still happens
 # inline -- only the AI call moved off the request path.
 @app.post("/api/reflection")
-async def post_reflection(user_id: str, text: str = Form(...)):
+async def post_reflection(user_id: str = Depends(require_self), text: str = Form(...)):
     """The daily Field Report: one reflection a day, answered with a Word
     of Wisdom in B1llbot's voice, generated async and pushed live once
     ready (see workers.py's FIELD REPORT WORKER + evoke/live.py). Doubles
@@ -3538,7 +3326,7 @@ async def post_reflection(user_id: str, text: str = Form(...)):
 
 
 @app.get("/api/reflections/{user_id}")
-async def get_reflections(user_id: str, limit: int = 60):
+async def get_reflections(user_id: str = Depends(require_self), limit: int = 60):
     rows = db_fetch_all(
         """SELECT reflection_date, text, wisdom FROM daily_reflections
            WHERE user_id = %s::uuid ORDER BY reflection_date DESC LIMIT %s""",
@@ -3556,7 +3344,7 @@ async def get_reflections(user_id: str, limit: int = 60):
 
 
 @app.get("/api/daily-objectives/{user_id}")
-async def get_daily_objectives(user_id: str):
+async def get_daily_objectives(user_id: str = Depends(require_self)):
     """Today's rotating checklist (console-player feedback: live games always
     greet you with a short list of "what do I do in the next 10 minutes" --
     we already have every mechanic behind these three, just never presented
@@ -3612,7 +3400,7 @@ async def companion_pair(token: str = Form(...)):
 
 # ========== Two-channel Minecraft linking (BUILD_PLAN_2 §8) ==========
 @app.post("/api/minecraft/link-code")
-async def create_link_code(user_id: str):
+async def create_link_code(user_id: str = Depends(require_self)):
     """Mint a short numeric code the learner types in-game as
     `/trigger evoke_link set <code>`. The bridge watches the trigger
     scoreboard, matches the code, and the phone confirms — two-channel
@@ -3634,7 +3422,7 @@ async def create_link_code(user_id: str):
 
 
 @app.get("/api/minecraft/link-request/{user_id}")
-async def get_link_request(user_id: str):
+async def get_link_request(user_id: str = Depends(require_self)):
     """The pending in-game match (bridge saw the code typed) awaiting the
     phone's confirm — polled by the Field Kit alongside the live push."""
     row = db_fetch_one(
@@ -3648,7 +3436,7 @@ async def get_link_request(user_id: str):
 
 
 @app.post("/api/minecraft/link-confirm")
-async def confirm_link(user_id: str, accept: bool = Form(...)):
+async def confirm_link(user_id: str = Depends(require_self), accept: bool = Form(...)):
     row = db_fetch_one(
         """SELECT code, minecraft_username FROM mc_link_codes
            WHERE user_id = %s::uuid AND status = 'matched' ORDER BY created_at DESC LIMIT 1""",
@@ -3684,7 +3472,7 @@ KIT_COMPLETE_XP = 100
 
 
 @app.post("/api/minigames/kit/piece")
-async def collect_kit_piece(user_id: str, piece: str = Form(...)):
+async def collect_kit_piece(user_id: str = Depends(require_self), piece: str = Form(...)):
     if piece not in KIT_PIECES:
         raise HTTPException(status_code=404, detail="No such component")
     game_key = f"kit:{piece}"
@@ -3729,7 +3517,7 @@ async def collect_kit_piece(user_id: str, piece: str = Form(...)):
 
 
 @app.get("/api/minigames/kit/{user_id}")
-async def kit_progress(user_id: str):
+async def kit_progress(user_id: str = Depends(require_self)):
     rows = db_fetch_all(
         "SELECT DISTINCT game_key FROM minigame_scores WHERE user_id = %s::uuid AND game_key LIKE 'kit:%%'",
         (user_id,)
@@ -3755,7 +3543,7 @@ SIGIL_GLYPHS = ["⬡", "◈", "✦", "☄", "⚙", "♜", "⟁", "◭", "⬢", "
 
 
 @app.post("/api/avatar/{user_id}")
-async def upload_avatar(user_id: str, file: UploadFile = File(...)):
+async def upload_avatar(user_id: str = Depends(require_self), file: UploadFile = File(...)):
     if not (file.content_type or "").startswith("image/"):
         raise HTTPException(status_code=400, detail="Avatars must be an image")
     data = await file.read()
@@ -3783,13 +3571,13 @@ async def get_avatar(user_id: str):
 
 
 @app.delete("/api/avatar/{user_id}")
-async def delete_avatar(user_id: str):
+async def delete_avatar(user_id: str = Depends(require_self)):
     db_execute("UPDATE users SET avatar_object_key = NULL WHERE id = %s::uuid", (user_id,))
     return {"status": "removed"}
 
 
 @app.post("/api/profile/{user_id}/sigil")
-async def set_sigil(user_id: str, glyph: str = Form(...), hue: int = Form(...)):
+async def set_sigil(user_id: str = Depends(require_self), glyph: str = Form(...), hue: int = Form(...)):
     if glyph not in SIGIL_GLYPHS:
         raise HTTPException(status_code=400, detail="Pick a sigil from the curated set")
     hue = max(0, min(360, hue))
@@ -3880,7 +3668,7 @@ async def get_gear(user_id: str):
 
 
 @app.post("/api/gear/{user_id}/equip")
-async def equip_gear(user_id: str, keys: str = Form(...)):
+async def equip_gear(user_id: str = Depends(require_self), keys: str = Form(...)):
     """Equip up to 3 unlocked gear items for display on the Dossier."""
     try:
         wanted = [k for k in json.loads(keys) if isinstance(k, str)][:3]

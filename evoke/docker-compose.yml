@@ -50,6 +50,15 @@ services:
       MINECRAFT_PUBLIC_PORT_BEDROCK: ${MINECRAFT_PUBLIC_PORT_BEDROCK:-19132}
       ADMIN_USERNAME: ${ADMIN_USERNAME:-admin}
       ADMIN_PASSWORD: ${ADMIN_PASSWORD:-devsecret123}
+      # Real session hardening (evoke/auth_session.py) -- signs the session
+      # cookie every route now relies on via get_current_user/require_self/
+      # get_current_admin, instead of trusting a client-supplied user_id.
+      SESSION_SECRET: ${SESSION_SECRET:-dev-only-insecure-secret-change-me}
+      # The one non-Brightspace login (POST /api/admin/login), for reaching
+      # #/admin without an LMS account. Unset EVOKE_ADMIN_PASSWORD_HASH ->
+      # disabled, not silently open -- see scripts/hash_admin_password.py.
+      EVOKE_ADMIN_USERNAME: ${EVOKE_ADMIN_USERNAME:-admin}
+      EVOKE_ADMIN_PASSWORD_HASH: ${EVOKE_ADMIN_PASSWORD_HASH:-}
       # .env.example has documented this since it was added, but it was
       # never actually wired through here -- setting it in .env silently
       # did nothing; main.py's _companion_url() never saw it.

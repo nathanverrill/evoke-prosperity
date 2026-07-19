@@ -162,29 +162,16 @@
           regs.forEach((r) => r.unregister());
         }).catch(() => {});
       }
-      // Playtest magic link: ?login=<email> always wins over whatever's in
-      // localStorage, same as app.js's ensureLoggedIn() -- so a shared/reused
-      // device or a stale prior session can't leave a tester on the wrong
-      // account, and a fresh device never silently falls through to
-      // dev-login's Player One default (see /api/dev-login's no-params case).
-      const loginEmail = new URLSearchParams(location.search).get("login");
-      if (loginEmail) {
-        const who = await fetch(`/api/dev-login?email=${encodeURIComponent(loginEmail)}`, { method: "POST" }).then(r => r.json());
-        localStorage.setItem("fieldkit_user_id", who.user_id);
-        localStorage.setItem("fieldkit_display_name", who.display_name);
-        const url = new URL(location.href);
-        url.searchParams.delete("login");
-        history.replaceState({}, "", url);
-      }
       // Pairing (BUILD_PLAN_2 §7): a ?pair= token from the Hub QR registers
-      // this phone as the scanning user — no login. Falls back to a stored
-      // pairing, then dev-login. Committed silently, no "Yes, that's me?"
-      // step: the token is already scoped to a specific already-logged-in
-      // user (minted by /api/companion/info for that exact user_id) -- the
-      // site/QR already knows who this is, so asking again was redundant.
-      // The old confirm step existed for a "someone else scans your QR off
-      // a shared screen" threat model; explicitly deferred for later rather
-      // than solved here. Name still shows -- see agent-line below.
+      // this phone as the scanning user -- no login. The token is minted by
+      // an authenticated web session (evoke/main.py's companion_info/
+      // companion_qr, now always the caller's own verified session, never a
+      // client-supplied user_id) and is single-use/short-lived
+      // (companion_pair). This -- or falling through to local-dev-login
+      // below -- is the phone's only path to an identity now; the old
+      // ?login=<email> shortcut is gone along with playtest-user
+      // provisioning, since a phone has no Brightspace session of its own
+      // to hand off through a magic link.
       const pairToken = new URLSearchParams(location.search).get("pair");
       if (pairToken) {
         try {
@@ -202,9 +189,17 @@
       userId = localStorage.getItem("fieldkit_user_id");
       displayName = localStorage.getItem("fieldkit_display_name");
       if (!userId) {
-        const res = await fetch("/api/dev-login", { method: "POST" }).then(r => r.json());
-        userId = res.user_id;
-        displayName = res.display_name;
+        try {
+          const res = await fetch("/api/dev-login", { method: "POST" }).then(r => {
+            if (!r.ok) throw new Error("no local dev-login available");
+            return r.json();
+          });
+          userId = res.user_id;
+          displayName = res.display_name;
+        } catch (e) {
+          document.getElementById("agent-line").textContent = "Scan the Hub QR on your computer to pair this device.";
+          return;
+        }
       }
       document.getElementById("agent-line").textContent = `Agent: ${displayName || "…"}`;
       fetch(`/api/minigames/kit/piece?user_id=${userId}`, { method: "POST", body: (() => { const f = new FormData(); f.append("piece", "cap"); return f; })() }).catch(() => {});
