@@ -27,6 +27,7 @@ services:
       BRIGHTSPACE_CLIENT_ID: ${BRIGHTSPACE_CLIENT_ID:-}
       BRIGHTSPACE_CLIENT_SECRET: ${BRIGHTSPACE_CLIENT_SECRET:-}
       BRIGHTSPACE_TENANT_URL: ${BRIGHTSPACE_TENANT_URL:-}
+      BRIGHTSPACE_ORG_UNIT_ID: ${BRIGHTSPACE_ORG_UNIT_ID:-}
       # OAuth 2.0 login (evoke/oauth_providers.py) -- like BRIGHTSPACE_CLIENT_ID
       # above, these were sitting in .env but never reaching this container
       # since this block is an explicit allowlist, not env_file: .env.

@@ -75,6 +75,11 @@ class BrightspaceOAuthProvider(AuthProvider):
         # shape hasn't changed since.
         self.whoami_base = os.getenv("BRIGHTSPACE_TENANT_URL")
         self.whoami_version = os.getenv("BRIGHTSPACE_WHOAMI_VERSION", "1.43")
+        # Team sync (Brightspace Groups -> Evoke teams) is optional -- a
+        # login still succeeds without it, just with no team assigned, same
+        # as a group-lookup failure below. Set to the course's org unit ID
+        # (visible in its Brightspace URL) to turn it on.
+        self.org_unit_id = os.getenv("BRIGHTSPACE_ORG_UNIT_ID")
 
     def is_configured(self) -> bool:
         return bool(self.client_id and self.client_secret and self.redirect_uri and self.whoami_base)
@@ -119,12 +124,14 @@ class BrightspaceOAuthProvider(AuthProvider):
                 )
             who = whoami_resp.json()
 
-        # whoami's Identifier is the same underlying numeric Brightspace user
-        # ID as LTI's `sub` claim, just returned as a string -- consistent
-        # with evoke_identities.brightspace_user_id (INTEGER).
-        subject = who.get("Identifier")
-        if not subject:
-            raise OAuthLoginError("Brightspace whoami response had no Identifier")
+            # whoami's Identifier is the same underlying numeric Brightspace
+            # user ID as LTI's `sub` claim, just returned as a string --
+            # consistent with evoke_identities.brightspace_user_id (INTEGER).
+            subject = who.get("Identifier")
+            if not subject:
+                raise OAuthLoginError("Brightspace whoami response had no Identifier")
+
+            team_name = await self._resolve_team_name(client, access_token, int(subject))
 
         display_name = " ".join(filter(None, [who.get("FirstName"), who.get("LastName")]))
         display_name = display_name or who.get("UniqueName") or f"User {subject}"
@@ -139,7 +146,37 @@ class BrightspaceOAuthProvider(AuthProvider):
             # whoami carries no LTI-style roles claim -- same default fallback
             # BrightspaceLTIProvider._map_lti_roles uses when a launch has none.
             "role": "learner",
+            "team_name": team_name,
         }
+
+    async def _resolve_team_name(self, client: httpx.AsyncClient, access_token: str, brightspace_user_id: int):
+        """Brightspace's own Groups feature is the source of truth for team
+        assignment -- no separate Evoke-side admin step. Looks across every
+        Group Category in the configured course for a group this user is
+        enrolled in; returns that group's Name, or None (login still
+        succeeds, just with no team) if unconfigured, the user isn't in any
+        group, or the lookup fails for any reason -- team sync is a
+        best-effort enrichment, never a login blocker."""
+        if not self.org_unit_id:
+            return None
+        headers = {"Authorization": f"Bearer {access_token}"}
+        base = f"{self.whoami_base}/d2l/api/lp/{self.whoami_version}/{self.org_unit_id}/groupcategories/"
+        try:
+            cat_resp = await client.get(base, headers=headers)
+            if cat_resp.status_code != 200:
+                logger.warning(f"Brightspace group categories lookup failed: {cat_resp.status_code} {cat_resp.text}")
+                return None
+            for category in cat_resp.json():
+                groups_resp = await client.get(f"{base}{category['GroupCategoryId']}/groups/", headers=headers)
+                if groups_resp.status_code != 200:
+                    logger.warning(f"Brightspace groups lookup for category {category.get('Name')} failed: {groups_resp.status_code} {groups_resp.text}")
+                    continue
+                for group in groups_resp.json():
+                    if brightspace_user_id in (group.get("Enrollments") or []):
+                        return group.get("Name")
+        except (httpx.HTTPError, KeyError, ValueError) as e:
+            logger.warning(f"Brightspace group lookup failed for user {brightspace_user_id}: {e}")
+        return None
 
 
 _PROVIDERS = {"brightspace": BrightspaceOAuthProvider}

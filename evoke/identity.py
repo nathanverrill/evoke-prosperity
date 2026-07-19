@@ -62,3 +62,48 @@ async def get_or_create_evoke_player(
     except asyncpg.PostgresError as e:
         logger.error(f"Database error creating/finding EVOKE Player: {e}")
         return None
+
+
+async def sync_team_membership(
+    db_pool: asyncpg.Pool,
+    org_id: str,
+    user_id: str,
+    team_name: Optional[str],
+) -> Optional[str]:
+    """Resolves (creating on first sight) the Evoke team matching a
+    Brightspace Group's name, and moves this user onto it -- Brightspace
+    Groups are the source of truth for team assignment (see
+    evoke/oauth_providers.py's _resolve_team_name), not a separate
+    Evoke-side admin step. Same delete-then-insert 'always moves, never a
+    second membership' pattern as /api/admin/teams/{id}/members. A no-op
+    (returns None) if team_name is falsy -- e.g. team sync isn't configured,
+    or this Brightspace user isn't in any group yet."""
+    if not team_name:
+        return None
+    try:
+        team_row = await db_pool.fetchrow(
+            """INSERT INTO teams (org_id, name) VALUES ($1::uuid, $2)
+               ON CONFLICT (org_id, name) DO UPDATE SET name = teams.name
+               RETURNING id""",
+            org_id, team_name,
+        )
+        team_id = str(team_row["id"])
+
+        current = await db_pool.fetchrow(
+            "SELECT team_id FROM team_members WHERE user_id = $1::uuid", user_id,
+        )
+        if current and str(current["team_id"]) == team_id:
+            return team_id
+
+        async with db_pool.acquire() as conn:
+            async with conn.transaction():
+                await conn.execute("DELETE FROM team_members WHERE user_id = $1::uuid", user_id)
+                await conn.execute(
+                    "INSERT INTO team_members (team_id, user_id) VALUES ($1::uuid, $2::uuid)",
+                    team_id, user_id,
+                )
+        return team_id
+
+    except asyncpg.PostgresError as e:
+        logger.error(f"Team sync failed for user {user_id} -> '{team_name}': {e}")
+        return None

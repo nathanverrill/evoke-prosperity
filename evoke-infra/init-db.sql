@@ -50,7 +50,14 @@ CREATE TABLE teams (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     org_id UUID NOT NULL REFERENCES organizations(id),
     name VARCHAR(255) NOT NULL,
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    -- evoke/identity.py's sync_team_membership targets this in its
+    -- ON CONFLICT (org_id, name) clause, to get-or-create a team matching a
+    -- Brightspace Group's name -- added live via ALTER TABLE on the running
+    -- dev Postgres 2026-07-18 (see the users(email, org_id) constraint above
+    -- for why that matters: an ON CONFLICT clause with no matching
+    -- constraint is invalid SQL, not a silent no-op).
+    UNIQUE(org_id, name)
 );
 
 -- Team Members

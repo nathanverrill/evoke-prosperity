@@ -25,7 +25,7 @@ from evoke.lms import get_brightspace_lms
 from evoke.lti import BrightspaceLTIProvider
 from evoke import skills_framework, progression, world_state, gear as gear_catalog
 from evoke.live import live_hub
-from evoke.identity import get_or_create_evoke_player
+from evoke.identity import get_or_create_evoke_player, sync_team_membership
 from evoke.oauth_providers import get_auth_provider, OAuthLoginError
 
 logger = logging.getLogger(__name__)
@@ -831,8 +831,11 @@ async def auth_brightspace_callback(request: Request, code: str = None, state: s
     """Brightspace redirects the browser here after the user authorizes.
     Exchanges the code, resolves the real user via whoami, provisions/finds
     their EVOKE Player (the same shared path LTI launches and admin
-    roster-import already use -- evoke/identity.py), then hands off to the
-    SPA's existing playtest magic-link convention (?login=<email>, see
+    roster-import already use -- evoke/identity.py), syncs their team from
+    whichever Brightspace Group they're enrolled in (Brightspace is the
+    source of truth for team assignment, not a separate Evoke-side admin
+    step -- see oauth_providers.py's _resolve_team_name), then hands off to
+    the SPA's existing playtest magic-link convention (?login=<email>, see
     controller.js's seedFromBackend) rather than inventing a second
     identity hand-off mechanism."""
     provider = get_auth_provider()
@@ -862,6 +865,10 @@ async def auth_brightspace_callback(request: Request, code: str = None, state: s
     )
     if not evoke_user_id:
         raise HTTPException(status_code=500, detail="Failed to provision EVOKE Player")
+
+    org_row = await async_db_pool.fetchrow("SELECT id FROM organizations LIMIT 1")
+    if org_row and profile.get("team_name"):
+        await sync_team_membership(async_db_pool, str(org_row["id"]), evoke_user_id, profile["team_name"])
 
     redirect_response = RedirectResponse(url="/?" + urlencode({"login": profile["email"]}), status_code=302)
     redirect_response.delete_cookie("oauth_state")
@@ -1491,7 +1498,7 @@ async def submit_evidence(
 
         team_id = _get_user_team(user_id)
         if not team_id:
-            raise HTTPException(status_code=400, detail="You're not on a team yet -- ask an admin to assign you one")
+            raise HTTPException(status_code=400, detail="You're not on a team yet -- ask your teacher to add you to a group in Brightspace")
 
         submission_id = str(uuid.uuid4())
 
@@ -1909,7 +1916,7 @@ async def submit_reflection(
 
         team_id = _get_user_team(user_id)
         if not team_id:
-            raise HTTPException(status_code=400, detail="You're not on a team yet -- ask an admin to assign you one")
+            raise HTTPException(status_code=400, detail="You're not on a team yet -- ask your teacher to add you to a group in Brightspace")
 
         db_execute(
             """INSERT INTO mission_reflections (user_id, mission_id, team_id, reflection)
