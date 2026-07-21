@@ -99,6 +99,25 @@ a submission, a future image classifier) needs, before a district pilot:
 - Self-hosted/open-weight models remain the safer default until that
   guarantee exists for whatever hosted vendor is in play.
 
+**Confirmed live, 2026-07-21 — today's actual chain has no third-party hop
+at all.** Traced every hop from `main.py` to wherever tokens actually get
+generated, not just the config default: `AI_GATEWAY_URL` (`main.py`) →
+`http://litellm:4000` (in-network) → `evoke-infra/litellm/config.yaml`'s
+`api_base: http://open-webui:8080/api` (in-network) → OpenWebUI's own
+backend, which `evoke-infra/docker-compose.yml` points at
+`OLLAMA_BASE_URL` (default `http://ollama:11434`, this project's own
+container) unless overridden. No `.env` in this repo overrides any of
+those three hops today. Concretely: as currently deployed, the
+no-training-on-data requirement above is **already true** — every model
+call stays inside containers this project runs itself, on an open-weight
+model (`OLLAMA_MODEL`, default `qwen3:8b`), never leaving the box. This
+doesn't retroactively satisfy the *written, disclosed-to-the-district*
+half of the requirement (still needs stating in the district agreement,
+not just being true in the compose file), and it stops being true the
+moment anyone points `OPENWEBUI_BASE_URL`/`OLLAMA_BASE_URL` at a hosted
+vendor — re-check this chain before treating the guarantee as settled if
+that ever changes.
+
 ---
 
 ## 4. AI can reject — AI cannot approve

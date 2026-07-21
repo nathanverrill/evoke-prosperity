@@ -104,11 +104,17 @@ whole list end to end.
       to include certain trafficking/enticement offenses, not just CSAM
       itself — the retention/deletion tooling this list requires elsewhere
       (P1) needs a carve-out for whatever this process ends up preserving.
-- [ ] **Confirm the actual LLM backend behind `OPENWEBUI_BASE_URL` and get
-      a written no-training-on-data guarantee**, or switch to a
-      self-hosted model — resolves `GAPS.md` line 35. Blocking because
-      B1llbot chat and AI-Coach review both already send real student text
-      to whatever that endpoint resolves to, today.
+- [ ] **Get a *written, district-facing* no-training-on-data guarantee on
+      record** — resolves `GAPS.md` line 35. **Technical half confirmed
+      live 2026-07-21** (`SAFETY.md` §3): traced `AI_GATEWAY_URL` →
+      `litellm` → `open-webui` → `OLLAMA_BASE_URL` end to end: every hop
+      stays inside this project's own containers, on an open-weight model,
+      no `.env` override pointing any of it at a hosted vendor today. What's
+      still open isn't "which vendor" (there isn't one) — it's that "true in
+      the compose file" and "stated in the district agreement" are
+      different claims, and only the first one exists. Still blocking until
+      the second one does; also needs re-checking if `OPENWEBUI_BASE_URL`/
+      `OLLAMA_BASE_URL` ever get pointed at a hosted backend.
 - [ ] **Encryption-in-transit/at-rest audit** — confirm this is actually
       true in the current deployment, not assumed true because it's the
       obvious default.

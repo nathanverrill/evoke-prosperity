@@ -232,6 +232,13 @@ services:
       OPENWEBUI_API_KEY: ${OPENWEBUI_API_KEY:-}
       PRESIDIO_ANALYZER_API_BASE: http://presidio-analyzer:3000
       PRESIDIO_ANONYMIZER_API_BASE: http://presidio-anonymizer:3000
+      # Hardcoded, not ${LITELLM_LOG:-INFO} -- that pattern would still let a
+      # stray LITELLM_LOG=DEBUG sitting in someone's .env silently win. DEBUG
+      # here prints the pre-mask request text to container stdout, including
+      # whatever PII Presidio is about to redact -- confirmed live while
+      # building the guardrail gateway (GUARDRAILS_PLAN.md). Fine as a
+      # one-off diagnostic; must never be this container's normal level.
+      LITELLM_LOG: INFO
     command: ["--config", "/app/config.yaml", "--port", "4000"]
     ports:
       - "${PORT_LITELLM:-4000}:4000"
