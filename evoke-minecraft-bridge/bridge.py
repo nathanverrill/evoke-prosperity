@@ -986,10 +986,16 @@ async def quest_trigger_loop():
                         "reason": "quest_completed",
                         "quest_id": str(quest_id),
                     })
-                    payload = json.dumps([
-                        {"text": "✔ ", "color": "green"},
-                        {"text": f"Quest logged: {title} — the Basin saw you do it.", "color": "yellow"},
-                    ])
+                    if kind == "basin_archive":
+                        payload = json.dumps([
+                            {"text": "◈ ", "color": "aqua"},
+                            {"text": f"Billbot recovered a memory: {title.replace('Archive: ', '')} — check your Field Tablet.", "color": "yellow"},
+                        ])
+                    else:
+                        payload = json.dumps([
+                            {"text": "✔ ", "color": "green"},
+                            {"text": f"Quest logged: {title} — the Basin saw you do it.", "color": "yellow"},
+                        ])
                     rcon.execute_command(f"tellraw {username} {payload}")
                     print(f"✓ Scoreboard trigger: {username} completed '{title}' ({objective}>={threshold}, score {score})")
             finally:
@@ -1098,6 +1104,195 @@ async def link_code_loop():
                 rcon.close()
         except Exception as e:
             print(f"Link code loop error: {e}")
+
+
+# ---------------------------------------------------------------------------
+# Basin Archive world-progress detection + the Keel ticket office
+# ---------------------------------------------------------------------------
+# The web app seeds a 'basin_archive' quest chain (main.py) whose triggers
+# are plain scoreboard objectives; this loop is what actually sets them.
+# gotCoal is set by the world itself (verified command blocks at
+# (-103,61,152)); the rest are bridge-observed: basinSeen when a linked
+# player is online at all, and the position flags when a linked player is
+# physically inside a named area. quest_trigger_loop then completes the
+# quests through the normal pipeline — this loop never touches Postgres.
+
+PROGRESS_INTERVAL = 15
+PROGRESS_OBJECTIVES = ("basinSeen", "keelVisited", "minesVisited", "halyardVisited")
+# (objective, (x1,y1,z1), (x2,y2,z2)) — inclusive world-coordinate boxes,
+# all verified against the real world content (MINECRAFT_WORLD_MAP.md):
+# Keel town bowl, the mines entrance street, the mines rooms themselves
+# (players get teleported to y≈40, x -132..-104), and Halyard's day-job
+# area including the train arrival point (5,93,96).
+POSITION_FLAGS = (
+    ("keelVisited", (-160, 40, 130), (30, 95, 240)),
+    ("minesVisited", (-152, 55, 156), (-126, 78, 182)),
+    ("minesVisited", (-145, 20, -125), (-90, 50, -70)),
+    ("halyardVisited", (-25, 80, 40), (60, 110, 135)),
+)
+
+
+def _player_pos(rcon: "RCONClient", player: str):
+    """[x, y, z] floats, or None. Response shape: '<player> has the
+    following entity data: [12.5d, 64.0d, -3.25d]'"""
+    resp = rcon.execute_command(f"data get entity {player} Pos")
+    if "[" not in resp:
+        return None
+    try:
+        coords = resp.split("[", 1)[1].split("]", 1)[0]
+        return [float(c.strip().rstrip("d")) for c in coords.split(",")]
+    except (ValueError, IndexError):
+        return None
+
+
+async def world_progress_loop():
+    objectives_ready = False
+    while True:
+        try:
+            await asyncio.sleep(PROGRESS_INTERVAL)
+            rcon = _rcon()
+            if not rcon:
+                continue
+            try:
+                if not objectives_ready:
+                    for obj in PROGRESS_OBJECTIVES:
+                        rcon.execute_command(f"scoreboard objectives add {obj} dummy")
+                    objectives_ready = True
+                players = rcon.get_online_players()
+                if not players:
+                    continue
+                conn = get_db_connection()
+                try:
+                    linked = get_online_linked_players(conn, players)
+                finally:
+                    return_db_connection(conn)
+                for player in linked:
+                    rcon.execute_command(f"scoreboard players set {player} basinSeen 1")
+                    pos = _player_pos(rcon, player)
+                    if not pos:
+                        continue
+                    x, y, z = pos
+                    for obj, lo, hi in POSITION_FLAGS:
+                        if lo[0] <= x <= hi[0] and lo[1] <= y <= hi[1] and lo[2] <= z <= hi[2]:
+                            rcon.execute_command(f"scoreboard players set {player} {obj} 1")
+            finally:
+                rcon.close()
+        except Exception as e:
+            print(f"World progress loop error: {e}")
+
+
+# The Keel economy office: coal selling + the Halyard ticket. Both were
+# originally powered by the savs-common-economy mod's sign shops (the
+# "[Admin Shop] | Coal | Buying" signs still standing in the mines rooms,
+# and per the design docs "every coal sells back to Alpha's factory") —
+# the school deployment doesn't run that mod, so the signs are dead and the
+# train's paper ticket had no source at all. Until the mod is restored,
+# this loop is Alpha's factory:
+#   /trigger sellCoal  — sells every coal/coal block in inventory into the
+#                        vanilla `money` scoreboard (the same currency the
+#                        world's own Halyard machine already uses)
+#   /trigger buyTicket — 300 credits -> the minecraft:paper the train at
+#                        (-137,65,108) actually consumes
+# Works for ALL online players, linked or not — the town economy shouldn't
+# require a web account.
+
+TICKET_OBJECTIVE = "buyTicket"
+TICKET_PRICE = 100      # the original booth's price (shops.json: paper $100)
+SELL_OBJECTIVE = "sellCoal"
+COAL_PRICE = 1          # matches the mines' [Admin Shop] registration ($1/coal)
+COAL_BLOCK_PRICE = 9    # 9 coal worth
+ECONOMY_INTERVAL = 5
+
+
+def _mod_balance(rcon: "RCONClient", player: str):
+    """savs-common-economy balance via its console command. Response:
+    \"<player>'s balance: $1000.0\" -- None if the mod didn't answer."""
+    resp = rcon.execute_command(f"bal {player}")
+    if "balance:" not in resp:
+        return None
+    try:
+        return float(resp.split("balance:", 1)[1].strip().lstrip("$").replace(",", ""))
+    except ValueError:
+        return None
+
+
+def _clear_count(rcon: "RCONClient", player: str, item: str) -> int:
+    """Remove every <item> from the player and return how many were
+    removed. Response shapes: 'Removed N matching item(s) from player X'
+    or 'No items were found on player X'."""
+    resp = rcon.execute_command(f"clear {player} {item}")
+    if "Removed" not in resp:
+        return 0
+    try:
+        return int(resp.split("Removed", 1)[1].strip().split(" ", 1)[0])
+    except (ValueError, IndexError):
+        return 0
+
+
+async def ticket_office_loop():
+    objectives_ready = False
+    while True:
+        try:
+            await asyncio.sleep(ECONOMY_INTERVAL)
+            rcon = _rcon()
+            if not rcon:
+                continue
+            try:
+                if not objectives_ready:
+                    rcon.execute_command(f"scoreboard objectives add {TICKET_OBJECTIVE} trigger")
+                    rcon.execute_command(f"scoreboard objectives add {SELL_OBJECTIVE} trigger")
+                    objectives_ready = True
+                players = rcon.get_online_players()
+                if not players:
+                    continue
+                rcon.execute_command(f"scoreboard players enable @a {TICKET_OBJECTIVE}")
+                rcon.execute_command(f"scoreboard players enable @a {SELL_OBJECTIVE}")
+                for player in players:
+                    if _score_for(rcon, player, SELL_OBJECTIVE):
+                        rcon.execute_command(f"scoreboard players reset {player} {SELL_OBJECTIVE}")
+                        rcon.execute_command(f"scoreboard players enable {player} {SELL_OBJECTIVE}")
+                        coal = _clear_count(rcon, player, "minecraft:coal")
+                        blocks = _clear_count(rcon, player, "minecraft:coal_block")
+                        earned = coal * COAL_PRICE + blocks * COAL_BLOCK_PRICE
+                        if earned:
+                            rcon.execute_command(f"givemoney {player} {earned}")
+                            balance = _mod_balance(rcon, player)
+                            bal_txt = f" Balance: ${balance:g}." if balance is not None else ""
+                            payload = json.dumps([
+                                {"text": "⛏ ", "color": "gold"},
+                                {"text": f"Alpha's factory bought {coal} coal and {blocks} coal blocks for ${earned}.{bal_txt}", "color": "yellow"},
+                            ])
+                            print(f"✓ Coal sale: {player} sold {coal}+{blocks}b for ${earned} (balance {balance})")
+                        else:
+                            payload = json.dumps([
+                                {"text": "⛏ ", "color": "gray"},
+                                {"text": "Nothing to sell — mine some coal first. The factory buys coal and coal blocks.", "color": "gray"},
+                            ])
+                        rcon.execute_command(f"tellraw {player} {payload}")
+
+                    if not _score_for(rcon, player, TICKET_OBJECTIVE):
+                        continue
+                    rcon.execute_command(f"scoreboard players reset {player} {TICKET_OBJECTIVE}")
+                    rcon.execute_command(f"scoreboard players enable {player} {TICKET_OBJECTIVE}")
+                    balance = _mod_balance(rcon, player) or 0
+                    if balance >= TICKET_PRICE:
+                        rcon.execute_command(f"takemoney {player} {TICKET_PRICE}")
+                        rcon.execute_command(f"give {player} minecraft:paper 1")
+                        payload = json.dumps([
+                            {"text": "🎫 ", "color": "gold"},
+                            {"text": f"Ticket purchased for ${TICKET_PRICE}. Board the train to Halyard — it takes the ticket when you ride.", "color": "yellow"},
+                        ])
+                        print(f"✓ Ticket office: {player} bought a Halyard ticket (${balance:g} -> ${balance - TICKET_PRICE:g})")
+                    else:
+                        payload = json.dumps([
+                            {"text": "🎫 ", "color": "gray"},
+                            {"text": f"A ticket up to Halyard costs ${TICKET_PRICE} — you have ${balance:g}. Mine coal, then sell it at the mines shop or with /trigger sellCoal.", "color": "gray"},
+                        ])
+                    rcon.execute_command(f"tellraw {player} {payload}")
+            finally:
+                rcon.close()
+        except Exception as e:
+            print(f"Ticket office loop error: {e}")
 
 
 async def presence_loop():
@@ -1224,7 +1419,9 @@ async def main():
         heartbeat_loop(),
         presence_loop(),
         quest_trigger_loop(),
-        link_code_loop()
+        link_code_loop(),
+        world_progress_loop(),
+        ticket_office_loop()
     )
 
 if __name__ == "__main__":

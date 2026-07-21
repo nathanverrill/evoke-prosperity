@@ -2985,7 +2985,7 @@ BASIN_ARCHIVE = [
      "memory": "The lift still runs. Good. Mine coal down there — it's hard, honest work, and it's how everyone in Keel starts. Every piece sells back to Alpha for a dollar: right-click the shop sign in the mines, or type /trigger sellCoal from anywhere."},
     {"key": "coal", "title": "First Coal", "quest": "Archive: First Coal",
      "teaser": "▓▓▓ corrupted — bring something back from underground ▓▓▓",
-     "memory": "Coal in hand. That seam kept this town alive for a generation. Now save: a train ticket up to Halyard costs $100. Mine, sell, repeat — and when you've got $100, type /trigger buyTicket near the station."},
+     "memory": "Coal in hand. That seam kept this town alive for a generation. Now save: a train ticket up to Halyard costs $100. Mine, sell, repeat — and when you've got $100, buy your ticket at the station booth sign (or type /trigger buyTicket)."},
     {"key": "ticket", "title": "The Ticket Up", "quest": "Archive: The Ticket Up",
      "teaser": "▓▓▓ corrupted — earn your way off the mountain floor ▓▓▓",
      "memory": "Halyard. Rent, fees, time-clocks — everything up here costs, and the water still isn't free. You earned your way up; nobody gave it to you. Remember what that took. The archive continues…"},
