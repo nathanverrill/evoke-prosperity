@@ -1248,6 +1248,25 @@ async def ticket_office_loop():
                 rcon.execute_command(f"scoreboard players enable @a {TICKET_OBJECTIVE}")
                 rcon.execute_command(f"scoreboard players enable @a {SELL_OBJECTIVE}")
                 for player in players:
+                    # Scoreboard mailboxes set by the datapacks -- functions
+                    # can't call mod commands (parse-time rejection), so
+                    # basin_qol/basin_secrets flag the player and this loop
+                    # executes the savs command for them.
+                    if _score_for(rcon, player, "stipendDue") == 1:
+                        rcon.execute_command(f"givemoney {player} 100")
+                        rcon.execute_command(f"scoreboard players set {player} stipendDue 2")
+                        rcon.execute_command(f"tellraw {player} " + json.dumps([
+                            {"text": "☀ ", "color": "gold"},
+                            {"text": "Welcome to the Oasis. A $100 settlement stipend has been credited to you.", "color": "gold"},
+                        ]))
+                        print(f"✓ Oasis stipend paid to {player}")
+                    if _score_for(rcon, player, "balanceWipe") == 1:
+                        rcon.execute_command(f"resetmoney {player}")
+                        rcon.execute_command(f"scoreboard players set {player} balanceWipe 0")
+                        rcon.execute_command(f"tellraw {player} " + json.dumps([
+                            {"text": "ACCOUNT RESET TO FACTORY DEFAULT.", "color": "dark_red", "bold": True},
+                        ]))
+                        print(f"✓ Balance wipe (Craig's terminal) for {player}")
                     if _score_for(rcon, player, SELL_OBJECTIVE):
                         rcon.execute_command(f"scoreboard players reset {player} {SELL_OBJECTIVE}")
                         rcon.execute_command(f"scoreboard players enable {player} {SELL_OBJECTIVE}")

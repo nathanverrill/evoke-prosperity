@@ -38,9 +38,25 @@ execute as @a[x=35,y=88,z=57,dx=3,dy=3,dz=3,tag=!oasis_gate_warned] unless items
 execute as @a[x=35,y=88,z=57,dx=3,dy=3,dz=3,tag=!oasis_gate_warned] unless items entity @s container.* minecraft:name_tag run tag @s add oasis_gate_warned
 execute as @a[tag=oasis_gate_warned] unless entity @s[x=35,y=88,z=57,dx=3,dy=3,dz=3] run tag @s remove oasis_gate_warned
 
+# --- The build system: the delivered yawp rule, ported to vanilla ---
+# The cu-internship deliverable ran yawp with exactly one protected
+# region ("keel", cuboid (-214,0,27)->(32,255,306), break-blocks +
+# access-container denied -- read from the world save's data/yawp/
+# region NBT) and let players build anywhere else in the huge world.
+# yawp has no build for this server's Minecraft version, so the same
+# rule is enforced with gamemode: adventure inside the town cuboid,
+# survival everywhere outside. Only survival<->adventure are touched --
+# admins in creative/spectator are never flipped. Server default
+# gamemode is survival (server.properties); this is the exception zone.
+# Not replicated: the region's container-access denial (vanilla
+# adventure mode still allows opening chests).
+execute as @a[x=-214,y=0,z=27,dx=246,dy=255,dz=279,gamemode=survival] run gamemode adventure @s
+execute as @a[gamemode=adventure] unless entity @s[x=-214,y=0,z=27,dx=246,dy=255,dz=279] run gamemode survival @s
+
 # --- Oasis: one-time $100 arrival grant (mod currency) ---
-execute as @a[x=86,y=136,z=1023,dx=19,dy=5,dz=26,tag=!oasis_granted] run givemoney @s 100
-execute as @a[x=86,y=136,z=1023,dx=19,dy=5,dz=26,tag=!oasis_granted] run tellraw @s {"text":"Welcome to the Oasis. A $100 settlement stipend has been credited to you.","color":"gold"}
+# givemoney is a mod command -- functions can't call it (see load.mcfunction).
+# Flag the player; the bridge's economy loop pays and confirms within ~5s.
+execute as @a[x=86,y=136,z=1023,dx=19,dy=5,dz=26,tag=!oasis_granted] run scoreboard players set @s stipendDue 1
 tag @a[x=86,y=136,z=1023,dx=19,dy=5,dz=26,tag=!oasis_granted] add oasis_granted
 
 schedule function basin_qol:tick 2t replace

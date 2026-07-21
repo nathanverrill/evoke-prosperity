@@ -7,4 +7,11 @@
 # Apex server without a restart. This #minecraft:load tag arms the loop at
 # every future boot, and `schedule ... replace` guarantees exactly one
 # scheduled instance no matter how many times load runs.
+# Mailbox objectives: datapack functions cannot call savs-common-economy
+# commands (the function parser rejects mod commands at load time -- this
+# silently killed the whole tick function until found via the server
+# log). The datapack sets these flags; the bridge's economy loop executes
+# the actual mod command over RCON and advances the flag.
+scoreboard objectives add stipendDue dummy
+scoreboard objectives add balanceWipe dummy
 schedule function basin_qol:tick 2t replace

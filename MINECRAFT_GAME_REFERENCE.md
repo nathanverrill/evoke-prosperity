@@ -269,6 +269,14 @@ trigger like `sellCoal` for a command-based equivalent.
   `/tell`-style feedback via `tellraw` are the only channels.
 - Always-active, uncapped item-append CBs flood (the coal-block incident);
   cap-and-count like `crafting_factory`'s conveyor.
+- **Mod commands cannot appear in datapack functions** — the function
+  parser rejects them at load time and the whole function silently fails
+  (`Failed to load function` in the server log; every command in it goes
+  dead, not just the offending line). Pattern: the datapack sets a
+  scoreboard "mailbox" flag; the bridge's economy loop executes the mod
+  command over RCON (`stipendDue`/`balanceWipe`). **After any datapack
+  deploy, grep the server log for `Failed to load function`** — a
+  `/reload` reports success even when functions failed to parse.
 - OP testing skews: `/shop admin` toggle changes sign-click behavior;
   creative mode is exempt from the factory eviction; creative items can
   fake economy inputs.
@@ -373,6 +381,15 @@ raises you to the Oasis.
 **Act 3 — Oasis (arrival).** You land at `(57,149,1095)`; a one-time
 $100 settlement stipend credits on arrival. Content beyond the overlook
 is the remaining build-out (plots, Alpha HQ ending).
+
+**Building.** The delivered design (yawp region data in the true_oasis
+save): exactly one protected zone — the town cuboid
+`(-214,0,27)→(32,255,306)` (Keel + the Halyard plaza) — and free
+building everywhere else in the huge world. Replicated on 1.21.11 with
+gamemode enforcement in `basin_qol`: server default is **survival**;
+inside the town cuboid players are flipped to adventure. Admins in
+creative/spectator are never touched. (Not replicated: the region's
+container-access denial — chests in town remain openable.)
 
 **Easter egg:** drop a diamond onto a bone block (the shrine pedestal at
 `(39,146,501)` is the intended spot) and wait ~1 second.

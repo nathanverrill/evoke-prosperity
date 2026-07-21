@@ -14,8 +14,8 @@ execute as @e[type=item,nbt={Item:{id:"minecraft:diamond"}},scores={skelly=11..}
 # Standing at the terminal wipes your mod-economy balance back to the $10
 # default (the original command block ran `resetmoney @p`). Tag-gated so
 # it fires once per visit; the tag clears when you leave the tunnel.
-execute as @a[x=-9,y=58,z=193,dx=1,dy=2,dz=2,tag=!panel_used] run tellraw @s {"text":"The old Alpha terminal hums... ACCOUNT RESET TO FACTORY DEFAULT.","color":"dark_red"}
-execute as @a[x=-9,y=58,z=193,dx=1,dy=2,dz=2,tag=!panel_used] run resetmoney @s
+execute as @a[x=-9,y=58,z=193,dx=1,dy=2,dz=2,tag=!panel_used] run tellraw @s {"text":"The old Alpha terminal hums...","color":"dark_red"}
+execute as @a[x=-9,y=58,z=193,dx=1,dy=2,dz=2,tag=!panel_used] run scoreboard players set @s balanceWipe 1
 tag @a[x=-9,y=58,z=193,dx=1,dy=2,dz=2,tag=!panel_used] add panel_used
 execute as @a[tag=panel_used] unless entity @s[x=-14,y=56,z=188,dx=9,dy=7,dz=11] run tag @s remove panel_used
 
