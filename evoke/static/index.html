@@ -218,6 +218,7 @@
     backdrop-filter:blur(16px);font-family:var(--font-display);font-weight:700;font-size:16px;
     letter-spacing:.02em;transition:filter .24s var(--ease-out),transform .14s var(--ease-out);
     white-space:normal;line-height:1.2;text-align:center;max-width:100%;}
+  .btn[hidden]{display:none;}
   .btn:hover{filter:brightness(1.18);}
   .btn:active{transform:translateY(1px);}
   .btn.sec{min-height:52px;background:var(--surface-glass-dim,rgba(15,23,43,0.5));box-shadow:inset 0 0 0 1px var(--border-ui);color:var(--text-label);font-size:15px;}
@@ -650,10 +651,7 @@
     background:rgba(0,150,136,0.07);box-shadow:inset 0 0 0 1px var(--border-ui);border-radius:12px;padding:11px 13px;}
   .comp-banner .ms{color:var(--cyan-300);flex:none;}
   .comp-mission{background:linear-gradient(180deg,#172f52,#102443);box-shadow:inset 0 0 0 1px rgba(0,150,136,0.18);border-radius:14px;padding:14px 15px;flex:none;}
-  .comp-mission .comp-mt{font-family:var(--font-display);font-weight:800;font-size:18px;color:var(--cyan-100);margin:4px 0 11px;}
-  .comp-obj{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:9px;}
-  .comp-obj li{display:flex;gap:9px;font-family:var(--font-body);font-size:13.5px;line-height:1.4;color:var(--teal-050);}
-  .comp-obj li .ms{color:var(--cyan-300);font-size:18px;flex:none;}
+  .comp-mission .comp-mt{font-family:var(--font-display);font-weight:800;font-size:18px;color:var(--cyan-100);margin:4px 0 8px;}
   .comp-tabs{display:flex;gap:8px;flex:none;}
   .comp-tab{flex:1;display:inline-flex;align-items:center;justify-content:center;gap:7px;border:none;cursor:pointer;font-family:var(--font-display);font-weight:700;font-size:13px;
     padding:11px;border-radius:11px;color:var(--teal-050);background:rgba(255,255,255,0.04);box-shadow:inset 0 0 0 1px var(--border-ui);}
@@ -1461,20 +1459,10 @@
       <span class="ms" aria-hidden="true">dock_to_left</span>
       <span>Snap EVOKE to the left of your screen and Minecraft to the right.</span>
     </div>
-    <div class="comp-mission">
-      <div class="hud" style="font-size:10px;color:var(--cyan-300);">Current Quest</div>
-      <div class="comp-mt" id="comp-mt">Follow the Flow</div>
-      <ul class="comp-obj" id="comp-obj">
-        <li><span class="ms" aria-hidden="true">looks_one</span>Open Minecraft and load the world of Keel.</li>
-        <li><span class="ms" aria-hidden="true">looks_two</span>Explore Keel and complete in-game missions.</li>
-        <li><span class="ms" aria-hidden="true">looks_3</span>Earn and save in-game money.</li>
-        <li><span class="ms" aria-hidden="true">looks_4</span>Capture what you earn &amp; notice in your Notebook.</li>
-      </ul>
-    </div>
     <div class="comp-tabs" role="tablist" aria-label="Field Kit tools">
       <button class="comp-tab on" id="comp-tab-chat" data-ctab="chat" role="tab" aria-selected="true" type="button"><span class="ms" aria-hidden="true" style="font-size:17px;">smart_toy</span>B1llBot</button>
       <button class="comp-tab" id="comp-tab-note" data-ctab="note" role="tab" aria-selected="false" type="button"><span class="ms" aria-hidden="true" style="font-size:17px;">history_edu</span>Notebook</button>
-      <button class="comp-tab" id="comp-tab-mc" data-ctab="mc" role="tab" aria-selected="false" type="button"><span class="ms" aria-hidden="true" style="font-size:17px;">stadia_controller</span>Minecraft</button>
+      <button class="comp-tab" id="comp-tab-mc" data-ctab="mc" role="tab" aria-selected="false" type="button"><svg aria-hidden="true" width="15" height="15" viewBox="0 0 16 16" style="flex:none;"><rect width="16" height="16" fill="#7a4a2b"/><rect width="16" height="6" fill="#6cbb3c"/><rect y="5" width="16" height="2" fill="#5a9c30"/></svg>Simulation</button>
     </div>
 
     <div class="comp-pane" data-cpane="chat" role="tabpanel" aria-labelledby="comp-tab-chat">
@@ -1489,25 +1477,26 @@
 
     <div class="comp-pane" data-cpane="note" role="tabpanel" aria-labelledby="comp-tab-note" hidden>
       <div style="flex:1;overflow:auto;padding-right:2px;">
-        <p style="font-family:var(--font-body);font-size:13px;line-height:1.5;color:var(--teal-050);margin:0 0 14px;">Jot these down as you play — your notes save automatically and travel back to your Evidence Cache.</p>
-        <div class="note-field">
-          <label for="comp-earned"><span class="ms" aria-hidden="true" style="font-size:15px;">savings</span>What did you earn?</label>
-          <textarea id="comp-earned" placeholder="In Keel, I earned money by…"></textarea>
-          <div class="note-saved" id="comp-earned-saved"><span class="ms" aria-hidden="true" style="font-size:14px;">check_circle</span>Saved</div>
+        <div class="comp-mission" style="margin-bottom:18px;">
+          <div class="hud" style="font-size:10px;color:var(--cyan-300);">Current Mission</div>
+          <div class="comp-mt" id="comp-mt"></div>
+          <p id="comp-note-desc" style="font-family:var(--font-body);font-size:13.5px;line-height:1.55;color:var(--teal-050);margin:0 0 8px;"></p>
+          <button id="comp-note-more-btn" type="button" style="background:none;border:none;padding:0;cursor:pointer;color:var(--cyan-300);font-family:var(--font-body);font-size:12.5px;font-weight:700;display:inline-flex;align-items:center;">More<span class="ms" aria-hidden="true" style="font-size:16px;">expand_more</span></button>
+          <div id="comp-note-more" hidden style="font-family:var(--font-body);font-size:13.5px;line-height:1.6;color:var(--teal-050);margin-top:10px;padding-top:10px;border-top:1px solid var(--border-ui);"></div>
         </div>
-        <div class="note-field">
-          <label for="comp-noticed"><span class="ms" aria-hidden="true" style="font-size:15px;">visibility</span>What did you notice?</label>
-          <textarea id="comp-noticed" placeholder="I noticed that the water system…"></textarea>
-          <div class="note-saved" id="comp-noticed-saved"><span class="ms" aria-hidden="true" style="font-size:14px;">check_circle</span>Saved</div>
-        </div>
-        <div class="note-field">
-          <label for="comp-shot-input"><span class="ms" aria-hidden="true" style="font-size:15px;">add_a_photo</span>Drop a screenshot</label>
-          <div class="note-drop" id="comp-shot" role="button" tabindex="0" aria-label="Add a screenshot from your Minecraft session">
-            <span class="ms" aria-hidden="true">add_photo_alternate</span>
-            <span>Click or drag an image here</span>
+
+        <div class="ev-divider" style="margin:0 0 16px;"></div>
+
+        <div class="hud" style="font-size:10px;color:var(--cyan-300);margin-bottom:10px;">Field Notes</div>
+        <button id="comp-note-add-btn" type="button" class="btn sec" style="width:100%;margin-bottom:14px;"><span class="ms" aria-hidden="true" style="font-size:16px;vertical-align:middle;">add</span> Add Field Note</button>
+        <div id="comp-note-entry" hidden style="margin-bottom:14px;">
+          <textarea id="comp-note-input" placeholder="What did you earn, build, or notice…" style="width:100%;min-height:80px;padding:10px 12px;border-radius:10px;border:none;background:rgba(0,150,136,0.06);box-shadow:inset 0 0 0 1px var(--border-ui);color:var(--text-heading);font-family:var(--font-body);font-size:13.5px;resize:vertical;"></textarea>
+          <div style="display:flex;gap:10px;margin-top:8px;">
+            <button id="comp-note-save" type="button" class="btn" style="flex:1;">Save</button>
+            <button id="comp-note-cancel" type="button" class="btn sec" style="flex:1;">Cancel</button>
           </div>
-          <input id="comp-shot-input" type="file" accept="image/*" style="display:none;">
         </div>
+        <ul id="comp-note-list" style="list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:10px;"></ul>
       </div>
     </div>
 

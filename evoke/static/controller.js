@@ -1046,10 +1046,6 @@
       setHTML('mc-modal-intro', c.modalIntro);
       var qs=document.getElementById('mc-quest-steps');
       if(qs){ qs.innerHTML=''; c.steps.forEach(function(s,i){ qs.appendChild(el('<div class="mc-step"><span class="num" aria-hidden="true">'+(i+1)+'</span><div><div class="t">'+s.t+'</div><div class="d">'+s.d+'</div></div></div>')); }); }
-      var ob=document.getElementById('comp-obj');
-      if(ob){ var icons=['looks_one','looks_two','looks_3','looks_4']; ob.innerHTML=''; c.obj.forEach(function(t,i){ ob.appendChild(el('<li><span class="ms" aria-hidden="true">'+icons[i]+'</span>'+t+'</li>')); }); }
-      var mt2=document.getElementById('comp-mt');
-      if(mt2 && typeof curMission==='function'){ try{ var gm=curMission(), wi=Math.floor((gm-1)/2), mi=(gm-1)%2; mt2.textContent=CONTENT.weeks[wi].missions[mi].title; }catch(e){} }
       var ms=document.getElementById('mc-modal-steps');
       if(ms){ ms.innerHTML=''; c.modalSteps.forEach(function(t,i){ ms.appendChild(el('<div class="ops-step"><span class="n" aria-hidden="true">'+(i+1)+'</span><span style="flex:1;font-family:var(--font-body);font-size:14px;line-height:1.55;color:var(--teal-050);padding-top:2px;">'+t+'</span></div>')); }); }
     }
@@ -1540,27 +1536,97 @@
     }
     window.switchCompTab = switchCompTab;
     document.querySelectorAll('.comp-tab').forEach(function(t){ t.addEventListener('click',function(){ switchCompTab(t.dataset.ctab); }); });
-    // notebook autosave
-    function bindNote(id,key){ var t=document.getElementById(id); if(!t)return; try{ t.value=localStorage.getItem(key)||''; }catch(e){}
-      var saved=document.getElementById(id+'-saved'), tmo;
-      t.addEventListener('input',function(){ try{ localStorage.setItem(key,t.value); }catch(e){} if(saved){ saved.classList.add('show'); clearTimeout(tmo); tmo=setTimeout(function(){ saved.classList.remove('show'); },1200); } });
-    }
-    bindNote('comp-earned','evoke-note-earned');
-    bindNote('comp-noticed','evoke-note-noticed');
-    // screenshot drop
-    var drop=document.getElementById('comp-shot'), file=document.getElementById('comp-shot-input');
-    if(drop&&file){
-      function show(f){ if(!f||!/^image\//.test(f.type))return; var r=new FileReader(); r.onload=function(){ drop.innerHTML='<img src="'+r.result+'" alt="Your captured screenshot">'; }; r.readAsDataURL(f); }
-      drop.addEventListener('click',function(){ file.click(); });
-      drop.addEventListener('keydown',function(e){ if(e.key==='Enter'||e.key===' '){ e.preventDefault(); file.click(); } });
-      file.addEventListener('change',function(){ show(file.files[0]); });
-      drop.addEventListener('dragover',function(e){ e.preventDefault(); drop.style.boxShadow='inset 0 0 0 2px var(--cyan-300)'; });
-      drop.addEventListener('dragleave',function(){ drop.style.boxShadow=''; });
-      drop.addEventListener('drop',function(e){ e.preventDefault(); drop.style.boxShadow=''; show(e.dataTransfer.files[0]); });
-    }
-    // current-quest title sync (works across all 12 missions)
-    var mt=document.getElementById('comp-mt');
-    if(mt && typeof curMission==='function'){ try{ var gm=curMission(), wi=Math.floor((gm-1)/2), mi=(gm-1)%2; mt.textContent = CONTENT.weeks[wi].missions[mi].title; }catch(e){} }
+    // Notebook tab: current mission title + one-line desc (local, same copy
+    // Operations Hub uses), with a "More" expand that fetches the real
+    // per-mission curriculum narrative (pbl_description) from the backend --
+    // that field has been sitting unused since Mission content populated
+    // (see GAPS.md/memory), this is its first real surface in this UI.
+    (function(){
+      var mt=document.getElementById('comp-mt'), desc=document.getElementById('comp-note-desc');
+      if(mt && typeof curMission==='function'){
+        try{
+          var gm=curMission(), wi=Math.floor((gm-1)/2), mi=(gm-1)%2, m=CONTENT.weeks[wi].missions[mi];
+          mt.textContent = m.title;
+          if(desc) desc.textContent = m.desc;
+        }catch(e){}
+      }
+      var moreBtn=document.getElementById('comp-note-more-btn'), moreBox=document.getElementById('comp-note-more');
+      if(!moreBtn || !moreBox) return;
+      var loaded=false, expanded=false;
+      function escapeHtml(s){ return String(s==null?'':s).replace(/[&<>"]/g,function(c){return ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'})[c];}); }
+      // Same light "Step N:" bold / "- " bullet structure formatMissionNarrative
+      // (screens.js, no longer loaded by this UI) used for this same field.
+      function formatNarrative(text){
+        return text.split(/\n\n+/).map(function(block){
+          var lines=block.split('\n'), html='', bullets=[];
+          function flush(){ if(bullets.length){ html+='<ul style="margin:6px 0;padding-left:20px;">'+bullets.map(function(b){return '<li>'+escapeHtml(b)+'</li>';}).join('')+'</ul>'; bullets=[]; } }
+          lines.forEach(function(line,i){
+            if(/^-\s+/.test(line)){ bullets.push(line.replace(/^-\s+/,'')); return; }
+            flush();
+            if(!line.trim()) return;
+            var isStepHeader = i===0 && /^Step \d+/.test(line);
+            html += isStepHeader ? ('<p style="margin:0 0 6px;"><strong style="color:var(--cyan-100);">'+escapeHtml(line)+'</strong></p>') : ('<p style="margin:0 0 6px;">'+escapeHtml(line)+'</p>');
+          });
+          flush();
+          return html;
+        }).join('');
+      }
+      moreBtn.addEventListener('click', function(){
+        expanded = !expanded;
+        moreBox.hidden = !expanded;
+        moreBtn.innerHTML = expanded
+          ? 'Less<span class="ms" aria-hidden="true" style="font-size:16px;">expand_less</span>'
+          : 'More<span class="ms" aria-hidden="true" style="font-size:16px;">expand_more</span>';
+        if(expanded && !loaded && STATE.userId){
+          loaded = true;
+          moreBox.textContent = 'Loading…';
+          fetch('/api/missions?user_id='+encodeURIComponent(STATE.userId)).then(function(r){ return r.ok?r.json():null; }).then(function(d){
+            var missions=(d && d.missions) || [];
+            var idx=(typeof curMission==='function'?curMission():1)-1;
+            var narrative = missions[idx] && missions[idx].pbl_description;
+            moreBox.innerHTML = narrative ? formatNarrative(narrative) : 'No additional detail yet for this mission.';
+          }).catch(function(){ moreBox.textContent = 'Couldn’t load additional detail — try again.'; });
+        }
+      });
+    })();
+    // Field Notes: a plain running journal, local to this device (same
+    // localStorage-only pattern the old What-did-you-earn/notice fields
+    // used) -- add-button reveals an entry box, saving appends to a list.
+    (function(){
+      var KEY='evoke-field-notes';
+      var addBtn=document.getElementById('comp-note-add-btn'), entry=document.getElementById('comp-note-entry'),
+          input=document.getElementById('comp-note-input'), saveBtn=document.getElementById('comp-note-save'),
+          cancelBtn=document.getElementById('comp-note-cancel'), list=document.getElementById('comp-note-list');
+      if(!addBtn || !list) return;
+      function load(){ try{ return JSON.parse(localStorage.getItem(KEY)||'[]'); }catch(e){ return []; } }
+      function persist(notes){ try{ localStorage.setItem(KEY, JSON.stringify(notes)); }catch(e){} }
+      function fmtTime(ts){ try{ return new Date(ts).toLocaleString(undefined,{month:'short',day:'numeric',hour:'numeric',minute:'2-digit'}); }catch(e){ return ''; } }
+      function render(){
+        var notes=load();
+        list.innerHTML='';
+        if(!notes.length){ list.appendChild(el('<li class="hud" style="font-size:11px;color:var(--text-faint);">No field notes yet.</li>')); return; }
+        notes.slice().reverse().forEach(function(n){
+          var li=el('<li style="padding:11px 13px;border-radius:10px;background:rgba(0,150,136,0.05);box-shadow:inset 0 0 0 1px var(--border-ui);"><div class="hud" style="font-size:10px;color:var(--text-faint);margin-bottom:5px;"></div><div style="font-family:var(--font-body);font-size:13.5px;line-height:1.5;color:var(--teal-050);white-space:pre-wrap;"></div></li>');
+          li.children[0].textContent = fmtTime(n.ts);
+          li.children[1].textContent = n.text;
+          list.appendChild(li);
+        });
+      }
+      function openEntry(){ entry.hidden=false; addBtn.hidden=true; input.value=''; input.focus(); }
+      function closeEntry(){ entry.hidden=true; addBtn.hidden=false; }
+      addBtn.addEventListener('click', openEntry);
+      cancelBtn.addEventListener('click', closeEntry);
+      saveBtn.addEventListener('click', function(){
+        var text=(input.value||'').trim();
+        if(!text) return;
+        var notes=load();
+        notes.push({text:text, ts:Date.now()});
+        persist(notes);
+        render();
+        closeEntry();
+      });
+      render();
+    })();
     // window enter/exit toggle
     var COMPACT_W=480, prevWin=null, compWin=null;
     // Dock the CURRENT window: narrow, full-height, snapped to the LEFT edge.
