@@ -191,7 +191,7 @@ Tags: `billbot_intro` (kiosk fired), `mine_tp` (mines routing), `admin`
 
 | Loop | Interval | Does |
 |---|---|---|
-| `event_consumer_loop` | poll | Kafka → in-game reactions: `LevelUpped` (title/sound/particles), `MissionCompleted` (broadcast), `TeamWheelCompleted`, `WorldStateAdvanced` (beacon), `MinecraftLinked` (whitelist add), `RewardCollected` (tier → `mc_reward_catalog` item/effect delivery) |
+| `event_consumer_loop` | poll | Kafka → in-game reactions: `LevelUpped` (title/sound/particles), `MissionCompleted` (broadcast), `TeamWheelCompleted`, `WorldStateAdvanced` (beacon), `MinecraftLinked` (whitelist add), `RewardCollected` (tier → the **whole `mc_reward_catalog` set** for that tier: commendation book named after the mission via `<mission_title>` templating, bounded effects with `reward_amount` = amplifier / `duration` in ticks, `givemoney` grants, the legendary allay — delivered with a tellraw+sound announcement, offline-queued with mission context on the grant row; see MINECRAFT_REWARDS.md) |
 | `offline_delivery_loop` | 60s | queued rewards (`mc_reward_grants`) when player comes online |
 | `heartbeat_loop` | 60s | online XP tick (5/min), arena+gauntlet ratchet checks, lore lines (via LiteLLM guardrails), optional Player One auto-link (`AUTO_LINK_PLAYER_ONE`, **false in prod**) |
 | `presence_loop` | 15s | `MinecraftPresence` snapshots (web "who's in the Basin" card) |
@@ -515,6 +515,10 @@ re-arm its self-scheduling loop.
 
 ## 15. Related docs
 
+- [`MINECRAFT_QUESTS.md`](MINECRAFT_QUESTS.md) — the auto-completing quest
+  catalog (54 quests by level, each with its detection hook)
+- [`MINECRAFT_REWARDS.md`](MINECRAFT_REWARDS.md) — web-mission reward sets
+  delivered into the game (shipped; design rationale + tier catalog)
 - [`MINECRAFT_WORLD_MAP.md`](MINECRAFT_WORLD_MAP.md) — deep coordinates +
   investigation history of the basin lineage (pre-2026-07-21 status lines
   superseded by this doc)

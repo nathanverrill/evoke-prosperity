@@ -1,5 +1,20 @@
 # MINECRAFT_REWARDS.md — web-mission rewards that land in the Basin
 
+> **Status: SHIPPED 2026-07-21** (commit `ee92cd3`). The "proposed tier
+> catalog" below is the live catalog — deployed to the running database
+> (old rows retired, duplicates purged) and to `seed.py` for fresh
+> installs. Delivery mechanics implemented in the bridge: whole-tier
+> **set** delivery (the old `LIMIT 1` picked one arbitrary row),
+> `<player>`/`<mission_title>` templating (mission name looked up from
+> the event and stored on the grant's new `context` column so offline
+> deliveries render it too), a tellraw + level-up-sound announcement on
+> every delivery (legendary adds a "COMMENDED" title), per-player grouped
+> offline delivery, and a fix for the previously **invalid** mark-executed
+> SQL — which means online deliveries were never marked executed before,
+> so every reward was silently delivered twice (once live, again by the
+> offline loop). Command syntax for the risky SNBT (book, lored trophy,
+> allay) is validated against the live server after each deploy.
+
 The transmedia direction opposite to quests: **quests** are Minecraft acts
 the web notices; **rewards** are web achievements (mission completions,
 award tiers, level-ups) made physical in Minecraft. The pipeline already
@@ -8,7 +23,7 @@ tier lookup → RCON delivery with offline queueing (`mc_reward_grants`) —
 so everything here is catalog content + small delivery polish, not new
 architecture.
 
-## Why the current catalog fails
+## Why the pre-2026-07-21 catalog failed
 
 (`mc_reward_catalog` today, per tier, rows duplicated 4×:)
 
