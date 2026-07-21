@@ -1,7 +1,7 @@
 {
-  "name": "EVOKE Field Kit",
-  "short_name": "Field Kit",
-  "description": "Companion for EVOKE Prosperity agents in the field — quests, awards, Basin status, and B1llbot.",
+  "name": "Billbot's Field Tablet",
+  "short_name": "Field Tablet",
+  "description": "The rugged field tablet Billbot handed you before the Basin fell — B1llbot, Mission Notes, and the Field Training Simulator.",
   "start_url": "/companion.html",
   "display": "standalone",
   "background_color": "#f4f4f4",

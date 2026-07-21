@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>EVOKE Field Kit</title>
+  <title>Billbot's Field Tablet</title>
   <meta name="theme-color" content="#2c3e50">
   <link rel="manifest" href="manifest.webmanifest">
   <link rel="icon" href="fieldkit-icon.svg" type="image/svg+xml">
@@ -12,10 +12,13 @@
   <link rel="stylesheet" href="theme.css">
   <link rel="stylesheet" href="showcase.css">
   <style>
-    /* Phone-first tab bar -- same B1llBot/Notebook/Minecraft split as the
-       desktop app's in-app Companion Mode screen (index.html), so the
-       experience is the same whether you scan the QR or open this on a
-       computer. B1llBot is the default tab, everywhere, no exceptions. */
+    /* Phone-first tab bar: B1llBot / Mission Notes / Field Training
+       Simulator -- the in-universe "Billbot's Field Tablet" rewrite
+       (2026-07-21). This diverged from the desktop app's in-app Companion
+       Mode screen (index.html's #companion) on purpose -- that one's still
+       "Notebook"/"Simulation" and out of scope for this pass; the desktop
+       Ops Hub's "Or open it on your computer" link and the QR code both
+       point here regardless. B1llBot is the default tab, no exceptions. */
     .fk-tabs{display:flex;gap:6px;margin:14px 0;}
     .fk-tab{flex:1;padding:9px 6px;border-radius:10px;border:none;cursor:pointer;font-family:inherit;font-size:0.85em;font-weight:600;background:rgba(0,0,0,0.06);color:inherit;opacity:0.6;}
     .fk-tab.on{opacity:1;background:rgba(44,62,80,0.14);}
@@ -38,13 +41,13 @@
     </section>
 
     <div id="fk-content" hidden>
-    <h1 class="card__title">EVOKE Field Kit</h1>
+    <h1 class="card__title">Billbot's Field Tablet</h1>
     <p class="empty-state" id="agent-line"></p>
-    <p class="empty-state">Your pocket companion — keep this open on your phone next to Minecraft, or check in here anytime for B1llBot, your Notebook, and the Simulation.</p>
+    <p class="empty-state">The tablet Billbot ejected from his own chest before he sent you out. Keep it open next to Minecraft, or check in anytime for B1llBot, your Mission Notes, and the Field Training Simulator.</p>
 
     <section class="card" id="link-confirm-card" hidden>
-      <div class="card__eyebrow">⛏ Minecraft link request</div>
-      <p>Player <strong id="link-mc-name"></strong> entered your code in the Basin. Link it to your account?</p>
+      <div class="card__eyebrow">⛏ Tablet sync request</div>
+      <p>Player <strong id="link-mc-name"></strong> entered your activation code in the Basin. Sync it to your Field Tablet?</p>
       <div class="row">
         <button class="btn btn-primary" id="link-yes">Confirm Link</button>
         <button class="btn" id="link-no">Deny</button>
@@ -53,12 +56,13 @@
 
     <div class="fk-tabs" role="tablist" aria-label="Companion tools">
       <button class="fk-tab on" id="fk-tab-chat" data-fpane="chat" role="tab" aria-selected="true" type="button">B1llBot</button>
-      <button class="fk-tab" id="fk-tab-note" data-fpane="note" role="tab" aria-selected="false" type="button">Notebook</button>
-      <button class="fk-tab" id="fk-tab-mc" data-fpane="mc" role="tab" aria-selected="false" type="button"><svg aria-hidden="true" width="14" height="14" viewBox="0 0 16 16" style="vertical-align:-2px;margin-right:3px;"><rect width="16" height="16" fill="#7a4a2b"/><rect width="16" height="6" fill="#6cbb3c"/><rect y="5" width="16" height="2" fill="#5a9c30"/></svg>Simulation</button>
+      <button class="fk-tab" id="fk-tab-note" data-fpane="note" role="tab" aria-selected="false" type="button">Mission Notes</button>
+      <button class="fk-tab" id="fk-tab-mc" data-fpane="mc" role="tab" aria-selected="false" type="button"><svg aria-hidden="true" width="14" height="14" viewBox="0 0 16 16" style="vertical-align:-2px;margin-right:3px;"><rect width="16" height="16" fill="#7a4a2b"/><rect width="16" height="6" fill="#6cbb3c"/><rect y="5" width="16" height="2" fill="#5a9c30"/></svg>Field Training Simulator</button>
     </div>
 
     <section class="card fk-pane" data-fpane="chat">
       <div class="billbot-drawer__log" id="chat"></div>
+      <div id="chat-suggest" style="display:flex;flex-wrap:wrap;gap:6px;margin:8px 0;"></div>
       <form id="chat-form" class="row">
         <input type="text" id="chat-input" placeholder="Ask B1llBot..." style="flex:1" autocomplete="off">
         <button type="submit">→</button>
@@ -75,10 +79,11 @@
       <div class="card__eyebrow" style="margin-top:18px;">Daily Field Report</div>
       <div id="reflect-body">Loading...</div>
 
-      <div class="card__eyebrow" style="margin-top:18px;">Field Notes</div>
-      <button id="fn-add-btn" type="button" class="btn btn-primary" style="width:100%;margin-bottom:10px;">+ Add Field Note</button>
+      <div class="card__eyebrow" style="margin-top:18px;">Mission Notes</div>
+      <p class="empty-state" style="margin:0 0 10px;">Every apprentice kept a mission log. Record what you notice before you forget it.</p>
+      <button id="fn-add-btn" type="button" class="btn btn-primary" style="width:100%;margin-bottom:10px;">+ Add Mission Note</button>
       <div id="fn-entry" hidden style="margin-bottom:10px;">
-        <textarea id="fn-input" rows="3" placeholder="What did you earn, build, or notice…" style="width:100%;"></textarea>
+        <textarea id="fn-input" rows="3" placeholder="What did you notice? Who did you meet? What surprised you?" style="width:100%;"></textarea>
         <div class="row" style="margin-top:6px;">
           <button type="button" id="fn-save" class="btn btn-primary" style="flex:1;">Save</button>
           <button type="button" id="fn-cancel" class="btn" style="flex:1;">Cancel</button>
@@ -88,7 +93,6 @@
     </section>
 
     <section class="card fk-pane" data-fpane="mc" hidden>
-      <div class="card__eyebrow">Connect to Minecraft</div>
       <div id="connect-body">Loading...</div>
       <div id="mc-quest-card" hidden style="margin-top:14px;">
         <div class="card__eyebrow">Minecraft Quests</div>
@@ -113,6 +117,58 @@
       div.textContent = s;
       return div.innerHTML;
     }
+
+    // B1llBot greeting + suggestion chips -- a pool of 6, 3 shown at random
+    // each time the tablet's opened (initChat(), called once from init()).
+    // Defined here, ahead of the conduct-gate logic below, on purpose:
+    // enterField()/init() can fire synchronously (already-accepted gate,
+    // see localStorage check below) before the script finishes executing
+    // top-to-bottom -- a const declared further down would still be in its
+    // temporal dead zone at that point (hit live: ReferenceError on a
+    // returning device that had already accepted the gate).
+    const BILLBOT_GREETING = "Morning, Apprentice.\n\nNeed directions, a second opinion, or a story from before the Basin fell? Ask away.";
+    const BILLBOT_SUGGESTIONS = [
+      "What's my mission?",
+      "I'm stuck — what do I do?",
+      "Tell me about Keel.",
+      "How do I earn badges?",
+      "What does Systems Thinker mean?",
+      "How do Superpowers work?",
+    ];
+    function initChat() {
+      const chat = document.getElementById("chat");
+      chat.insertAdjacentHTML("beforeend", `<div class="billbot-msg" data-from="billbot">${escapeHtml(BILLBOT_GREETING).replace(/\n/g, "<br>")}</div>`);
+      const pool = BILLBOT_SUGGESTIONS.slice();
+      const picks = [];
+      while (picks.length < 3 && pool.length) picks.push(pool.splice(Math.floor(Math.random() * pool.length), 1)[0]);
+      const suggest = document.getElementById("chat-suggest");
+      suggest.innerHTML = picks.map(s => `<button type="button" class="btn" style="padding:5px 10px;font-size:0.8em;height:auto;">${escapeHtml(s)}</button>`).join("");
+      suggest.querySelectorAll("button").forEach(btn => btn.addEventListener("click", () => sendChat(btn.textContent)));
+    }
+    async function sendChat(msg) {
+      msg = (msg || "").trim();
+      if (!msg) return;
+      const chat = document.getElementById("chat");
+      chat.insertAdjacentHTML("beforeend", `<div class="billbot-msg" data-from="user">${escapeHtml(msg)}</div>`);
+      chat.scrollTop = chat.scrollHeight;
+      try {
+        // Query params, not a JSON body -- /api/billbot/chat reads user_id
+        // and message as query params (previously this page sent a JSON
+        // body here too, which 422'd every time).
+        const res = await fetch(`/api/billbot/chat?user_id=${userId}&message=${encodeURIComponent(msg)}`, { method: "POST" }).then(r => r.json());
+        chat.insertAdjacentHTML("beforeend", `<div class="billbot-msg" data-from="billbot">${escapeHtml(res.reply)}</div>`);
+      } catch (err) {
+        chat.insertAdjacentHTML("beforeend", `<div class="billbot-msg" data-from="billbot">Having trouble hearing you right now.</div>`);
+      }
+      chat.scrollTop = chat.scrollHeight;
+    }
+    document.getElementById("chat-form").addEventListener("submit", (e) => {
+      e.preventDefault();
+      const input = document.getElementById("chat-input");
+      const msg = input.value;
+      input.value = "";
+      sendChat(msg);
+    });
 
     let displayName = null;
 
@@ -202,15 +258,16 @@
       document.getElementById("agent-line").textContent = `Agent: ${displayName || "…"}`;
       fetch(`/api/minigames/kit/piece?user_id=${userId}`, { method: "POST", body: (() => { const f = new FormData(); f.append("piece", "cap"); return f; })() }).catch(() => {});
       connectLive();
+      initChat();
       loadNotebookMission();
       loadReflect();
       loadConnect();
       setInterval(pollLinkRequest, 8000);
     }
 
-    // ---- Notebook tab: current mission title/desc + "More" (real
+    // ---- Mission Notes tab: current mission title/desc + "More" (real
     // curriculum narrative, same pbl_description field the desktop app's
-    // Notebook tab reads from this same /api/missions response) ----
+    // Mission Notes tab reads from this same /api/missions response) ----
     async function loadNotebookMission() {
       const titleEl = document.getElementById("nb-mission-title"), descEl = document.getElementById("nb-mission-desc");
       try {
@@ -238,7 +295,7 @@
       } catch (e) { titleEl.textContent = "Couldn't load your mission right now."; }
     }
     // Same light "Step N:" bold / "- " bullet structure the desktop app's
-    // Notebook tab uses for this same field.
+    // Mission Notes tab uses for this same field.
     function formatNarrative(text) {
       return text.split(/\n\n+/).map((block) => {
         const lines = block.split("\n");
@@ -256,8 +313,8 @@
       }).join("");
     }
 
-    // ---- Field Notes: same plain localStorage journal as the desktop
-    // app's Notebook tab -- same key, so notes made on this device show up
+    // ---- Mission Notes: same plain localStorage journal as the desktop
+    // app's Mission Notes tab -- same key, so notes made on this device show up
     // in either place, same browser. ----
     (function () {
       const KEY = "evoke-field-notes";
@@ -269,7 +326,7 @@
       function fmtTime(ts) { try { return new Date(ts).toLocaleString(undefined, { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" }); } catch (e) { return ""; } }
       function render() {
         const notes = load();
-        list.innerHTML = notes.length ? "" : `<li class="empty-state">No field notes yet.</li>`;
+        list.innerHTML = notes.length ? "" : `<li class="empty-state">No mission notes yet.</li>`;
         notes.slice().reverse().forEach((n) => {
           const li = document.createElement("li");
           li.style.cssText = "padding:9px 11px;border-radius:8px;background:rgba(0,0,0,0.04);";
@@ -300,7 +357,7 @@
       render();
     })();
 
-    // ---- Daily Field Report (the Notebook tab's real content) ----
+    // ---- Daily Field Report (the Mission Notes tab's real content) ----
     // Wisdom generates async now (workers.py's FIELD REPORT WORKER) and
     // arrives live over the /ws socket (see connectLive()'s WisdomReady
     // case) -- "Filed" shows instantly instead of waiting on the AI call.
@@ -354,26 +411,38 @@
         ]);
         mcStopPolling();
         if (link.linked) {
-          body.innerHTML = `<p>Linked as <strong>${escapeHtml(link.username)}</strong> ✓</p><p class="empty-state">Rewards, quests, and XP flow between the Basin and your account.</p>`;
+          body.innerHTML = `<p>Tablet synchronized as <strong>${escapeHtml(link.username)}</strong> ✓</p><p class="empty-state">Rewards, quests, and XP now flow between the Basin and your Field Tablet.</p>`;
           loadMcQuests();
           return;
         }
         document.getElementById("mc-quest-card").hidden = true;
         body.innerHTML = `
-          <p class="empty-state">Optional — never graded. Play the same world in Minecraft: fly over Keel, Halyard, and the Oasis, and talk to B1llBot and the people of Keel yourself.</p>
-          <p><strong>1.</strong> Make sure you're running Minecraft <strong>Java Edition ${escapeHtml(info.java_version)}</strong> — Java needs a matching version to connect at all; a mismatch gets you "Outdated client/server," not a normal error. (Bedrock/mobile: any recent version works through the address below.)</p>
-          <p><strong>2.</strong> In Minecraft, add a multiplayer server:</p>
+          <h1 class="card__title" style="font-size:1.2em;margin-bottom:10px;">Boot the Field Training Simulator</h1>
+          <p>This simulator is older than you are.</p>
+          <p class="empty-state">Alpha Dynamics built it on an old game called Minecraft because every engineer already knew how to use it. Every construction robot carried an offline copy so apprentices could train anywhere, even without a network.</p>
+          <p class="empty-state">Billbot has restored his copy.</p>
+
+          <div class="card__eyebrow" style="margin-top:18px;">1. Match the archived build</div>
+          <p>Keel was preserved on Minecraft Java Edition <strong>${escapeHtml(info.java_version)}</strong>. Set your launcher to that version before entering. Bedrock Edition players can use the latest release.</p>
+
+          <div class="card__eyebrow" style="margin-top:18px;">2. Connect to the Basin</div>
+          <p class="empty-state" style="margin-bottom:6px;">Open Minecraft. Choose Multiplayer → Add Server, and enter:</p>
           <p style="display:flex;align-items:center;gap:6px">Java: <code>${escapeHtml(info.java_address)}</code>
             <button class="btn" data-copy="${escapeHtml(info.java_address)}" style="padding:2px 8px;font-size:0.85em">Copy</button></p>
           <p style="display:flex;align-items:center;gap:6px">Bedrock: <code>${escapeHtml(info.bedrock_address)}</code>
             <button class="btn" data-copy="${escapeHtml(info.bedrock_address)}" style="padding:2px 8px;font-size:0.85em">Copy</button></p>
-          <p><strong>3.</strong> You'll spawn on the mountain, above Keel — it's a real walk down, not a quick hop. Head downhill and outward from spawn; Keel is the hot, cramped mining town at the base, and that's where B1llBot's kiosk is. If you get turned around, open your coordinates (F3 on Java, the settings menu on Bedrock) — Keel is roughly <code>-50, 65, 210</code>.</p>
-          <button class="btn btn-primary" id="connect-start">Link Your Minecraft Account</button>
+
+          <div class="card__eyebrow" style="margin-top:18px;">3. Enter the Basin</div>
+          <p class="empty-state">You'll arrive on the ridge above Keel. Walk downhill until the town comes into view. Find Billbot's kiosk. He'll recognize the tablet before he recognizes you.</p>
+
+          <div class="card__eyebrow" style="margin-top:18px;">4. Link your tablet</div>
+          <p class="empty-state">Billbot will give you an activation code inside Minecraft.</p>
+          <button class="btn btn-primary" id="connect-start" style="margin-top:8px;">Link Your Minecraft Account</button>
           <div id="connect-steps" hidden style="margin-top:8px">
-            <p><strong>4.</strong> Once you're at the kiosk, he'll whisper hello on his own. Type in chat:</p>
+            <p>Enter it exactly as shown:</p>
             <p><code id="connect-cmd" style="font-size:1.05em"></code></p>
             <p class="empty-state">Code expires in 10 minutes.</p>
-            <button class="btn" id="connect-confirm-check" style="margin-top:6px">I typed it — Check</button>
+            <button class="btn" id="connect-confirm-check" style="margin-top:6px">I've Entered My Code</button>
             <p id="connect-confirm-status" class="empty-state"></p>
           </div>`;
         document.getElementById("connect-start").addEventListener("click", async () => {
@@ -405,7 +474,7 @@
           // stayed stuck reading "Checking…" forever, even though
           // showLinkConfirm() had already rendered the real confirm card
           // above it. Looked exactly like a hang.
-          status.textContent = found ? "Found it! Confirm above ↑" : "Not yet — make sure you typed the command in Minecraft, then tap Confirm again.";
+          status.textContent = found ? "Found it! Confirm above ↑" : "Not yet — make sure you entered the code in Minecraft, then tap I've Entered My Code again.";
         });
       } catch (e) {
         body.innerHTML = `<p class="empty-state">Basin status unavailable right now.</p>`;
@@ -478,10 +547,10 @@
       overlay.className = "celebration-overlay";
       overlay.innerHTML = `
         <div class="card celebration-card" data-tier="legendary">
-          <div class="card__eyebrow">Connect to Minecraft</div>
-          <h1>Connected!</h1>
+          <div class="card__eyebrow">Field Training Simulator</div>
+          <h1>Tablet Synchronized!</h1>
           <p class="celebration-tier">Linked as <strong>${escapeHtml(mcName)}</strong></p>
-          <p>Rewards, quests, and XP now flow between the Basin and your account.</p>
+          <p>Rewards, quests, and XP now flow between the Basin and your Field Tablet.</p>
           <button class="btn btn-primary" id="link-celebration-continue">Carry On →</button>
         </div>
       `;
@@ -518,26 +587,6 @@
       open();
     }
 
-    document.getElementById("chat-form").addEventListener("submit", async (e) => {
-      e.preventDefault();
-      const input = document.getElementById("chat-input");
-      const msg = input.value.trim();
-      if (!msg) return;
-      const chat = document.getElementById("chat");
-      chat.insertAdjacentHTML("beforeend", `<div class="billbot-msg" data-from="user">${escapeHtml(msg)}</div>`);
-      input.value = "";
-      chat.scrollTop = chat.scrollHeight;
-      try {
-        // Query params, not a JSON body -- /api/billbot/chat reads user_id
-        // and message as query params (previously this page sent a JSON
-        // body here too, which 422'd every time).
-        const res = await fetch(`/api/billbot/chat?user_id=${userId}&message=${encodeURIComponent(msg)}`, { method: "POST" }).then(r => r.json());
-        chat.insertAdjacentHTML("beforeend", `<div class="billbot-msg" data-from="billbot">${escapeHtml(res.reply)}</div>`);
-      } catch (err) {
-        chat.insertAdjacentHTML("beforeend", `<div class="billbot-msg" data-from="billbot">Having trouble hearing you right now.</div>`);
-      }
-      chat.scrollTop = chat.scrollHeight;
-    });
   </script>
 </body>
 </html>
