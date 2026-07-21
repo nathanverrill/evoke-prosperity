@@ -12,10 +12,13 @@
   <link rel="stylesheet" href="theme.css">
   <link rel="stylesheet" href="showcase.css">
   <style>
-    /* Phone-first tab bar: B1llBot / Mission Notes / Field Training
+    /* Phone-first tab bar: B1llBot / Mission Evidence / Field Training
        Simulator -- the in-universe "Billbot's Field Tablet" rewrite
-       (2026-07-21). This diverged from the desktop app's in-app Companion
-       Mode screen (index.html's #companion) on purpose -- that one's still
+       (2026-07-21, revised same day: Mission Notes -> a single Mission
+       Evidence submission per mission -- see mission_field_reports in
+       main.py, deliberately NOT the real evidence/AND-gate pipeline).
+       This diverged from the desktop app's in-app Companion Mode screen
+       (index.html's #companion) on purpose -- that one's still
        "Notebook"/"Simulation" and out of scope for this pass; the desktop
        Ops Hub's "Or open it on your computer" link and the QR code both
        point here regardless. B1llBot is the default tab, no exceptions. */
@@ -43,7 +46,7 @@
     <div id="fk-content" hidden>
     <h1 class="card__title">Billbot's Field Tablet</h1>
     <p class="empty-state" id="agent-line"></p>
-    <p class="empty-state">The tablet Billbot ejected from his own chest before he sent you out. Keep it open next to Minecraft, or check in anytime for B1llBot, your Mission Notes, and the Field Training Simulator.</p>
+    <p class="empty-state">The tablet Billbot ejected from his own chest before he sent you out. Keep it open next to Minecraft, or check in anytime for B1llBot, your Mission Evidence, and the Field Training Simulator.</p>
 
     <section class="card" id="link-confirm-card" hidden>
       <div class="card__eyebrow">⛏ Tablet sync request</div>
@@ -56,7 +59,7 @@
 
     <div class="fk-tabs" role="tablist" aria-label="Companion tools">
       <button class="fk-tab on" id="fk-tab-chat" data-fpane="chat" role="tab" aria-selected="true" type="button">B1llBot</button>
-      <button class="fk-tab" id="fk-tab-note" data-fpane="note" role="tab" aria-selected="false" type="button">Mission Notes</button>
+      <button class="fk-tab" id="fk-tab-note" data-fpane="note" role="tab" aria-selected="false" type="button">Mission Evidence</button>
       <button class="fk-tab" id="fk-tab-mc" data-fpane="mc" role="tab" aria-selected="false" type="button"><svg aria-hidden="true" width="14" height="14" viewBox="0 0 16 16" style="vertical-align:-2px;margin-right:3px;"><rect width="16" height="16" fill="#7a4a2b"/><rect width="16" height="6" fill="#6cbb3c"/><rect y="5" width="16" height="2" fill="#5a9c30"/></svg>Field Training Simulator</button>
     </div>
 
@@ -71,25 +74,59 @@
 
     <section class="card fk-pane" data-fpane="note" hidden>
       <div class="card__eyebrow">Current Mission</div>
-      <div id="nb-mission-title" style="font-weight:700;font-size:1.05em;margin-bottom:6px;">Loading…</div>
-      <p id="nb-mission-desc" class="empty-state" style="margin:0 0 6px;"></p>
-      <button id="nb-mission-more-btn" type="button" style="background:none;border:none;padding:0;cursor:pointer;color:inherit;opacity:0.75;font-size:0.85em;font-weight:600;">More ▾</button>
-      <div id="nb-mission-more" hidden style="margin-top:8px;padding-top:8px;border-top:1px solid rgba(0,0,0,0.1);font-size:0.92em;line-height:1.5;"></div>
+      <div id="cm-title" style="font-weight:700;font-size:1.1em;margin-bottom:10px;">Loading…</div>
 
-      <div class="card__eyebrow" style="margin-top:18px;">Daily Field Report</div>
-      <div id="reflect-body">Loading...</div>
+      <div class="empty-state" style="font-size:0.78em;letter-spacing:.04em;text-transform:uppercase;margin-bottom:3px;">Objective</div>
+      <p id="cm-objective" style="margin:0 0 12px;"></p>
 
-      <div class="card__eyebrow" style="margin-top:18px;">Mission Notes</div>
-      <p class="empty-state" style="margin:0 0 10px;">Every apprentice kept a mission log. Record what you notice before you forget it.</p>
-      <button id="fn-add-btn" type="button" class="btn btn-primary" style="width:100%;margin-bottom:10px;">+ Add Mission Note</button>
-      <div id="fn-entry" hidden style="margin-bottom:10px;">
-        <textarea id="fn-input" rows="3" placeholder="What did you notice? Who did you meet? What surprised you?" style="width:100%;"></textarea>
-        <div class="row" style="margin-top:6px;">
-          <button type="button" id="fn-save" class="btn btn-primary" style="flex:1;">Save</button>
-          <button type="button" id="fn-cancel" class="btn" style="flex:1;">Cancel</button>
+      <div class="empty-state" style="font-size:0.78em;letter-spacing:.04em;text-transform:uppercase;margin-bottom:3px;">Briefing</div>
+      <p id="cm-briefing" style="margin:0 0 10px;"></p>
+
+      <button id="cm-view-full-btn" type="button" style="background:none;border:none;padding:0;cursor:pointer;color:inherit;opacity:0.75;font-size:0.85em;font-weight:600;">View Full Mission ▾</button>
+      <div id="cm-full" hidden style="margin-top:8px;padding-top:8px;border-top:1px solid rgba(0,0,0,0.1);font-size:0.92em;line-height:1.5;"></div>
+
+      <div class="card__eyebrow" style="margin-top:20px;">Mission Evidence</div>
+
+      <div id="me-empty">
+        <p class="empty-state" style="margin:0 0 10px;">You haven't filed evidence for this mission yet.</p>
+        <button id="me-file-btn" type="button" class="btn btn-primary" style="width:100%;">File Evidence</button>
+      </div>
+
+      <div id="me-form" hidden>
+        <label style="font-weight:600;font-size:0.9em;display:block;margin-bottom:6px;">Evidence</label>
+        <div id="me-photo-drop" style="border-radius:10px;background:rgba(0,0,0,0.04);padding:14px;text-align:center;margin-bottom:6px;">
+          <img id="me-photo-preview" hidden style="max-width:100%;max-height:220px;border-radius:8px;display:block;margin:0 auto;">
+          <p id="me-photo-placeholder" class="empty-state" style="margin:8px 0 0;">No photo yet</p>
+        </div>
+        <input type="file" id="me-photo-input-camera" accept="image/*" capture="environment" style="display:none;">
+        <input type="file" id="me-photo-input-choose" accept="image/*" style="display:none;">
+        <div class="row" style="margin-bottom:6px;">
+          <button type="button" id="me-take-photo" class="btn" style="flex:1;">Take Photo</button>
+          <button type="button" id="me-choose-photo" class="btn" style="flex:1;">Choose Photo</button>
+        </div>
+        <p class="empty-state" style="margin:0 0 16px;">Capture one piece of evidence that represents what you learned during this mission.</p>
+
+        <label for="me-observation" style="font-weight:600;font-size:0.9em;display:block;margin-bottom:4px;">Observation</label>
+        <p class="empty-state" style="margin:0 0 6px;">What did you notice? What surprised you? How did this change your understanding of the people, systems, or financial realities behind this challenge?</p>
+        <textarea id="me-observation" rows="5" placeholder="Describe your evidence and explain why it matters." style="width:100%;margin-bottom:16px;"></textarea>
+
+        <label style="font-weight:600;font-size:0.9em;display:block;margin-bottom:4px;">Mission</label>
+        <p id="me-mission-readonly" class="empty-state" style="margin:0 0 16px;"></p>
+
+        <button type="button" id="me-submit" class="btn btn-primary" style="width:100%;">Submit Field Report</button>
+        <p id="me-status" class="empty-state" style="margin-top:8px;"></p>
+      </div>
+
+      <div id="me-filed" hidden>
+        <p style="font-weight:700;margin:0 0 4px;">Mission Evidence ✓</p>
+        <p class="empty-state" style="margin:0 0 10px;">Your Field Report has been filed.</p>
+        <button type="button" id="me-view-btn" class="btn" style="width:100%;">View Submission</button>
+        <div id="me-filed-detail" hidden style="margin-top:10px;">
+          <img id="me-filed-photo" style="max-width:100%;border-radius:10px;margin-bottom:10px;">
+          <p id="me-filed-observation" style="margin:0 0 6px;"></p>
+          <p id="me-filed-date" class="empty-state" style="margin:0;"></p>
         </div>
       </div>
-      <ul id="fn-list" style="list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:8px;"></ul>
     </section>
 
     <section class="card fk-pane" data-fpane="mc" hidden>
@@ -259,17 +296,20 @@
       fetch(`/api/minigames/kit/piece?user_id=${userId}`, { method: "POST", body: (() => { const f = new FormData(); f.append("piece", "cap"); return f; })() }).catch(() => {});
       connectLive();
       initChat();
-      loadNotebookMission();
-      loadReflect();
+      loadCurrentMission();
       loadConnect();
       setInterval(pollLinkRequest, 8000);
     }
 
-    // ---- Mission Notes tab: current mission title/desc + "More" (real
-    // curriculum narrative, same pbl_description field the desktop app's
-    // Mission Notes tab reads from this same /api/missions response) ----
-    async function loadNotebookMission() {
-      const titleEl = document.getElementById("nb-mission-title"), descEl = document.getElementById("nb-mission-desc");
+    // ---- Mission Evidence tab: Current Mission (title/objective/briefing +
+    // "View Full Mission") plus a single photo+observation Field Report per
+    // mission. Not a notebook or journal -- exactly one submission per
+    // mission (main.py's mission_field_reports, UNIQUE(user_id, mission_id),
+    // deliberately outside the real evidence/AND-gate pipeline). ----
+    let currentMissionId = null;
+    async function loadCurrentMission() {
+      const titleEl = document.getElementById("cm-title"), objEl = document.getElementById("cm-objective"),
+        briefEl = document.getElementById("cm-briefing");
       try {
         const [missionsRes, profile] = await Promise.all([
           fetch(`/api/missions?user_id=${userId}`).then(r => r.json()),
@@ -279,20 +319,38 @@
         const completed = new Set(((profile && profile.missions_completed) || []).map(String));
         const current = missions.find(m => !completed.has(String(m.id))) || missions[missions.length - 1];
         if (!current) { titleEl.textContent = "No missions yet."; return; }
+        currentMissionId = current.id;
         titleEl.textContent = current.title;
-        descEl.textContent = current.brief || "";
-        const moreBtn = document.getElementById("nb-mission-more-btn"), moreBox = document.getElementById("nb-mission-more");
+        objEl.textContent = current.objective || current.brief || "";
+        const { briefing, steps } = splitMissionNarrative(current.pbl_description);
+        briefEl.textContent = briefing || current.brief || "";
+
+        const viewBtn = document.getElementById("cm-view-full-btn"), fullBox = document.getElementById("cm-full");
         let expanded = false;
-        moreBtn.addEventListener("click", () => {
+        viewBtn.addEventListener("click", () => {
           expanded = !expanded;
-          moreBox.hidden = !expanded;
-          moreBtn.textContent = expanded ? "Less ▴" : "More ▾";
-          if (expanded && !moreBox.dataset.loaded) {
-            moreBox.dataset.loaded = "1";
-            moreBox.innerHTML = current.pbl_description ? formatNarrative(current.pbl_description) : "No additional detail yet for this mission.";
+          fullBox.hidden = !expanded;
+          viewBtn.textContent = expanded ? "View Full Mission ▴" : "View Full Mission ▾";
+          if (expanded && !fullBox.dataset.loaded) {
+            fullBox.dataset.loaded = "1";
+            fullBox.innerHTML = steps ? formatNarrative(steps) : "No additional detail yet for this mission.";
           }
         });
+
+        document.getElementById("me-mission-readonly").textContent = current.title;
+        loadMissionEvidence();
       } catch (e) { titleEl.textContent = "Couldn't load your mission right now."; }
+    }
+    // The curriculum narrative's intro paragraph (shown always, as
+    // "Briefing") vs. its "Step N:" breakdown (shown only behind "View Full
+    // Mission") -- same field (pbl_description) the desktop app's Mission
+    // Notes tab reads, just split instead of shown as one block.
+    function splitMissionNarrative(text) {
+      if (!text) return { briefing: "", steps: "" };
+      const blocks = text.split(/\n\n+/);
+      const stepStart = blocks.findIndex((b) => /^Step \d+/.test(b.split("\n")[0]));
+      if (stepStart === -1) return { briefing: text, steps: "" };
+      return { briefing: blocks.slice(0, stepStart).join("\n\n"), steps: blocks.slice(stepStart).join("\n\n") };
     }
     // Same light "Step N:" bold / "- " bullet structure the desktop app's
     // Mission Notes tab uses for this same field.
@@ -313,89 +371,89 @@
       }).join("");
     }
 
-    // ---- Mission Notes: same plain localStorage journal as the desktop
-    // app's Mission Notes tab -- same key, so notes made on this device show up
-    // in either place, same browser. ----
-    (function () {
-      const KEY = "evoke-field-notes";
-      const addBtn = document.getElementById("fn-add-btn"), entry = document.getElementById("fn-entry"),
-        input = document.getElementById("fn-input"), saveBtn = document.getElementById("fn-save"),
-        cancelBtn = document.getElementById("fn-cancel"), list = document.getElementById("fn-list");
-      function load() { try { return JSON.parse(localStorage.getItem(KEY) || "[]"); } catch (e) { return []; } }
-      function persist(notes) { try { localStorage.setItem(KEY, JSON.stringify(notes)); } catch (e) {} }
-      function fmtTime(ts) { try { return new Date(ts).toLocaleString(undefined, { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" }); } catch (e) { return ""; } }
-      function render() {
-        const notes = load();
-        list.innerHTML = notes.length ? "" : `<li class="empty-state">No mission notes yet.</li>`;
-        notes.slice().reverse().forEach((n) => {
-          const li = document.createElement("li");
-          li.style.cssText = "padding:9px 11px;border-radius:8px;background:rgba(0,0,0,0.04);";
-          const meta = document.createElement("div");
-          meta.className = "empty-state";
-          meta.style.cssText = "font-size:0.78em;margin-bottom:4px;";
-          meta.textContent = fmtTime(n.ts);
-          const text = document.createElement("div");
-          text.style.cssText = "white-space:pre-wrap;";
-          text.textContent = n.text;
-          li.appendChild(meta); li.appendChild(text);
-          list.appendChild(li);
-        });
-      }
-      function openEntry() { entry.hidden = false; addBtn.hidden = true; input.value = ""; input.focus(); }
-      function closeEntry() { entry.hidden = true; addBtn.hidden = false; }
-      addBtn.addEventListener("click", openEntry);
-      cancelBtn.addEventListener("click", closeEntry);
-      saveBtn.addEventListener("click", () => {
-        const text = (input.value || "").trim();
-        if (!text) return;
-        const notes = load();
-        notes.push({ text, ts: Date.now() });
-        persist(notes);
-        render();
-        closeEntry();
-      });
-      render();
-    })();
-
-    // ---- Daily Field Report (the Mission Notes tab's real content) ----
-    // Wisdom generates async now (workers.py's FIELD REPORT WORKER) and
-    // arrives live over the /ws socket (see connectLive()'s WisdomReady
-    // case) -- "Filed" shows instantly instead of waiting on the AI call.
-    function showWisdom(wisdom) {
-      const el = document.getElementById("reflect-wisdom");
-      if (el) el.outerHTML = `<p id="reflect-wisdom" class="empty-state">"${escapeHtml(wisdom)}" — B1llBot</p>`;
+    // ---- Mission Evidence: the single File Evidence -> Submit Field
+    // Report flow, backed by /api/mission-field-report. ----
+    let evidencePhotoFile = null;
+    function fmtFiledDate(iso) {
+      try { return new Date(iso).toLocaleString(undefined, { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" }); } catch (e) { return ""; }
     }
-    async function loadReflect() {
-      const body = document.getElementById("reflect-body");
+    function showEvidenceEmpty() {
+      document.getElementById("me-empty").hidden = false;
+      document.getElementById("me-form").hidden = true;
+      document.getElementById("me-filed").hidden = true;
+    }
+    function showEvidenceForm() {
+      document.getElementById("me-empty").hidden = true;
+      document.getElementById("me-form").hidden = false;
+      document.getElementById("me-filed").hidden = true;
+    }
+    function showEvidenceFiled(report) {
+      document.getElementById("me-empty").hidden = true;
+      document.getElementById("me-form").hidden = true;
+      document.getElementById("me-filed").hidden = false;
+      document.getElementById("me-filed-detail").hidden = true;
+      document.getElementById("me-view-btn").textContent = "View Submission";
+      document.getElementById("me-filed-photo").src = report.photo_url;
+      document.getElementById("me-filed-observation").textContent = report.observation;
+      document.getElementById("me-filed-date").textContent = report.filed_at ? `Filed ${fmtFiledDate(report.filed_at)}` : "Filed";
+    }
+    async function loadMissionEvidence() {
+      if (!currentMissionId) return;
       try {
-        const r = await fetch(`/api/reflections/${userId}`).then(r => r.json());
-        if (r.filed_today) {
-          const latest = (r.journal || [])[0];
-          body.innerHTML = `<p>Filed today ✓</p><p id="reflect-wisdom" class="empty-state">${latest && latest.wisdom ? `"${escapeHtml(latest.wisdom)}" — B1llBot` : "B1llBot's still thinking of a word of wisdom…"}</p>`;
-          return;
-        }
+        const r = await fetch(`/api/mission-field-report/${currentMissionId}`).then(r => r.json());
+        if (r.filed) { showEvidenceFiled(r); return; }
       } catch (e) {}
-      body.innerHTML = `
-        <form id="reflect-form" class="stack-sm">
-          <textarea id="reflect-text" rows="2" maxlength="600" placeholder="What did you do today? What are you thinking about?"></textarea>
-          <button type="submit" class="btn btn-primary">File Report</button>
-        </form>
-        <p id="reflect-status" class="empty-state"></p>`;
-      document.getElementById("reflect-form").addEventListener("submit", async (e) => {
-        e.preventDefault();
-        const text = document.getElementById("reflect-text").value.trim();
-        if (!text) return;
-        document.getElementById("reflect-status").textContent = "Filing…";
-        try {
-          const fd = new FormData();
-          fd.append("text", text);
-          await fetch(`/api/reflection?user_id=${userId}`, { method: "POST", body: fd });
-          body.innerHTML = `<p>Filed ✓</p><p id="reflect-wisdom" class="empty-state">B1llBot's thinking of a word of wisdom…</p>`;
-        } catch (err) {
-          document.getElementById("reflect-status").textContent = "Couldn't file that — try again.";
-        }
-      });
+      showEvidenceEmpty();
     }
+    document.getElementById("me-file-btn").addEventListener("click", () => {
+      evidencePhotoFile = null;
+      document.getElementById("me-photo-preview").hidden = true;
+      document.getElementById("me-photo-placeholder").hidden = false;
+      document.getElementById("me-observation").value = "";
+      document.getElementById("me-status").textContent = "";
+      showEvidenceForm();
+    });
+    document.getElementById("me-view-btn").addEventListener("click", () => {
+      const detail = document.getElementById("me-filed-detail");
+      detail.hidden = !detail.hidden;
+      document.getElementById("me-view-btn").textContent = detail.hidden ? "View Submission" : "Hide Submission";
+    });
+    function handlePhotoPicked(file) {
+      if (!file || !/^image\//.test(file.type)) return;
+      evidencePhotoFile = file;
+      const reader = new FileReader();
+      reader.onload = () => {
+        const img = document.getElementById("me-photo-preview");
+        img.src = reader.result;
+        img.hidden = false;
+        document.getElementById("me-photo-placeholder").hidden = true;
+      };
+      reader.readAsDataURL(file);
+    }
+    document.getElementById("me-take-photo").addEventListener("click", () => document.getElementById("me-photo-input-camera").click());
+    document.getElementById("me-choose-photo").addEventListener("click", () => document.getElementById("me-photo-input-choose").click());
+    document.getElementById("me-photo-input-camera").addEventListener("change", (e) => handlePhotoPicked(e.target.files[0]));
+    document.getElementById("me-photo-input-choose").addEventListener("change", (e) => handlePhotoPicked(e.target.files[0]));
+    document.getElementById("me-submit").addEventListener("click", async () => {
+      const status = document.getElementById("me-status");
+      const observation = document.getElementById("me-observation").value.trim();
+      if (!evidencePhotoFile) { status.textContent = "Take or choose a photo first."; return; }
+      if (!observation) { status.textContent = "Describe your evidence before filing."; return; }
+      if (!currentMissionId) { status.textContent = "No active mission to file against."; return; }
+      status.textContent = "Filing…";
+      try {
+        const fd = new FormData();
+        fd.append("mission_id", currentMissionId);
+        fd.append("photo", evidencePhotoFile);
+        fd.append("observation", observation);
+        const res = await fetch("/api/mission-field-report", { method: "POST", body: fd });
+        const data = await res.json();
+        if (!res.ok) throw new Error(data && data.detail || "Couldn't file that");
+        showEvidenceFiled(data);
+      } catch (err) {
+        status.textContent = err.message || "Couldn't file that — try again.";
+      }
+    });
 
     // ---- Connect to Minecraft (Minecraft tab) -- same code-entry mechanism
     // as the desktop app's Minecraft tab: mint a code, type it in-game,
@@ -574,12 +632,8 @@
             showLinkConfirm(msg.data.minecraft_username);
             return;
           }
-          if (msg.type === "WisdomReady" && msg.data && msg.data.user_id === userId) {
-            showWisdom(msg.data.wisdom);
-            return;
-          }
           if (msg.type === "MissionCompleted" && msg.data && msg.data.user_id === userId) {
-            loadNotebookMission();
+            loadCurrentMission();
           }
         };
         ws.onclose = () => { setTimeout(open, retryMs); retryMs = Math.min(retryMs * 2, 15000); };

@@ -97,6 +97,12 @@ CREATE TABLE missions (
     pbl_description TEXT,
     mission_brief_md TEXT,
     evidence_requirements_md TEXT,
+    -- "I can..." student-facing learning objective -- source docx calls
+    -- this SWBAT ("Students Will Be Able To"); transcribed and converted to
+    -- first person the same manual way pbl_description/mission_brief_md
+    -- were, no auto-import pipeline. First surfaced on the Field Tablet's
+    -- Mission Evidence tab (companion.html), 2026-07-21.
+    objective_md TEXT,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     -- NULL = not yet released to learners. Gating is manual admin release,
     -- not automatic order-of-completion -- see GAPS.md's now-resolved
@@ -271,6 +277,23 @@ CREATE TABLE mission_reflections (
     team_id UUID NOT NULL REFERENCES teams(id),
     reflection TEXT NOT NULL,
     submitted_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE(user_id, mission_id)
+);
+
+-- The Field Tablet's (companion.html) single evidence submission per
+-- mission -- one photo + one observation, filed once from the phone while
+-- a student is out investigating. Deliberately separate from `submissions`
+-- (the team's shared evidence, main.py's team-completion AND-gate) and
+-- `mission_reflections` (each member's individual reflection) -- this is a
+-- personal field capture, not a substitute for either, and must never
+-- trigger MissionCompleted/XPGranted/BadgeAwarded.
+CREATE TABLE mission_field_reports (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    user_id UUID NOT NULL REFERENCES users(id),
+    mission_id UUID NOT NULL REFERENCES missions(id),
+    photo_object_key VARCHAR(500) NOT NULL,
+    observation TEXT NOT NULL,
+    filed_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     UNIQUE(user_id, mission_id)
 );
 

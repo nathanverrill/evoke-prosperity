@@ -1021,14 +1021,14 @@ async def list_missions(user_id: str = Depends(require_self)):
         # Fetch all missions for this campaign
         missions_data = db_fetch_all(
             """SELECT id, title, week, arc, superpower, mission_brief_md, released_at,
-                      pbl_description, evidence_requirements_md
+                      pbl_description, evidence_requirements_md, objective_md
                FROM missions WHERE campaign_id = %s::uuid ORDER BY week, sequence""",
             (campaign_id,)
         )
 
         missions = []
         for mission in missions_data:
-            mission_id, title, week, arc, superpower, brief, released_at, pbl_description, evidence_requirements = mission
+            mission_id, title, week, arc, superpower, brief, released_at, pbl_description, evidence_requirements, objective = mission
 
             # Get any linked quest
             quest = db_fetch_one(
@@ -1043,6 +1043,7 @@ async def list_missions(user_id: str = Depends(require_self)):
                 "arc": arc,
                 "superpower": superpower,
                 "brief": brief,
+                "objective": objective,
                 "pbl_description": pbl_description,
                 "evidence_requirements": evidence_requirements,
                 "released": released_at is not None,
@@ -3880,6 +3881,91 @@ async def get_avatar(user_id: str):
 async def delete_avatar(user_id: str = Depends(require_self)):
     db_execute("UPDATE users SET avatar_object_key = NULL WHERE id = %s::uuid", (user_id,))
     return {"status": "removed"}
+
+
+# ========== Field Tablet: Mission Evidence (companion.html) ==========
+# One photo + one observation, filed once per (learner, mission) from the
+# phone while a student is out investigating. Deliberately its own table
+# and its own tiny pipeline -- NOT a route into the real evidence/AND-gate
+# machinery (submit_evidence, submit_reflection, _complete_mission_for_user)
+# used by the desktop Operations Hub, so filing one of these can never
+# accidentally fire MissionCompleted/XPGranted/BadgeAwarded. If this ever
+# needs to count as real mission evidence, that's a deliberate later
+# decision, not something that should happen by construction.
+
+@app.get("/api/mission-field-report/{mission_id}")
+async def get_mission_field_report(mission_id: str, user_id: str = Depends(get_current_user)):
+    row = db_fetch_one(
+        "SELECT observation, filed_at FROM mission_field_reports WHERE user_id = %s::uuid AND mission_id = %s::uuid",
+        (user_id, mission_id)
+    )
+    if not row:
+        return {"filed": False}
+    return {
+        "filed": True,
+        "observation": row[0],
+        "filed_at": row[1].isoformat() if row[1] else None,
+        "photo_url": f"/api/mission-field-report/{mission_id}/photo",
+    }
+
+
+@app.post("/api/mission-field-report")
+async def submit_mission_field_report(
+    mission_id: str = Form(...),
+    photo: UploadFile = File(...),
+    observation: str = Form(...),
+    user_id: str = Depends(get_current_user),
+):
+    if not (photo.content_type or "").startswith("image/"):
+        raise HTTPException(status_code=400, detail="Evidence must be a photo")
+    observation = observation.strip()
+    if not observation:
+        raise HTTPException(status_code=400, detail="Describe your evidence before filing")
+    mission_release = db_fetch_one("SELECT released_at FROM missions WHERE id = %s::uuid", (mission_id,))
+    if not mission_release or mission_release[0] is None:
+        raise HTTPException(status_code=403, detail="This mission hasn't been released yet")
+
+    data = await photo.read()
+    object_key = f"mission-field-reports/{mission_id}/{user_id}"
+    s3_client.put_object(Bucket="default-bucket", Key=object_key, Body=data, ContentType=photo.content_type)
+
+    report_id = str(uuid.uuid4())
+    db_execute(
+        """INSERT INTO mission_field_reports (id, user_id, mission_id, photo_object_key, observation)
+           VALUES (%s::uuid, %s::uuid, %s::uuid, %s, %s)
+           ON CONFLICT (user_id, mission_id) DO UPDATE SET
+               photo_object_key = EXCLUDED.photo_object_key,
+               observation = EXCLUDED.observation,
+               filed_at = CURRENT_TIMESTAMP""",
+        (report_id, user_id, mission_id, object_key, observation)
+    )
+    row = db_fetch_one(
+        "SELECT filed_at FROM mission_field_reports WHERE user_id = %s::uuid AND mission_id = %s::uuid",
+        (user_id, mission_id)
+    )
+    return {
+        "filed": True,
+        "observation": observation,
+        "filed_at": row[0].isoformat() if row and row[0] else None,
+        "photo_url": f"/api/mission-field-report/{mission_id}/photo",
+    }
+
+
+@app.get("/api/mission-field-report/{mission_id}/photo")
+async def get_mission_field_report_photo(mission_id: str, user_id: str = Depends(get_current_user)):
+    row = db_fetch_one(
+        "SELECT photo_object_key FROM mission_field_reports WHERE user_id = %s::uuid AND mission_id = %s::uuid",
+        (user_id, mission_id)
+    )
+    if not row:
+        raise HTTPException(status_code=404, detail="No field report filed for this mission")
+    try:
+        obj = s3_client.get_object(Bucket="default-bucket", Key=row[0])
+        return Response(content=obj["Body"].read(),
+                        media_type=obj.get("ContentType", "image/jpeg"),
+                        headers={"Cache-Control": "no-cache"})
+    except Exception:
+        raise HTTPException(status_code=404, detail="Photo not found")
 
 
 @app.post("/api/profile/{user_id}/sigil")
