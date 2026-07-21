@@ -1,0 +1,286 @@
+<title>EVOKE ↔ Brightspace — Integration &amp; Setup</title>
+<style>
+  :root {
+    --bg: #fbfcfc;
+    --surface: #f1f5f4;
+    --ink: #16211f;
+    --muted: #5b6a67;
+    --accent: #0d7d74;
+    --line: #dce4e2;
+    --chip-req-bg: #e2f0ee;
+    --chip-req-ink: #0b6159;
+    --chip-auto-bg: #eceff0;
+    --chip-auto-ink: #5b6a67;
+    --chip-warn-bg: #f5ecdd;
+    --chip-warn-ink: #8a5410;
+    --mono: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #0f1615;
+      --surface: #16201e;
+      --ink: #dce6e3;
+      --muted: #8ba39e;
+      --accent: #45b0a4;
+      --line: #24312e;
+      --chip-req-bg: #143530;
+      --chip-req-ink: #6fcabe;
+      --chip-auto-bg: #1d2726;
+      --chip-auto-ink: #8ba39e;
+      --chip-warn-bg: #33270f;
+      --chip-warn-ink: #d9a24a;
+    }
+  }
+  :root[data-theme="dark"] {
+    --bg: #0f1615;
+    --surface: #16201e;
+    --ink: #dce6e3;
+    --muted: #8ba39e;
+    --accent: #45b0a4;
+    --line: #24312e;
+    --chip-req-bg: #143530;
+    --chip-req-ink: #6fcabe;
+    --chip-auto-bg: #1d2726;
+    --chip-auto-ink: #8ba39e;
+    --chip-warn-bg: #33270f;
+    --chip-warn-ink: #d9a24a;
+  }
+  :root[data-theme="light"] {
+    --bg: #fbfcfc;
+    --surface: #f1f5f4;
+    --ink: #16211f;
+    --muted: #5b6a67;
+    --accent: #0d7d74;
+    --line: #dce4e2;
+    --chip-req-bg: #e2f0ee;
+    --chip-req-ink: #0b6159;
+    --chip-auto-bg: #eceff0;
+    --chip-auto-ink: #5b6a67;
+    --chip-warn-bg: #f5ecdd;
+    --chip-warn-ink: #8a5410;
+  }
+
+  body {
+    background: var(--bg);
+    color: var(--ink);
+    font-family: "Helvetica Neue", Helvetica, Arial, sans-serif;
+    line-height: 1.55;
+    font-size: 15.5px;
+  }
+  .page { max-width: 740px; margin: 0 auto; padding: 48px 24px 72px; }
+
+  .eyebrow {
+    color: var(--accent);
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+  }
+  header .eyebrow { font-size: 12px; }
+  h1 { font-size: 27px; font-weight: 700; letter-spacing: -0.01em; margin: 6px 0 4px; text-wrap: balance; }
+  .dateline { color: var(--muted); font-size: 13px; }
+  header { border-bottom: 2px solid var(--accent); padding-bottom: 18px; margin-bottom: 8px; }
+
+  section { margin-top: 40px; }
+  section > .eyebrow { display: block; margin-bottom: 10px; }
+  h2 { font-size: 19px; font-weight: 700; margin: 0 0 10px; letter-spacing: -0.005em; text-wrap: balance; }
+  h3 { font-size: 15px; font-weight: 700; margin: 22px 0 8px; }
+  p { margin: 0 0 12px; max-width: 66ch; }
+  p:last-child { margin-bottom: 0; }
+  .muted { color: var(--muted); }
+  code {
+    font-family: var(--mono);
+    font-size: 0.88em;
+    background: var(--surface);
+    border: 1px solid var(--line);
+    border-radius: 3px;
+    padding: 1px 5px;
+  }
+
+  /* token-path cards */
+  .paths { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-top: 16px; }
+  @media (max-width: 560px) { .paths { grid-template-columns: 1fr; } }
+  .path {
+    border: 1px solid var(--line);
+    border-top: 3px solid var(--accent);
+    border-radius: 4px;
+    background: var(--surface);
+    padding: 14px 16px;
+    font-size: 13.5px;
+  }
+  .path strong { display: block; font-size: 14px; margin-bottom: 4px; }
+  .path .who {
+    font-size: 11px; font-weight: 700; letter-spacing: 0.09em;
+    text-transform: uppercase; color: var(--accent); display: block; margin-bottom: 6px;
+  }
+
+  .callout {
+    border-left: 3px solid var(--chip-warn-ink);
+    background: var(--chip-warn-bg);
+    color: var(--ink);
+    padding: 12px 16px;
+    margin: 18px 0 0;
+    font-size: 14px;
+    border-radius: 0 4px 4px 0;
+    max-width: none;
+  }
+  .callout strong { color: var(--chip-warn-ink); }
+
+  /* checklist */
+  ol.steps { margin: 14px 0 0; padding: 0; list-style: none; counter-reset: step; }
+  ol.steps li {
+    counter-increment: step;
+    position: relative;
+    padding: 0 0 16px 40px;
+    font-size: 14px;
+    max-width: 64ch;
+  }
+  ol.steps li::before {
+    content: counter(step);
+    position: absolute; left: 0; top: 0;
+    width: 24px; height: 24px;
+    border: 1.5px solid var(--accent);
+    color: var(--accent);
+    border-radius: 50%;
+    font-size: 12px; font-weight: 700;
+    display: flex; align-items: center; justify-content: center;
+    background: var(--bg);
+  }
+  ol.steps li:not(:last-child)::after {
+    content: "";
+    position: absolute; left: 11.5px; top: 26px; bottom: 2px;
+    width: 1.5px; background: var(--line);
+  }
+  ol.steps li strong { display: block; margin-bottom: 2px; }
+
+  ul.tight { margin: 10px 0 0; padding-left: 20px; }
+  ul.tight li { margin-bottom: 8px; font-size: 14px; max-width: 62ch; }
+
+  .chip {
+    display: inline-block;
+    font-size: 10.5px; font-weight: 700; letter-spacing: 0.07em;
+    text-transform: uppercase;
+    border-radius: 999px; padding: 2px 9px; white-space: nowrap;
+    vertical-align: middle;
+  }
+  .chip.req  { background: var(--chip-req-bg);  color: var(--chip-req-ink); }
+  .chip.auto { background: var(--chip-auto-bg); color: var(--chip-auto-ink); }
+  .chip.warn { background: var(--chip-warn-bg); color: var(--chip-warn-ink); }
+
+  .table-scroll { overflow-x: auto; margin: 14px 0 6px; }
+  table { border-collapse: collapse; width: 100%; font-size: 13.5px; }
+  th {
+    text-align: left; font-size: 11px; text-transform: uppercase;
+    letter-spacing: 0.09em; color: var(--muted); font-weight: 700;
+    padding: 0 14px 7px 0; border-bottom: 1.5px solid var(--line); white-space: nowrap;
+  }
+  td { padding: 8px 14px 8px 0; border-bottom: 1px solid var(--line); vertical-align: top; }
+  td:last-child, th:last-child { padding-right: 0; }
+
+  footer {
+    margin-top: 52px; padding-top: 14px;
+    border-top: 1px solid var(--line);
+    font-size: 12.5px; color: var(--muted);
+  }
+</style>
+
+<div class="page">
+  <header>
+    <span class="eyebrow">EVOKE Prosperity · Engineering</span>
+    <h1>Brightspace Integration — Security Model &amp; Setup</h1>
+    <div class="dateline">Verified against the live tenant (charge.yacenter.org, "EVOKE Test") July 19–21, 2026</div>
+  </header>
+
+  <section>
+    <span class="eyebrow">01 · Security model</span>
+    <h2>OAuth only, two token paths, least privilege by construction</h2>
+    <p>Everything that runs today goes through Brightspace's <strong>OAuth&nbsp;2.0</strong> (Manage Extensibility app registration). There are no shared service passwords, no API keys in student paths, and no LTI launch in use. Two distinct token paths, deliberately kept separate:</p>
+    <div class="paths">
+      <div class="path">
+        <span class="who">Per student</span>
+        <strong>The student's own token</strong>
+        Minted fresh at every real login. Used for evidence submission and grade sync, so every submission is attributed to the right person in the gradebook — and a student's token can only ever see what that student can see. No shared credential to leak or over-scope.
+      </div>
+      <div class="path">
+        <span class="who">Admin session</span>
+        <strong>Service-connection token</strong>
+        Minted by the admin's one-click "Connect Brightspace" in <code>/admin</code>, cached in process memory only — never written to disk or database. Used for read-only pulls (assignments, classlist, grades). Expires with the token or a restart; reconnecting is one click.
+      </div>
+    </div>
+    <h3>Boundaries that hold by design</h3>
+    <ul class="tight">
+      <li><strong>Two identity systems that never mix.</strong> Real students and instructors are Brightspace accounts underneath (OAuth). The EVOKE admin is a local bcrypt login with <em>no</em> Brightspace identity behind it — signing into <code>/admin</code> never touches Brightspace, and the admin's connect flow uses its own state cookie so it can't collide with a learner login in the same browser.</li>
+      <li><strong>CSRF-protected OAuth flows.</strong> Random per-flow <code>state</code> values in origin-bound cookies, validated at the callback; the registered redirect URI must match exactly.</li>
+      <li><strong>Reads are free, writes are deliberate.</strong> Pulling assignments is read-only and safe to repeat. Linking an assignment to a mission is an explicit admin action with database-enforced 1:1 uniqueness in both directions — an assignment already linked elsewhere 409s by name rather than silently re-linking.</li>
+      <li><strong>EVOKE never writes rosters, groups, or enrollment.</strong> Brightspace Groups are the read-only source of truth for teams; the old manual roster import was deliberately removed. The district's enrollment process stays authoritative.</li>
+      <li><strong>Submissions never block on Brightspace.</strong> Evidence stores locally first; a background worker pushes it to the Dropbox Folder using the student's own token. If Brightspace is down, the student's submission still exists and is marked for the sync-failed path — nothing is lost.</li>
+    </ul>
+    <p class="muted" style="font-size:13px; margin-top:14px">Not in use, by choice: LTI 1.3 launch (an alternate login path, unwired) and the legacy <code>APP_KEY</code>/<code>APP_SECRET</code> ID-Key service account (dead code — do not set one up expecting it to be required).</p>
+  </section>
+
+  <section>
+    <span class="eyebrow">02 · Brightspace setup</span>
+    <h2>One-time setup, per course offering</h2>
+    <p>Needs someone with instructor/course-admin rights, once:</p>
+    <ol class="steps">
+      <li><strong>Register the OAuth app</strong> (Manage Extensibility). Yields <code>BRIGHTSPACE_CLIENT_ID</code> / <code>BRIGHTSPACE_CLIENT_SECRET</code>. The registered Redirect URI must match <code>BRIGHTSPACE_OAUTH_REDIRECT_URI</code> character-for-character — a mismatch fails OAuth state validation. Scope: <code>core:*:*</code>.</li>
+      <li><strong>Create the course offering</strong> the normal way; its org unit ID becomes <code>BRIGHTSPACE_ORG_UNIT_ID</code>.</li>
+      <li><strong>Create a Group Category with named groups</strong> (e.g. Alpha, Bravo) and enroll students into them. EVOKE reads these at every login to assign teams — it never creates or edits groups.</li>
+      <li><strong>Enroll learners normally</strong> (SIS, instructor add — whatever the institution does). EVOKE has no roster import; accounts are provisioned automatically at first OAuth login.</li>
+      <li><strong>Click "Connect Brightspace" in <code>/admin</code></strong> to mint the service-connection token the pull/read actions use. Repeat after a restart or token expiry.</li>
+    </ol>
+
+    <h2 style="margin-top:34px">Per mission — repeat for each one going live</h2>
+    <ol class="steps">
+      <li><strong>Create the Dropbox Folder in Brightspace — and publish it.</strong> Creating it is not enough: set its Availability/Visibility so students can actually see it.</li>
+      <li><strong>Pull → Link in <code>/admin</code>.</strong> Pull fetches and validates live assignments (read-only); Link attaches one assignment ID to one EVOKE mission.</li>
+      <li><strong>Release the mission in EVOKE</strong> (<code>released_at</code> in the mission editor) — EVOKE's own gate, independent of Brightspace's publish state. Both must be true before the mission genuinely works.</li>
+    </ol>
+    <div class="callout">
+      <strong>The one silent failure mode, confirmed live:</strong> an assignment can exist, be correctly mapped, and be visible to the admin token — yet 404 every student submission because it was never <em>published to students</em>. Brightspace gives no other signal. If a submission shows <code>brightspace_sync_failed</code> with a correct mapping, check the folder's Availability/Visibility before suspecting code.
+    </div>
+  </section>
+
+  <section>
+    <span class="eyebrow">03 · What runs itself</span>
+    <h2>Automatic once setup is done</h2>
+    <div class="table-scroll">
+      <table>
+        <thead><tr><th>Flow</th><th>How</th><th>Trigger</th></tr></thead>
+        <tbody>
+          <tr>
+            <td>Player account creation</td>
+            <td>Provisioned on first OAuth login, linked to the Brightspace user ID</td>
+            <td><span class="chip auto">Every login</span></td>
+          </tr>
+          <tr>
+            <td>Team assignment</td>
+            <td>Read from Brightspace Groups — a live sync, not a one-time import</td>
+            <td><span class="chip auto">Every login</span></td>
+          </tr>
+          <tr>
+            <td>Evidence → Brightspace dropbox</td>
+            <td>Event-driven background worker, student's own token; status tracked <code>submitted → brightspace → graded</code></td>
+            <td><span class="chip auto">On submit</span></td>
+          </tr>
+          <tr>
+            <td>Grade pull</td>
+            <td>Admin clicks per mission; no Brightspace-side step needed</td>
+            <td><span class="chip req">On demand</span></td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+    <p class="muted" style="font-size:13px">Failed pushes are logged and the local copy kept; there is no automatic retry today. A grade webhook (Brightspace pushing grades to EVOKE) is possible but unconfigured — on-demand pull covers the pilot.</p>
+  </section>
+
+  <section>
+    <span class="eyebrow">04 · Quick diagnostic</span>
+    <h2>"The student submitted but it's not in Brightspace"</h2>
+    <p>Compare the assignment list as seen by the service token versus that student's own token. If the folder is missing from the student's-eye view, it's the publish step above — someone with instructor rights needs to set the folder's Availability/Visibility. Mapping, tokens, and EVOKE's release gate can all be correct and this still blocks every submission.</p>
+  </section>
+
+  <footer>
+    Sources: BRIGHTSPACE.md · evoke/BRIGHTSPACE_SETUP.md · live verification against org unit 6762, 2026-07-19 → 07-21. Engineering reference — no student data appears in this document.
+  </footer>
+</div>

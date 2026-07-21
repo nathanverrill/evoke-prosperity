@@ -1,0 +1,514 @@
+<title>EVOKE — AI Guardrails: Technical Brief</title>
+<style>
+  :root {
+    --bg: #fbfcfc;
+    --surface: #f1f5f4;
+    --ink: #16211f;
+    --muted: #5b6a67;
+    --accent: #0d7d74;
+    --line: #dce4e2;
+    --chip-live-bg: #e2f0ee;
+    --chip-live-ink: #0b6159;
+    --chip-plan-bg: #eceff0;
+    --chip-plan-ink: #5b6a67;
+    --chip-gap-bg: #f5ecdd;
+    --chip-gap-ink: #8a5410;
+    --mono: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #0f1615;
+      --surface: #16201e;
+      --ink: #dce6e3;
+      --muted: #8ba39e;
+      --accent: #45b0a4;
+      --line: #24312e;
+      --chip-live-bg: #143530;
+      --chip-live-ink: #6fcabe;
+      --chip-plan-bg: #1d2726;
+      --chip-plan-ink: #8ba39e;
+      --chip-gap-bg: #33270f;
+      --chip-gap-ink: #d9a24a;
+    }
+  }
+  :root[data-theme="dark"] {
+    --bg: #0f1615;
+    --surface: #16201e;
+    --ink: #dce6e3;
+    --muted: #8ba39e;
+    --accent: #45b0a4;
+    --line: #24312e;
+    --chip-live-bg: #143530;
+    --chip-live-ink: #6fcabe;
+    --chip-plan-bg: #1d2726;
+    --chip-plan-ink: #8ba39e;
+    --chip-gap-bg: #33270f;
+    --chip-gap-ink: #d9a24a;
+  }
+  :root[data-theme="light"] {
+    --bg: #fbfcfc;
+    --surface: #f1f5f4;
+    --ink: #16211f;
+    --muted: #5b6a67;
+    --accent: #0d7d74;
+    --line: #dce4e2;
+    --chip-live-bg: #e2f0ee;
+    --chip-live-ink: #0b6159;
+    --chip-plan-bg: #eceff0;
+    --chip-plan-ink: #5b6a67;
+    --chip-gap-bg: #f5ecdd;
+    --chip-gap-ink: #8a5410;
+  }
+
+  body {
+    background: var(--bg);
+    color: var(--ink);
+    font-family: "Helvetica Neue", Helvetica, Arial, sans-serif;
+    line-height: 1.55;
+    font-size: 15.5px;
+  }
+  .page {
+    max-width: 740px;
+    margin: 0 auto;
+    padding: 48px 24px 72px;
+  }
+
+  .eyebrow {
+    color: var(--accent);
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+  }
+  header .eyebrow { font-size: 12px; }
+  h1 {
+    font-size: 27px;
+    font-weight: 700;
+    letter-spacing: -0.01em;
+    margin: 6px 0 4px;
+    text-wrap: balance;
+  }
+  .dateline {
+    color: var(--muted);
+    font-size: 13px;
+  }
+  header {
+    border-bottom: 2px solid var(--accent);
+    padding-bottom: 18px;
+    margin-bottom: 8px;
+  }
+
+  section { margin-top: 40px; }
+  section > .eyebrow { display: block; margin-bottom: 10px; }
+  h2 {
+    font-size: 19px;
+    font-weight: 700;
+    margin: 0 0 10px;
+    letter-spacing: -0.005em;
+    text-wrap: balance;
+  }
+  p { margin: 0 0 12px; max-width: 66ch; }
+  p:last-child { margin-bottom: 0; }
+  .muted { color: var(--muted); }
+  code {
+    font-family: var(--mono);
+    font-size: 0.88em;
+    background: var(--surface);
+    border: 1px solid var(--line);
+    border-radius: 3px;
+    padding: 1px 5px;
+    white-space: nowrap;
+  }
+
+  .rule-callout {
+    border-left: 3px solid var(--accent);
+    background: var(--surface);
+    padding: 14px 18px;
+    margin: 22px 0 0;
+    font-size: 16.5px;
+    font-weight: 600;
+    max-width: none;
+  }
+  .rule-callout .sub {
+    display: block;
+    font-size: 13px;
+    font-weight: 400;
+    color: var(--muted);
+    margin-top: 4px;
+  }
+
+  /* chain diagram */
+  .chain-scroll { overflow-x: auto; margin: 18px 0 10px; }
+  .chain {
+    display: flex;
+    align-items: stretch;
+    gap: 0;
+    min-width: 640px;
+    font-family: var(--mono);
+    font-size: 12px;
+  }
+  .node {
+    flex: 1;
+    border: 1px solid var(--line);
+    background: var(--surface);
+    border-radius: 4px;
+    padding: 10px 12px;
+    display: flex;
+    flex-direction: column;
+    gap: 3px;
+  }
+  .node .name { font-weight: 700; font-size: 12.5px; }
+  .node .role {
+    font-family: "Helvetica Neue", Helvetica, Arial, sans-serif;
+    color: var(--muted);
+    font-size: 11.5px;
+    line-height: 1.4;
+  }
+  .node.gateway { border-color: var(--accent); border-width: 1.5px; }
+  .node.gateway .name { color: var(--accent); }
+  .arrow {
+    align-self: center;
+    color: var(--accent);
+    padding: 0 8px;
+    font-size: 15px;
+    flex: 0 0 auto;
+  }
+  .chain-caption {
+    font-size: 12.5px;
+    color: var(--muted);
+    border: 1px dashed var(--line);
+    border-radius: 4px;
+    padding: 8px 12px;
+    margin-top: 10px;
+  }
+
+  /* tables */
+  .table-scroll { overflow-x: auto; margin: 14px 0 6px; }
+  table {
+    border-collapse: collapse;
+    width: 100%;
+    font-size: 13.5px;
+  }
+  th {
+    text-align: left;
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: 0.09em;
+    color: var(--muted);
+    font-weight: 700;
+    padding: 0 14px 7px 0;
+    border-bottom: 1.5px solid var(--line);
+    white-space: nowrap;
+  }
+  td {
+    padding: 8px 14px 8px 0;
+    border-bottom: 1px solid var(--line);
+    vertical-align: top;
+  }
+  td:last-child, th:last-child { padding-right: 0; }
+  td .mono, .mono { font-family: var(--mono); font-size: 12.5px; }
+
+  .chip {
+    display: inline-block;
+    font-size: 10.5px;
+    font-weight: 700;
+    letter-spacing: 0.07em;
+    text-transform: uppercase;
+    border-radius: 999px;
+    padding: 2px 9px;
+    white-space: nowrap;
+  }
+  .chip.live { background: var(--chip-live-bg); color: var(--chip-live-ink); }
+  .chip.plan { background: var(--chip-plan-bg); color: var(--chip-plan-ink); }
+  .chip.gap  { background: var(--chip-gap-bg);  color: var(--chip-gap-ink); }
+
+  /* layer rows */
+  .layers { display: flex; flex-direction: column; gap: 10px; margin-top: 14px; }
+  .layer {
+    display: grid;
+    grid-template-columns: 118px 1fr;
+    gap: 14px;
+    border: 1px solid var(--line);
+    border-radius: 4px;
+    padding: 12px 16px;
+    background: var(--surface);
+  }
+  .layer .tag {
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: 0.09em;
+    text-transform: uppercase;
+    color: var(--accent);
+    padding-top: 2px;
+  }
+  .layer .body { font-size: 13.5px; }
+  .layer .body strong { display: block; margin-bottom: 2px; font-size: 14px; }
+  @media (max-width: 540px) {
+    .layer { grid-template-columns: 1fr; gap: 4px; }
+  }
+
+  /* pipeline steps */
+  ol.steps {
+    margin: 14px 0 0;
+    padding: 0;
+    list-style: none;
+    counter-reset: step;
+    display: flex;
+    flex-direction: column;
+    gap: 0;
+  }
+  ol.steps li {
+    counter-increment: step;
+    position: relative;
+    padding: 0 0 16px 40px;
+    font-size: 14px;
+    max-width: 62ch;
+  }
+  ol.steps li::before {
+    content: counter(step);
+    position: absolute;
+    left: 0;
+    top: 0;
+    width: 24px;
+    height: 24px;
+    border: 1.5px solid var(--accent);
+    color: var(--accent);
+    border-radius: 50%;
+    font-size: 12px;
+    font-weight: 700;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: var(--bg);
+  }
+  ol.steps li:not(:last-child)::after {
+    content: "";
+    position: absolute;
+    left: 11.5px;
+    top: 26px;
+    bottom: 2px;
+    width: 1.5px;
+    background: var(--line);
+  }
+
+  ul.tight { margin: 10px 0 0; padding-left: 20px; }
+  ul.tight li { margin-bottom: 7px; font-size: 14px; max-width: 62ch; }
+
+  footer {
+    margin-top: 52px;
+    padding-top: 14px;
+    border-top: 1px solid var(--line);
+    font-size: 12.5px;
+    color: var(--muted);
+  }
+  a { color: var(--accent); }
+</style>
+
+<div class="page">
+  <header>
+    <span class="eyebrow">EVOKE Prosperity · Engineering</span>
+    <h1>AI Guardrails &amp; Data Handling — Technical Brief</h1>
+    <div class="dateline">Verified against the live stack July 21, 2026 · Not legal advice — companion to SAFETY.md and COMPLIANCE_TODO.md</div>
+  </header>
+
+  <div class="rule-callout">
+    AI may auto-reject. Only a human can make something visible.
+    <span class="sub">The single operating rule every control below implements. AI cuts review volume; it is never the last check on anything a learner or classmate sees.</span>
+  </div>
+
+  <section>
+    <span class="eyebrow">01 · The AI chain</span>
+    <h2>Every model call stays inside our own containers</h2>
+    <p>All four AI call sites — B1llbot chat, the AI Coach worker, the Field Report worker, and the Minecraft lore bridge — route through one self-hosted gateway. No student text reaches a third-party vendor: the “no training on student data” claim is a property of the architecture, not a contractual promise.</p>
+    <div class="chain-scroll">
+      <div class="chain">
+        <div class="node">
+          <span class="name">App call sites</span>
+          <span class="role">main.py · workers.py · bridge.py — user messages only; no client-side prompts</span>
+        </div>
+        <span class="arrow">→</span>
+        <div class="node gateway">
+          <span class="name">LiteLLM gateway</span>
+          <span class="role">Pre-call: PII mask + content filter. Post-call: same two on the reply. Default-on for every caller.</span>
+        </div>
+        <span class="arrow">→</span>
+        <div class="node">
+          <span class="name">OpenWebUI</span>
+          <span class="role">Injects the B1llbot system prompt server-side — callers cannot omit or replace it</span>
+        </div>
+        <span class="arrow">→</span>
+        <div class="node">
+          <span class="name">Ollama</span>
+          <span class="role">Open-weight model (qwen3:8b), local inference, nothing leaves the box</span>
+        </div>
+      </div>
+    </div>
+    <div class="chain-caption">Entire chain runs on one Docker network operated by this project. Swapping the backend for a hosted provider is a gateway config change — every guardrail stays in place — but is gated on a written no-training DPA and named-vendor disclosure to the district (SAFETY.md §3).</div>
+  </section>
+
+  <section>
+    <span class="eyebrow">02 · Gateway guardrails</span>
+    <h2>What runs on every request, verified live</h2>
+    <div class="table-scroll">
+      <table>
+        <thead>
+          <tr><th>Control</th><th>Direction</th><th>Behavior</th><th>Status</th></tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td>PII masking <span class="mono">(Presidio)</span></td>
+            <td>In + out</td>
+            <td>Names, emails, phone numbers, locations, card numbers masked before the model sees them and again on the reply. SSNs are blocked outright.</td>
+            <td><span class="chip live">Live · tested</span></td>
+          </tr>
+          <tr>
+            <td>Content filter</td>
+            <td>In + out</td>
+            <td>Violence, weapons, and prompt-injection/jailbreak patterns blocked pre-call; violence filter re-run on output.</td>
+            <td><span class="chip live">Live · tested</span></td>
+          </tr>
+          <tr>
+            <td>Crisis language pass-through</td>
+            <td>In</td>
+            <td>Self-harm/crisis text is <em>deliberately not blocked</em> — blocking it would silence B1llbot’s crisis redirect (verified regression, since fixed). It must reach the model so the redirect can fire.</td>
+            <td><span class="chip live">By design</span></td>
+          </tr>
+          <tr>
+            <td>Content-safety model <span class="mono">(Llama Guard 3)</span></td>
+            <td>In + out</td>
+            <td>Model-based classification for harm categories, still fully local (same Ollama container).</td>
+            <td><span class="chip plan">Planned · Ph 2</span></td>
+          </tr>
+          <tr>
+            <td>Crisis escalation routing</td>
+            <td>In</td>
+            <td>Flag routed to a named human faster than the ordinary queue — the pipe exists in design; the queue it routes to is unbuilt.</td>
+            <td><span class="chip plan">Planned · Ph 3</span></td>
+          </tr>
+          <tr>
+            <td>Rate limits &amp; budgets</td>
+            <td>—</td>
+            <td>Per-caller ceilings so a runaway session hits a limit, not a bill.</td>
+            <td><span class="chip plan">Planned · Ph 4</span></td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+    <p class="muted" style="font-size:13px">“Tested” = exercised against the running gateway on July 21, 2026: jailbreak input blocked with a specific category match; name/phone masked end-to-end through a real B1llbot reply; SSN blocked pre-call.</p>
+  </section>
+
+  <section>
+    <span class="eyebrow">03 · Defense in depth</span>
+    <h2>Three layers, each doing what the others can’t</h2>
+    <div class="layers">
+      <div class="layer">
+        <span class="tag">Behavior</span>
+        <div class="body">
+          <strong>System prompt (server-side)</strong>
+          Persona limits, age-appropriate language, no grading, no real-world financial advice, and the crisis redirect (drop character, point to a trusted adult). Injected by OpenWebUI, never supplied by the client. Steerable by a determined attacker — which is why it is never the enforcement layer.
+        </div>
+      </div>
+      <div class="layer">
+        <span class="tag">Enforcement</span>
+        <div class="body">
+          <strong>Gateway (LiteLLM)</strong>
+          The controls in §02, applied to every call site by construction — a new AI feature gets guardrails by pointing at the gateway, not by remembering to add them.
+        </div>
+      </div>
+      <div class="layer">
+        <span class="tag">Judgment</span>
+        <div class="body">
+          <strong>Human facilitator</strong>
+          Anything visible to other learners requires facilitator approval; safety-critical flags route to a named person on a real response window. AI never approves — it only rejects or queues.
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section>
+    <span class="eyebrow">04 · Content handling</span>
+    <h2>How learner content is treated internally</h2>
+
+    <p><strong>Photo evidence (Field Tablet).</strong> The raw photo is never written to storage — by design, after finding the original design cached raw JPEGs carrying phone EXIF including GPS.</p>
+    <ol class="steps">
+      <li>Photo arrives and exists <strong>in memory only</strong>, for exactly as long as rendering takes.</li>
+      <li>EXIF orientation is applied to the pixels (so portrait shots render upright), then discarded with the rest of the metadata.</li>
+      <li>Pixels are <strong>re-encoded into a styled Field Evidence PDF</strong> — re-encoding drops the entire EXIF block, including GPS, by construction rather than by a stripping step that could be forgotten.</li>
+      <li>The PDF is the only stored artifact. There is no raw photo to leak, cache, or forget to delete.</li>
+    </ol>
+
+    <p style="margin-top:18px"><strong>Chat text.</strong> Masked by the gateway before the model sees it and again on the reply. Chat events are the planned source for the facilitator moderation queue and the retention window.</p>
+
+    <p><strong>Storage locality.</strong> All persistence is self-hosted in-stack — Postgres, MinIO object storage, OpenSearch, Redpanda — with per-cohort instance isolation. No behavioral advertising, no data sale, no cross-cohort sharing, enforced by architecture, not just policy.</p>
+
+    <p><strong>Not yet aligned to the evidence-pipeline standard:</strong></p>
+    <ul class="tight">
+      <li>Avatar uploads and Minecraft quest screenshots still store the raw uploaded bytes, EXIF included — the P1 “strip EXIF before storage” item. The Field Evidence pipeline is the model to converge on. <span class="chip gap">Gap</span></li>
+      <li>The app’s own B1llbot chat log stores the raw message <em>before</em> gateway masking, with no retention window or deletion path. <span class="chip gap">Gap</span></li>
+    </ul>
+  </section>
+
+  <section>
+    <span class="eyebrow">05 · Compliance mapping</span>
+    <h2>Which control answers which requirement</h2>
+    <div class="table-scroll">
+      <table>
+        <thead>
+          <tr><th>Requirement</th><th>Technical answer</th><th>Status</th></tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td>COPPA — no training on children’s data</td>
+            <td>Fully local chain (§01); guarantee is architectural today. Needs stating in the district agreement.</td>
+            <td><span class="chip live">True in stack</span></td>
+          </tr>
+          <tr>
+            <td>COPPA — data minimization</td>
+            <td>PII masked at the gateway; raw photos never stored; Agent Sigil (procedural avatar) is the default.</td>
+            <td><span class="chip live">Live</span></td>
+          </tr>
+          <tr>
+            <td>COPPA — written retention window</td>
+            <td>Chat-archive worker + enforced window over the event log.</td>
+            <td><span class="chip gap">Not built</span></td>
+          </tr>
+          <tr>
+            <td>FERPA / CO-SDTSA — deletion rights</td>
+            <td>Single-learner full-footprint deletion (Postgres + MinIO + logs + chat) as one action.</td>
+            <td><span class="chip gap">Not built</span></td>
+          </tr>
+          <tr>
+            <td>CIPA — chat safety posture</td>
+            <td>Gateway filtering + moderation queue + Minecraft whitelist hardening (four config changes named in WHITELIST.md).</td>
+            <td><span class="chip gap">Partial</span></td>
+          </tr>
+          <tr>
+            <td>CSAM reporting — hash matching</td>
+            <td>PhotoDNA-class check on every upload path before storage, plus a written NCMEC process.</td>
+            <td><span class="chip gap">Not built</span></td>
+          </tr>
+          <tr>
+            <td>Colorado AI Act (eff. 2027) — no automated consequential decisions</td>
+            <td>B1llbot refuses to grade by system-prompt rule; the AI Coach’s automated award tier needs a counsel read.</td>
+            <td><span class="chip plan">Under review</span></td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <section>
+    <span class="eyebrow">06 · Hardening before pilot</span>
+    <h2>Dev-shaped edges that must close first</h2>
+    <ul class="tight">
+      <li>Gateway keys default to a dev secret and port <span class="mono">4000</span> is published to the host — rotate keys, keep the gateway network-internal. <span class="chip gap">Gap</span></li>
+      <li>Surface guardrail rejections to the learner with the specific reason (“looks like it includes a phone number”) instead of a generic error — required by SAFETY.md §4, not yet implemented in the app layer. <span class="chip gap">Gap</span></li>
+      <li>Post-call PII masking currently masks B1llbot’s own fictional people and places; scope the output pass to high-risk entities (phone/email/SSN/card). <span class="chip gap">Tuning</span></li>
+      <li>Add a chain smoke test — a rotated upstream key silently took the whole AI chain down once; a one-line health probe catches that in minutes, not at review time. <span class="chip gap">Gap</span></li>
+    </ul>
+  </section>
+
+  <footer>
+    Sources: SAFETY.md · GUARDRAILS_PLAN.md · COMPLIANCE_TODO.md · WHITELIST.md · live gateway verification 2026-07-21. Engineering view only — counsel review required before any district sign-off.
+  </footer>
+</div>
