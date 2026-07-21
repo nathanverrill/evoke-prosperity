@@ -12,7 +12,21 @@ Everything below was checked live against the real tenant (`charge.yacenter.org`
 
 ### Not set up — this is the actual blocker right now
 
-4. **Assignments (Dropbox Folders) — the course has none.** Checked two ways: the real API pull (`GET /api/admin/brightspace/assignments`) returned zero folders, and the Content page in Brightspace's own UI is completely empty, with no Assignments/Dropbox tool even in the nav bar for this account. **Someone with instructor or course-admin rights in Brightspace needs to create one Dropbox Folder per mission you want linked** (the Bravo Captain student account used for the live check today can't do this). Names don't need to match EVOKE's mission titles — the Link step in `/admin` is manual, by inspection, not by name-matching (a real Brightspace `DropboxFolder` has no field for EVOKE's curriculum metadata anyway, see below) — but matching names would make that step far less error-prone. For chapters 1–2, that's 4 folders, one each for "Follow the Flow," "Your Prosperity Origin Story," "Dream Beyond the Obvious," and "2035: If We Get This Right." The moment these exist, `/admin`'s Pull → Link flow is proven working end-to-end and needs no further EVOKE-side changes.
+4. **~~Assignments (Dropbox Folders) — the course has none~~ [SUPERSEDED, 2026-07-21 — see below].** As of 2026-07-19 the course had zero Dropbox Folders. That's no longer true: by 2026-07-21, folders 33–41 exist and are correctly mapped in `mission_brightspace_mapping` for at least missions 1–2 ("Follow the Flow" → 40, "Your Prosperity Origin Story" → 41). But a *new*, more specific blocker replaced it — folder existing and folder mapped isn't the same as folder actually reachable by a student. Read on.
+
+### New finding, 2026-07-21 — a mapped assignment isn't necessarily submittable
+
+Confirmed live, not inferred: submitting real evidence for mission 2 ("Your Prosperity Origin Story," folder `41`) failed with a real `404 Assignment not found` from Brightspace, even though:
+- `mission_brightspace_mapping` correctly has `brightspace_assignment_id='41'` for that mission.
+- The **admin/service-account token** (`GET /api/admin/brightspace/assignments` path, `_get_service_token`) can see folder `41` fine — it showed up in the live pull, named correctly.
+
+The actual submission call uses the **submitting student's own token** (`_get_student_token`, `workers.py`), not the service account — that's intentional and correct, it's what attributes the grade to the right person in Brightspace's gradebook. Diagnosed by calling `provider.list_dropbox_folders()` with the student's own token directly: it returned **only folder `40`** ("Follow the Flow"). Folder `41` doesn't appear at all for that student, despite existing and being correctly mapped.
+
+**Conclusion: this is a Brightspace-side per-assignment visibility/availability setting** (Availability Dates, Visibility, or a release condition on the Dropbox Folder itself), not anything wrong in EVOKE's mapping, tokens, or submission code. Confirmed mission-1's folder (`40`) doesn't have this problem — it's visible to the student and submissions there sync successfully (`submissions.status = 'brightspace'`).
+
+**What this means practically:** before assuming a submission failure is a code bug, check whether the assignment is actually *published to students* in Brightspace (not just present in the course) — this will block **any** submission to that folder, `team_product` or `individual_evidence` alike, regardless of what EVOKE's own `missions.released_at` gate says. **Action needed in Brightspace itself** (someone with instructor rights): open each mission's Dropbox Folder → check Availability Dates/Visibility → publish it to students. EVOKE's code has no way to detect or work around this from the outside; the 404 is the only signal.
+
+A fast diagnostic for any future case of "student says they submitted but I don't see it in Brightspace": compare `list_dropbox_folders()` under the service token vs. that specific student's own token (`_get_student_token(user_id)`) for the assignment in question. If the folder's missing from the student's-eye view, this is the cause.
 
 ### Only needed for the real submission/grading round-trip (not for a playtest)
 
@@ -93,6 +107,8 @@ This mirrors the exact reasoning already applied to AI Coach feedback (`workers.
 A real progression now, not just a value written once at insert and never touched again:
 
 `submitted` → `brightspace` / `brightspace_sync_failed` (set by the Brightspace Submission Worker above) → `graded` (set by the grade webhook or the backup polling job, once Brightspace itself confirms a grade — which can only happen for a row that already reached `brightspace`, so this really is the terminal state).
+
+Seeing `brightspace_sync_failed` on a row that looks correctly mapped? Check the new finding above (2026-07-21) before assuming a code bug — a real, live-confirmed cause is the assignment simply not being published/visible to that student in Brightspace yet, which 404s regardless of how correct the mapping and tokens are.
 
 **AI review is deliberately not a value in this column.** It's an independent, concurrent branch off the same `TeamEvidenceSubmitted` event (the AI Coach Worker, running alongside the Brightspace Submission Worker, not before or after it) — the two can finish in either order. Folding "ai_reviewed" into one linear status would sometimes misrepresent what actually happened (e.g. a fast Brightspace sync completing before a slower AI pass would make the AI step's write look like a regression). AI review already has its own correct, independent, timestamped record — an `awards` row with `tier='epic', source='ai_review'` — and stays there.
 
