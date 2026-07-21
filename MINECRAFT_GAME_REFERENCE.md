@@ -323,7 +323,161 @@ player-to-player chat.
 
 ---
 
-## 11. Related docs
+## 12. How to play — the full arc (as deployed)
+
+The intended player journey, end to end, with every command a player
+actually types. Everything here is live.
+
+**Setup.** Java: launcher pinned to 1.21.11 → Multiplayer →
+`prosperity.apexmc.co`. Bedrock: latest release via the Geyser port. The
+server is whitelist-only; linking (next step) auto-whitelists. Sync the
+Field Tablet: scan the Ops Hub QR on a phone → accept the conduct charter
+→ Simulator tab → "Link Your Minecraft Account" → type the shown code
+in-game as `/trigger evoke_link set <code>` → confirm on the phone. From
+here the tablet's **Basin Archive** narrates progress (6 memories unlock
+automatically as the bridge detects each stage below).
+
+**Act 1 — Keel (labor).** You wake on the ridge above town: look around
+(all three tiers are visible), then walk down. Find Billbot's kiosk by
+the villager pen — he whispers to you once. Grab the free iron pickaxe at
+the worker station beside it ("Daily Task: Mine some coal"). Optional:
+buy better tools at Benjamin's store, talk to Jim/Beth/Craig/the pen
+villagers (staged lines; the greeting hands you a "relay chip" — the
+in-world reason the tablet reaches Billbot). Enter the mines (sign at
+`(-141,66,167)`; the lift refuses you without a pickaxe), get assigned a
+random room, mine coal. Sell it at the `[Admin Shop] Coal` sign in the
+room ($1/coal) or anywhere via `/trigger sellCoal`. Pickaxe worn out?
+Hold it at the entrance repair station. Save **$100** → buy the paper
+ticket at the station booth sign (or `/trigger buyTicket`) → step to the
+train at `(-137,65,108)` — it consumes the paper and delivers you to
+Halyard. Side content: coinflip (2 gold ingots), the donation bin
+(Kindness badge), the hidden room/parkour near the kiosk, and — if Craig
+ever tells you — a tunnel under the town hall (careful: its terminal
+wipes your balance).
+
+**Act 2 — Halyard (strategy + time).** Arrival sets your respawn to the
+plaza. Two income engines: (1) **the Crafting Factory** — time itself is
+the cost: being in Halyard builds XP levels (+1/5s, cap 60); the entry
+pad at `(2,92,98)` requires 60; inside, levels drain, and at zero you're
+ejected. Collect conveyor materials (red sand, obsidian, oak, cobble,
+occasional **emeralds**), trade emeralds to the three villagers for the
+exotic ingredients, craft the non-vanilla recipes, sell at the factory
+shops (bookshelf $5 … beacon $200). (2) **combat** — the solo Mob Arena
+or the co-op Mob Gauntlet; sell spider eyes/magma cream/slimeballs at
+`(98,93,128-132)`. Meanwhile the rent machine teaches deadlines (unpaid
+rent compounds 1.1×/sec). Goal: the **Name Tag credential** — 500
+scoreboard-money at the ticket machine `(32,94,53)` or $1000 at the shop
+sign — then stand on the lift at `(36,89,58)`: it consumes the tag and
+raises you to the Oasis.
+
+**Act 3 — Oasis (arrival).** You land at `(57,149,1095)`; a one-time
+$100 settlement stipend credits on arrival. Content beyond the overlook
+is the remaining build-out (plots, Alpha HQ ending).
+
+**Easter egg:** drop a diamond onto a bone block (the shrine pedestal at
+`(39,146,501)` is the intended spot) and wait ~1 second.
+
+---
+
+## 13. Gazetteer — key locations
+
+| Location | Coordinates | Notes |
+|---|---|---|
+| Billbot's kiosk | `(-49,63,206)` | one-time whisper; golem at `(-49,65,208)` |
+| Villager pen (chuzz/Ethan/Fredster) | `(-31.5,65,183.5)` area | staged lines |
+| Worker station (free pickaxe) | `(-138,63,209-212)` | day-one badge |
+| Benjamin's tool store | `(-63..-60,66,200)`, signs z=201 | $5/$10/$15 pickaxes, helmet $2 |
+| Keel food buyers | `(-92..-90,65,131-137)` | sells food *to* Alpha |
+| Coinflip stand | `(-141,66,141)` | 2 gold to play |
+| Donation bin (Kindness) | `(-149,65,166)` | |
+| Mines entrance / lift | `(-141,66,167)` sign; 2nd entrance `(503,66,269)` | pickaxe-gated |
+| Mines rooms | y≈28-45, `(-137..-98, z -122..-70)` | coal shops at y=36 |
+| Mines exit lobby | `(-105,61,151-153)` | `claimReward` trigger, badges |
+| Pickaxe repair station | `(-138..-134,60-63,164-168)` | hold pickaxe |
+| Keel train station | train `(-137,65,108-110)`; ticket booths `(-137,67,113)` & `(-137,67,102)` | paper $100 |
+| Hidden room | `(75-82,62-67,145-154)` | teleport-swap trick |
+| Parkour shaft | `(-16..2, y93→119, z93-121)` | prismarine ring at top |
+| Halyard plaza / arrival | `(5,93,96)`, respawn `(6,93,91)` | |
+| Rent / day-job machine | `(0-35,89-94,69-101)` | `stage` 0→6 |
+| Factory entry pad | `(2,92,98)` | needs XP level 60 |
+| Crafting factory | `(295-333,118-134,-154..-111)` | conveyor `(306,127,-134)` |
+| Factory sell shops | `(320-329,123,-121..-114)` | |
+| Claude's Halyard Mob Arena | `(-30..-24,70-76,90-102)` | solo, 5 waves |
+| Mob Gauntlet | `(382,140,769)`+ room | co-op, 7 waves |
+| Arena-drop buyers | `(98,93,128/130/132)` | spider eye $4 … |
+| Name Tag ticket machine / shop | `(32,94,53)` / `(32,93,56-57)` | 500 money / $1000 |
+| Oasis lift | `(35-38,88-91,57-60)` | consumes name_tag → Oasis |
+| Oasis arrival | `(57,149,1095)` | stipend box `(86-105,136,1023-1049)` |
+| Oasis overlook | `(58,135,1000)` | tphub destination |
+| "Plots for Oasis" land | `(756,131,-367)` | undeveloped; no live tp |
+| Craig's tunnel + terminal | tunnel `(-14..-5,56-63,188-199)`; terminal `(-10,59,194)` | resetmoney |
+| Ritual shrine | `(35-43,142-151,497-505)`; pedestal `(39,146,501)` | diamond + bone block |
+| Admin teleport hub | `(575-576,74,113-121)` | see §14 |
+| Mirror town (east) | Keel duplicated at ~+648x | second mines entrance/train live there |
+
+---
+
+## 14. Admin tools: the teleporter and the trigger registry
+
+**Becoming an admin in-world:** `op <username>` from the console (RCON or
+Apex panel), then in-game `/tag @s add admin`. The `admin` tag — not OP
+itself — is what the world's admin mechanics check.
+
+**The teleport hub (tphub).** Type `/trigger tphub` from anywhere
+(admin-tagged players only — command blocks across the map run
+`execute as @a[tag=admin,scores={tphub=1..}] run tp @s 583 72 115`). You
+arrive at the hub at `(583,72,115)`; five signed buttons teleport onward:
+
+| Sign | Destination | What's there |
+|---|---|---|
+| "mines game (keel)" | `(-122,28,-79)` | inside the mines rooms |
+| "halyard game" | `(331,123,-169)` | minecart ride / factory roof area |
+| "halyard (dry)" | `(37,93,130)` | Halyard town |
+| "halyard (post game)" | `(662,106,216)` | mirror-town Halyard |
+| "oasis" | `(58,135,1000)` | the overlook |
+
+(The original build had a sixth "Plots for Oasis" sign → `(756,131,-367)`
+— not present in the live hub.)
+
+**Player-typeable triggers** (vanilla `/trigger`, works on Bedrock too):
+
+| Command | Who | Effect | Handled by |
+|---|---|---|---|
+| `/trigger evoke_link set <code>` | anyone | account linking | bridge `link_code_loop` |
+| `/trigger sellCoal` | anyone | sells all coal/coal blocks for `$` | bridge `ticket_office_loop` |
+| `/trigger buyTicket` | anyone | $100 → paper train ticket | bridge `ticket_office_loop` |
+| `/trigger claimReward` | anyone at mines exit | +100 scoreboard-`money` (legacy, unadvertised, infinitely repeatable) | world CBs |
+| `/trigger tphub` | `tag=admin` only | teleport to the admin hub | world CBs |
+
+**Economy admin (savs, console-safe):** `bal <p>`, `baltop`,
+`givemoney/takemoney/setmoney <p> <amt>`, `resetmoney <p>` (→ $10),
+`/ecolog <target> <time> <unit>` (ledger). In-game only: `/shop create
+sell|buy <price>`, `/shop remove`, `/shop admin` (**toggle — while on,
+your sign clicks create admin shops instead of transacting; a common
+source of "the shop is broken" during OP testing**).
+
+**Full player reset to new-user state** (the tested recipe):
+1. Postgres: delete their `minecraft_links` row, `mc_link_codes` rows,
+   `basin_archive` `mc_quest_completions`, `mc_arena_best` /
+   `mc_gauntlet_best` rows. Check `AUTO_LINK_PLAYER_ONE=false` on the
+   bridge first, or the link comes back within a minute.
+2. RCON (works offline): `scoreboard players reset <p>`, `resetmoney <p>`.
+3. RCON (needs them online): `tag <p> remove admin` / `billbot_intro`,
+   `gamemode survival`, `clear`, `xp set 0 levels` + `0 points`,
+   `advancement revoke <p> everything`, `kill` (respawns at world spawn).
+4. Leave them whitelisted — the fresh link flow requires joining.
+
+**Other admin notes:** keep the scoreboard sidebar clear
+(`scoreboard objectives setdisplay sidebar` with no argument clears it);
+one-shot placement functions (`restored_shops:place_all`,
+`basin_secrets:place`) are safe to re-run; `#minecraft:tick`/`load` tags
+arm only on a real boot — after editing `basin_qol`/`basin_secrets` on a
+running server, `/reload` then manually run the pack's `load` function to
+re-arm its self-scheduling loop.
+
+---
+
+## 15. Related docs
 
 - [`MINECRAFT_WORLD_MAP.md`](MINECRAFT_WORLD_MAP.md) — deep coordinates +
   investigation history of the basin lineage (pre-2026-07-21 status lines
