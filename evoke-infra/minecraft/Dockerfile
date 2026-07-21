@@ -36,6 +36,13 @@ ARG FABRIC_INSTALLER_VERSION=1.1.1
 ARG FABRIC_API_URL=https://cdn.modrinth.com/data/P7dR8mSH/versions/zGF3drOQ/fabric-api-0.141.5%2B1.21.11.jar
 ARG GEYSER_FABRIC_URL=https://cdn.modrinth.com/data/wKkoqHrH/versions/6uw7I3Qj/geyser-fabric-Geyser-Fabric-2.9.6-b1133.jar
 ARG FLOODGATE_FABRIC_URL=https://cdn.modrinth.com/data/bWrNNfkb/versions/81EuNxeZ/Floodgate-Fabric-2.2.6-b60.jar
+# The original build's economy mod (sign shops, /sell, bank notes) — same
+# 1.5.1 version the CU internship server ran, rebuilt upstream for 1.21.11.
+# Restores the mines' "[Admin Shop] Coal" signs and the crafting factory's
+# sell shops; shop registrations ship in config/savs-common-economy/shops.json
+# (recovered from the original server's config, balances deliberately not
+# carried over). Deployed to the live Apex server 2026-07-21.
+ARG SAVS_ECONOMY_URL=https://cdn.modrinth.com/data/NFdebgJ8/versions/4VzWg9eL/savs-common-economy-1.5.1-1.21.11.jar
 
 WORKDIR /downloads
 RUN apt-get update && apt-get install -y --no-install-recommends curl ca-certificates \
@@ -46,10 +53,12 @@ RUN curl -fsSL -o fabric-server-launch.jar \
     && curl -fsSL -o mods/fabric-api.jar --create-dirs "${FABRIC_API_URL}" \
     && curl -fsSL -o mods/geyser-fabric.jar "${GEYSER_FABRIC_URL}" \
     && curl -fsSL -o mods/floodgate-fabric.jar "${FLOODGATE_FABRIC_URL}" \
+    && curl -fsSL -o mods/savs-common-economy.jar "${SAVS_ECONOMY_URL}" \
     && test -s fabric-server-launch.jar \
     && test -s mods/fabric-api.jar \
     && test -s mods/geyser-fabric.jar \
-    && test -s mods/floodgate-fabric.jar
+    && test -s mods/floodgate-fabric.jar \
+    && test -s mods/savs-common-economy.jar
 
 FROM eclipse-temurin:21-jre
 

@@ -1,0 +1,26 @@
+{
+  "defaultBalance": 10,
+  "currencySymbol": "$",
+  "symbolBeforeAmount": true,
+  "enableSellCommands": false,
+  "enableChestShops": true,
+  "storage": {
+    "type": "JSON",
+    "host": "localhost",
+    "port": 3306,
+    "database": "savs_economy",
+    "user": "root",
+    "password": "password",
+    "tablePrefix": "savs_eco_",
+    "poolSize": 10,
+    "connectionTimeout": 30000,
+    "idleTimeout": 600000
+  },
+  "redis": {
+    "enabled": false,
+    "channel": "savs-economy-updates",
+    "debugLogging": false
+  },
+  "apiNotificationMode": "ACTION_BAR",
+  "commandNotificationMode": "CHAT"
+}

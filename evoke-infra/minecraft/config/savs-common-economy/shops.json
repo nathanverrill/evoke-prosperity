@@ -1,0 +1,436 @@
+{
+  "shops": [
+    {
+      "shopId": "cc2ba02d-9d44-4c05-a270-6cb12a32e5cb",
+      "worldId": "minecraft:overworld",
+      "chestLocation": {
+        "x": 327,
+        "y": 123,
+        "z": -114
+      },
+      "ownerId": "85127316-825b-4303-910f-5774576a8240",
+      "ownerName": "nighthawk5554",
+      "type": "ADMIN",
+      "itemId": "minecraft:activator_rail",
+      "itemCount": 1,
+      "itemStackSnbt": "H4sIAAAAAAAA/+NiYGBmYE3OL80rYWBgYORgYMpMYZDIzcxLTS5KTCuxSkwuySxLLMkvii9KzMxhAABCEy8tLwAAAA\u003d\u003d",
+      "price": 2.0,
+      "buying": true,
+      "stock": 1728
+    },
+    {
+      "shopId": "5a35a309-6b2f-45ed-86a9-df87a7369b53",
+      "worldId": "minecraft:overworld",
+      "chestLocation": {
+        "x": -63,
+        "y": 66,
+        "z": 200
+      },
+      "ownerId": "c7cf6a0f-a3d7-4ab7-aad2-e34a0d053080",
+      "ownerName": "mr2wei",
+      "type": "ADMIN",
+      "itemId": "minecraft:wooden_pickaxe",
+      "itemCount": 1,
+      "itemStackSnbt": "H4sIAAAAAAAA/+NiYGBmYE3OL80rYWBgYORgYMpMYZDIzcxLTS5KTCuxKs/PT0nNiy/ITM5OrEhlAADkn7R4LwAAAA\u003d\u003d",
+      "price": 5.0,
+      "buying": false,
+      "stock": 0
+    },
+    {
+      "shopId": "999295ce-38db-4a4b-9745-d9ede0003d2a",
+      "worldId": "minecraft:overworld",
+      "chestLocation": {
+        "x": -137,
+        "y": 67,
+        "z": 114
+      },
+      "ownerId": "e6813c7a-6598-49b5-9885-fb2cf8536a53",
+      "ownerName": "Leanerdbeta6",
+      "type": "ADMIN",
+      "itemId": "minecraft:paper",
+      "itemCount": 1,
+      "itemStackSnbt": "H4sIAAAAAAAA/+NiYGBmYE3OL80rYWBgYORgYMpMYeDPzcxLTS5KTCuxKkgsSC1iAAA8OqM4JgAAAA\u003d\u003d",
+      "price": 100.0,
+      "buying": false,
+      "stock": 1
+    },
+    {
+      "shopId": "5767ea96-051e-48ee-9bf7-7951b792fe5f",
+      "worldId": "minecraft:overworld",
+      "chestLocation": {
+        "x": 329,
+        "y": 123,
+        "z": -117
+      },
+      "ownerId": "85127316-825b-4303-910f-5774576a8240",
+      "ownerName": "nighthawk5554",
+      "type": "ADMIN",
+      "itemId": "minecraft:bookshelf",
+      "itemCount": 1,
+      "itemStackSnbt": "H4sIAAAAAAAA/+NiYGBmYE3OL80rYWBgYORgYMpMYRDOzcxLTS5KTCuxSsrPzy7OSM1JYwAANnQzYSoAAAA\u003d",
+      "price": 5.0,
+      "buying": true,
+      "stock": 1727
+    },
+    {
+      "shopId": "ab5b23de-300c-4f58-bcbf-f51b4c38d377",
+      "worldId": "minecraft:overworld",
+      "chestLocation": {
+        "x": 99,
+        "y": 93,
+        "z": 128
+      },
+      "ownerId": "85127316-825b-4303-910f-5774576a8240",
+      "ownerName": "nighthawk5554",
+      "type": "ADMIN",
+      "itemId": "minecraft:magma_cream",
+      "itemCount": 1,
+      "itemStackSnbt": "H4sIAAAAAAAA/+NiYGBmYE3OL80rYWBgYORgYMpMYRDNzcxLTS5KTCuxyk1Mz02MTy5KTcxlAACI1GjjLAAAAA\u003d\u003d",
+      "price": 10.0,
+      "buying": true,
+      "stock": 1728
+    },
+    {
+      "shopId": "4b59c120-5b41-4723-b828-0d4ff1806a39",
+      "worldId": "minecraft:overworld",
+      "chestLocation": {
+        "x": 323,
+        "y": 123,
+        "z": -114
+      },
+      "ownerId": "85127316-825b-4303-910f-5774576a8240",
+      "ownerName": "nighthawk5554",
+      "type": "ADMIN",
+      "itemId": "minecraft:end_rod",
+      "itemCount": 1,
+      "itemStackSnbt": "H4sIAAAAAAAA/+NiYGBmYE3OL80rYWBgYORgYMpMYRDMzcxLTS5KTCuxSs1LiS/KT2EAAD8qxoAoAAAA",
+      "price": 14.0,
+      "buying": true,
+      "stock": 1728
+    },
+    {
+      "shopId": "bf34b117-0f14-4b30-97e6-b099325fbfcf",
+      "worldId": "minecraft:overworld",
+      "chestLocation": {
+        "x": -92,
+        "y": 65,
+        "z": 135
+      },
+      "ownerId": "85127316-825b-4303-910f-5774576a8240",
+      "ownerName": "nighthawk5554",
+      "type": "ADMIN",
+      "itemId": "minecraft:golden_carrot",
+      "itemCount": 1,
+      "itemStackSnbt": "H4sIAAAAAAAA/+NiYGBmYE3OL80rYWBgYORgYMpMYRDPzcxLTS5KTCuxSs/PSUnNi09OLCrKL2EAACXiTB4uAAAA",
+      "price": 10.0,
+      "buying": true,
+      "stock": 1728
+    },
+    {
+      "shopId": "9509a916-0ecc-4d58-a955-9f730d3a0269",
+      "worldId": "minecraft:overworld",
+      "chestLocation": {
+        "x": -60,
+        "y": 66,
+        "z": 200
+      },
+      "ownerId": "c7cf6a0f-a3d7-4ab7-aad2-e34a0d053080",
+      "ownerName": "mr2wei",
+      "type": "ADMIN",
+      "itemId": "minecraft:iron_helmet",
+      "itemCount": 1,
+      "itemStackSnbt": "H4sIAAAAAAAA/+NiYGBmYE3OL80rYWBgYORgYMpMYRDNzcxLTS5KTCuxyizKz4vPSM3JTS1hAABKCJdQLAAAAA\u003d\u003d",
+      "price": 2.0,
+      "buying": false,
+      "stock": 0
+    },
+    {
+      "shopId": "4ebe6e36-af1a-4427-bc45-ec220cc6d983",
+      "worldId": "minecraft:overworld",
+      "chestLocation": {
+        "x": -92,
+        "y": 65,
+        "z": 133
+      },
+      "ownerId": "85127316-825b-4303-910f-5774576a8240",
+      "ownerName": "nighthawk5554",
+      "type": "ADMIN",
+      "itemId": "minecraft:apple",
+      "itemCount": 1,
+      "itemStackSnbt": "H4sIAAAAAAAA/+NiYGBmYE3OL80rYWBgYORgYMpMYeDPzcxLTS5KTCuxSiwoyEllAAAp6vunJgAAAA\u003d\u003d",
+      "price": 3.0,
+      "buying": true,
+      "stock": 1728
+    },
+    {
+      "shopId": "9d7ae1d0-fadf-4704-ad97-eceae4d14948",
+      "worldId": "minecraft:overworld",
+      "chestLocation": {
+        "x": -90,
+        "y": 65,
+        "z": 131
+      },
+      "ownerId": "85127316-825b-4303-910f-5774576a8240",
+      "ownerName": "nighthawk5554",
+      "type": "ADMIN",
+      "itemId": "minecraft:cooked_beef",
+      "itemCount": 1,
+      "itemStackSnbt": "H4sIAAAAAAAA/+NiYGBmYE3OL80rYWBgYORgYMpMYRDNzcxLTS5KTCuxSs7Pz05NiU9KTU1jAAD/y2nhLAAAAA\u003d\u003d",
+      "price": 8.0,
+      "buying": true,
+      "stock": 1728
+    },
+    {
+      "shopId": "8d86fa5c-b138-4543-ae0f-a4439825e8d9",
+      "worldId": "minecraft:overworld",
+      "chestLocation": {
+        "x": 99,
+        "y": 93,
+        "z": 130
+      },
+      "ownerId": "85127316-825b-4303-910f-5774576a8240",
+      "ownerName": "nighthawk5554",
+      "type": "ADMIN",
+      "itemId": "minecraft:spider_eye",
+      "itemCount": 64,
+      "itemStackSnbt": "H4sIAAAAAAAA/+NiYGBmYE3OL80rYWBgcOBgYMpMYRDJzcxLTS5KTCuxKi7ITEktik+tTGUAAJAme0ErAAAA",
+      "price": 4.0,
+      "buying": true,
+      "stock": 1728
+    },
+    {
+      "shopId": "0274c2b2-f554-4c6a-aa68-099ad6d47aa0",
+      "worldId": "minecraft:overworld",
+      "chestLocation": {
+        "x": -62,
+        "y": 66,
+        "z": 200
+      },
+      "ownerId": "c7cf6a0f-a3d7-4ab7-aad2-e34a0d053080",
+      "ownerName": "mr2wei",
+      "type": "ADMIN",
+      "itemId": "minecraft:stone_pickaxe",
+      "itemCount": 1,
+      "itemStackSnbt": "H4sIAAAAAAAA/+NiYGBmYE3OL80rYWBgYORgYMpMYRDPzcxLTS5KTCuxKi7Jz0uNL8hMzk6sSGUAABYD5TIuAAAA",
+      "price": 10.0,
+      "buying": false,
+      "stock": 0
+    },
+    {
+      "shopId": "742bf95b-0bb8-43f6-a570-15cb0a9a95c0",
+      "worldId": "minecraft:overworld",
+      "chestLocation": {
+        "x": 329,
+        "y": 123,
+        "z": -121
+      },
+      "ownerId": "85127316-825b-4303-910f-5774576a8240",
+      "ownerName": "nighthawk5554",
+      "type": "ADMIN",
+      "itemId": "minecraft:beacon",
+      "itemCount": 1,
+      "itemStackSnbt": "H4sIAAAAAAAA/+NiYGBmYE3OL80rYWBgYORgYMpMYRDIzcxLTS5KTCuxSkpNTM7PYwAAVZAy2ScAAAA\u003d",
+      "price": 200.0,
+      "buying": true,
+      "stock": 1663
+    },
+    {
+      "shopId": "81778991-a669-4f9d-bf89-1a7a354fd8df",
+      "worldId": "minecraft:overworld",
+      "chestLocation": {
+        "x": -61,
+        "y": 66,
+        "z": 200
+      },
+      "ownerId": "c7cf6a0f-a3d7-4ab7-aad2-e34a0d053080",
+      "ownerName": "mr2wei",
+      "type": "ADMIN",
+      "itemId": "minecraft:iron_pickaxe",
+      "itemCount": 1,
+      "itemStackSnbt": "H4sIAAAAAAAA/+NiYGBmYE3OL80rYWBgYORgYMpMYRDLzcxLTS5KTCuxyizKz4svyEzOTqxIZQAAbY9flC0AAAA\u003d",
+      "price": 15.0,
+      "buying": false,
+      "stock": 0
+    },
+    {
+      "shopId": "99bedfac-beb8-496b-90e5-e5bc6194bfb5",
+      "worldId": "minecraft:overworld",
+      "chestLocation": {
+        "x": 99,
+        "y": 93,
+        "z": 132
+      },
+      "ownerId": "85127316-825b-4303-910f-5774576a8240",
+      "ownerName": "nighthawk5554",
+      "type": "ADMIN",
+      "itemId": "minecraft:slime_ball",
+      "itemCount": 1,
+      "itemStackSnbt": "H4sIAAAAAAAA/+NiYGBmYE3OL80rYWBgYORgYMpMYRDJzcxLTS5KTCuxKs7JzE2NT0rMyWEAAHSc3tArAAAA",
+      "price": 20.0,
+      "buying": true,
+      "stock": 1728
+    },
+    {
+      "shopId": "cd8007a3-1b2d-49c9-be0d-3c7274a9a80a",
+      "worldId": "minecraft:overworld",
+      "chestLocation": {
+        "x": -90,
+        "y": 65,
+        "z": 137
+      },
+      "ownerId": "85127316-825b-4303-910f-5774576a8240",
+      "ownerName": "nighthawk5554",
+      "type": "ADMIN",
+      "itemId": "minecraft:cooked_rabbit",
+      "itemCount": 1,
+      "itemStackSnbt": "H4sIAAAAAAAA/+NiYGBmYE3OL80rYWBgYORgYMpMYRDPzcxLTS5KTCuxSs7Pz05NiS9KTErKLGEAAEPqdYMuAAAA",
+      "price": 5.0,
+      "buying": true,
+      "stock": 1728
+    },
+    {
+      "shopId": "287455d3-56de-4290-a700-70791720d6e0",
+      "worldId": "minecraft:overworld",
+      "chestLocation": {
+        "x": 320,
+        "y": 123,
+        "z": -116
+      },
+      "ownerId": "85127316-825b-4303-910f-5774576a8240",
+      "ownerName": "nighthawk5554",
+      "type": "ADMIN",
+      "itemId": "minecraft:sticky_piston",
+      "itemCount": 1,
+      "itemStackSnbt": "H4sIAAAAAAAA/+NiYGBmYE3OL80rYWBgYORgYMpMYRDPzcxLTS5KTCuxKi7JTM6ujC/ILC7Jz2MAADq9L0cuAAAA",
+      "price": 8.0,
+      "buying": true,
+      "stock": 1728
+    },
+    {
+      "shopId": "31001922-6b10-4711-a5da-292954689294",
+      "worldId": "minecraft:overworld",
+      "chestLocation": {
+        "x": -130,
+        "y": 36,
+        "z": -108
+      },
+      "ownerId": "c7cf6a0f-a3d7-4ab7-aad2-e34a0d053080",
+      "ownerName": "mr2wei",
+      "type": "ADMIN",
+      "itemId": "minecraft:coal",
+      "itemCount": 1,
+      "itemStackSnbt": "H4sIAAAAAAAA/+NiYGBmYE3OL80rYWBgYORgYMpMYeDLzcxLTS5KTCuxSs5PzGEAAGrhSG8lAAAA",
+      "price": 1.0,
+      "buying": true,
+      "stock": 1728
+    },
+    {
+      "shopId": "787f179f-03d1-4f33-885c-0b1df5c15832",
+      "worldId": "minecraft:overworld",
+      "chestLocation": {
+        "x": 320,
+        "y": 123,
+        "z": -120
+      },
+      "ownerId": "85127316-825b-4303-910f-5774576a8240",
+      "ownerName": "nighthawk5554",
+      "type": "ADMIN",
+      "itemId": "minecraft:cake",
+      "itemCount": 1,
+      "itemStackSnbt": "H4sIAAAAAAAA/+NiYGBmYE3OL80rYWBgYORgYMpMYeDLzcxLTS5KTCuxSk7MTmUAAMaowlMlAAAA",
+      "price": 20.0,
+      "buying": true,
+      "stock": 27
+    },
+    {
+      "shopId": "41dd2bc8-baf8-496f-88e4-53651834774c",
+      "worldId": "minecraft:overworld",
+      "chestLocation": {
+        "x": -130,
+        "y": 36,
+        "z": -77
+      },
+      "ownerId": "c7cf6a0f-a3d7-4ab7-aad2-e34a0d053080",
+      "ownerName": "mr2wei",
+      "type": "ADMIN",
+      "itemId": "minecraft:coal",
+      "itemCount": 8,
+      "itemStackSnbt": "H4sIAAAAAAAA/+NiYGBmYE3OL80rYWBg4OBgYMpMYeDLzcxLTS5KTCuxSs5PzGEAAJhIgvQlAAAA",
+      "price": 1.0,
+      "buying": true,
+      "stock": 1728
+    },
+    {
+      "shopId": "4c3e62d4-1604-451d-b25d-d8fbdf04533a",
+      "worldId": "minecraft:overworld",
+      "chestLocation": {
+        "x": -103,
+        "y": 36,
+        "z": -107
+      },
+      "ownerId": "c7cf6a0f-a3d7-4ab7-aad2-e34a0d053080",
+      "ownerName": "mr2wei",
+      "type": "ADMIN",
+      "itemId": "minecraft:coal",
+      "itemCount": 1,
+      "itemStackSnbt": "H4sIAAAAAAAA/+NiYGBmYE3OL80rYWBgYORgYMpMYeDLzcxLTS5KTCuxSs5PzGEAAGrhSG8lAAAA",
+      "price": 1.0,
+      "buying": true,
+      "stock": 1728
+    },
+    {
+      "shopId": "fb835602-4f27-4e6a-9ce0-67eabeeb6129",
+      "worldId": "minecraft:overworld",
+      "chestLocation": {
+        "x": -103,
+        "y": 36,
+        "z": -76
+      },
+      "ownerId": "c7cf6a0f-a3d7-4ab7-aad2-e34a0d053080",
+      "ownerName": "mr2wei",
+      "type": "ADMIN",
+      "itemId": "minecraft:coal",
+      "itemCount": 1,
+      "itemStackSnbt": "H4sIAAAAAAAA/+NiYGBmYE3OL80rYWBgYORgYMpMYeDLzcxLTS5KTCuxSs5PzGEAAGrhSG8lAAAA",
+      "price": 1.0,
+      "buying": true,
+      "stock": 1728
+    },
+    {
+      "shopId": "506b2835-263a-4ed0-a26b-e815f53f7349",
+      "worldId": "minecraft:overworld",
+      "chestLocation": {
+        "x": -137,
+        "y": 67,
+        "z": 101
+      },
+      "ownerId": "e6813c7a-6598-49b5-9885-fb2cf8536a53",
+      "ownerName": "Leanerdbeta6",
+      "type": "ADMIN",
+      "itemId": "minecraft:paper",
+      "itemCount": 1,
+      "itemStackSnbt": "H4sIAAAAAAAA/+NiYGBmYE3OL80rYWBgYORgYMpMYeDPzcxLTS5KTCuxKkgsSC1iAAA8OqM4JgAAAA\u003d\u003d",
+      "price": 100.0,
+      "buying": false,
+      "stock": 1
+    },
+    {
+      "shopId": "a755a903-4fea-4a17-986b-6826df5dc39c",
+      "worldId": "minecraft:overworld",
+      "chestLocation": {
+        "x": 32,
+        "y": 93,
+        "z": 56
+      },
+      "ownerId": "e6813c7a-6598-49b5-9885-fb2cf8536a53",
+      "ownerName": "Leanerdbeta6",
+      "type": "PLAYER",
+      "itemId": "minecraft:name_tag",
+      "itemCount": 1,
+      "itemStackSnbt": "H4sIAAAAAAAA/+NiYGBmYE3OL80rYWBgYORgYMpMYRDKzcxLTS5KTCuxykvMTY0vSUxnAACZoH8yKQAAAA\u003d\u003d",
+      "price": 1000.0,
+      "buying": false,
+      "stock": 1
+    }
+  ]
+}
