@@ -21,5 +21,5 @@
 # no such race.
 forceload add -25 183
 
-execute unless data storage keel_villager_pen:state {ethan:1b} run summon villager -25.5 65 183.7 {Tags:["keel_pen_ethan"],CustomName:'{"text":"Ethan"}',CustomNameVisible:1b,PersistenceRequired:1b,NoAI:1b,Invulnerable:1b,VillagerData:{profession:"minecraft:none",level:1,type:"minecraft:desert"}}
+execute unless data storage keel_villager_pen:state {ethan:1b} run summon villager -25.5 65 183.7 {Tags:["keel_pen_ethan"],CustomName:"Ethan",CustomNameVisible:1b,PersistenceRequired:1b,NoAI:1b,Invulnerable:1b,VillagerData:{profession:"minecraft:none",level:1,type:"minecraft:desert"}}
 data modify storage keel_villager_pen:state ethan set value 1b
