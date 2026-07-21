@@ -214,7 +214,11 @@ class RCONClient:
 
 # Reward delivery
 def deliver_reward(rcon: RCONClient, player_name: str, reward: dict) -> bool:
-    """Deliver a reward to a player"""
+    """Deliver one catalog row to a player. For 'effect' rows,
+    reward_amount is the amplifier (0 = level I) and duration is ticks.
+    'command' rows support <player> and <mission_title> placeholders --
+    mission_title comes from reward['context'] (set at grant time),
+    sanitized because it lands inside SNBT quotes."""
     try:
         reward_type = reward['reward_type']
         reward_value = reward['reward']
@@ -224,18 +228,64 @@ def deliver_reward(rcon: RCONClient, player_name: str, reward: dict) -> bool:
             cmd = f"give {player_name} {reward_value} {amount}"
             rcon.execute_command(cmd)
         elif reward_type == 'effect':
-            duration = reward.get('duration', 300)
-            level = 1
-            cmd = f"effect give {player_name} {reward_value} {duration // 20} {level}"
+            duration = reward.get('duration') or 6000
+            amplifier = amount if amount is not None else 0
+            cmd = f"effect give {player_name} {reward_value} {duration // 20} {amplifier}"
             rcon.execute_command(cmd)
         elif reward_type == 'command':
-            cmd = reward_value.replace("<player>", player_name)
+            title = (reward.get('context') or "your mission")
+            title = title.replace('\\', '').replace('"', "'")[:60]
+            cmd = reward_value.replace("<player>", player_name).replace("<mission_title>", title)
             rcon.execute_command(cmd)
 
         return True
     except Exception as e:
         print(f"Reward delivery failed: {e}")
         return False
+
+
+TIER_LABELS = {
+    "common": "Field Commendation",
+    "uncommon": "Miner's Lamp",
+    "rare": "Courier Package",
+    "epic": "Guild Standing",
+    "legendary": "Legend of the Basin",
+    "kit": "Aqueduct Kit Trophy",
+    "checkin": "Daily Check-in",
+}
+
+
+def announce_reward(rcon: RCONClient, player_name: str, tier: str):
+    """Every delivery announces itself -- the old pipeline dropped items
+    into the inventory silently, so rewards never registered as rewards."""
+    label = TIER_LABELS.get(tier, tier)
+    payload = json.dumps([
+        {"text": "✦ ", "color": "gold"},
+        {"text": f"Mission reward delivered: {label}. Check your inventory.", "color": "yellow"},
+    ])
+    rcon.execute_command(f"tellraw {player_name} {payload}")
+    rcon.execute_command(f"playsound minecraft:entity.player.levelup master {player_name}")
+    if tier == "legendary":
+        rcon.execute_command(
+            f'title {player_name} title {json.dumps({"text": "COMMENDED", "color": "gold", "bold": True})}'
+        )
+
+
+_grants_schema_ready = False
+
+def ensure_grants_schema(conn):
+    """mission context travels with the grant so offline deliveries can
+    still render <mission_title> in commendation books."""
+    global _grants_schema_ready
+    if _grants_schema_ready:
+        return
+    cur = conn.cursor()
+    try:
+        cur.execute("ALTER TABLE mc_reward_grants ADD COLUMN IF NOT EXISTS context TEXT")
+        conn.commit()
+        _grants_schema_ready = True
+    finally:
+        cur.close()
 
 async def process_event(event: dict):
     """Process a RewardCollected event"""
@@ -283,52 +333,62 @@ async def process_event(event: dict):
 
             player_name = result[0]
 
-            # Get reward definition
+            # The whole tier is one reward SET -- every catalog row for the
+            # tier gets granted and delivered (the old LIMIT 1 arbitrarily
+            # picked one of the duplicated rows).
             cur.execute(
-                """SELECT reward_type, reward, reward_amount, duration, persistent FROM mc_reward_catalog
-                   WHERE tier = %s LIMIT 1""",
+                """SELECT id, reward_type, reward, reward_amount, duration, persistent
+                   FROM mc_reward_catalog WHERE tier = %s ORDER BY id""",
                 (tier,)
             )
-            reward_result = cur.fetchone()
-            if not reward_result:
-                print(f"No reward catalog entry for tier {tier}")
+            catalog_rows = cur.fetchall()
+            if not catalog_rows:
+                print(f"No reward catalog entries for tier {tier}")
                 return
 
-            reward_type, reward_value, amount, duration, persistent = reward_result
-            reward = {
-                'reward_type': reward_type,
-                'reward': reward_value,
-                'reward_amount': amount,
-                'duration': duration,
-                'persistent': persistent
-            }
+            # Mission title travels with the grants so commendation books
+            # can name the actual mission, online or offline.
+            mission_title = None
+            if mission_id:
+                cur.execute("SELECT title FROM missions WHERE id = %s::uuid", (mission_id,))
+                trow = cur.fetchone()
+                mission_title = trow[0] if trow else None
 
-            # Create grant record
-            cur.execute(
-                """INSERT INTO mc_reward_grants (user_id, server_id, catalog_id, granted_at, active, executed)
-                   SELECT %s::uuid, 'default', id, CURRENT_TIMESTAMP, true, false
-                   FROM mc_reward_catalog WHERE tier = %s LIMIT 1""",
-                (user_id, tier)
-            )
+            ensure_grants_schema(conn)
+            grant_ids = []
+            for cat_id, *_ in catalog_rows:
+                cur.execute(
+                    """INSERT INTO mc_reward_grants (user_id, server_id, catalog_id, granted_at, active, executed, context)
+                       VALUES (%s::uuid, 'default', %s, CURRENT_TIMESTAMP, true, false, %s)
+                       RETURNING id""",
+                    (user_id, cat_id, mission_title)
+                )
+                grant_ids.append(str(cur.fetchone()[0]))
             conn.commit()
 
             # Try to deliver immediately
             rcon = RCONClient(MINECRAFT_HOST, MINECRAFT_PORT, RCON_PASSWORD)
             if rcon.connect():
                 online_players = rcon.get_online_players()
-                rcon.close()
-
                 if player_name in online_players:
-                    if deliver_reward(RCONClient(MINECRAFT_HOST, MINECRAFT_PORT, RCON_PASSWORD), player_name, reward):
-                        # Mark as executed
+                    delivered = True
+                    for _cat_id, reward_type, reward_value, amount, duration, persistent in catalog_rows:
+                        delivered = deliver_reward(rcon, player_name, {
+                            'reward_type': reward_type, 'reward': reward_value,
+                            'reward_amount': amount, 'duration': duration,
+                            'persistent': persistent, 'context': mission_title,
+                        }) and delivered
+                    if delivered:
+                        announce_reward(rcon, player_name, tier)
                         cur.execute(
-                            "UPDATE mc_reward_grants SET executed = true WHERE user_id = %s::uuid ORDER BY granted_at DESC LIMIT 1",
-                            (user_id,)
+                            "UPDATE mc_reward_grants SET executed = true WHERE id = ANY(%s::uuid[])",
+                            (grant_ids,)
                         )
                         conn.commit()
-                        print(f"✓ Delivered {tier} reward to {player_name}")
+                        print(f"✓ Delivered {tier} reward set ({len(catalog_rows)} items) to {player_name}")
                 else:
                     print(f"Player {player_name} offline, scheduled for later delivery")
+                rcon.close()
         finally:
             cur.close()
             return_db_connection(conn)
@@ -351,47 +411,41 @@ async def offline_delivery_loop():
             conn = get_db_connection()
             try:
                 cur = conn.cursor()
+                ensure_grants_schema(conn)
 
-                # Get pending grants for online players
+                # Pending grants for online players, grouped per player so a
+                # whole reward set delivers together with one announcement.
                 cur.execute(
-                    """SELECT g.id, g.user_id, c.reward_type, c.reward, c.reward_amount, c.duration
+                    """SELECT g.id, ml.minecraft_username, c.tier, c.reward_type, c.reward,
+                              c.reward_amount, c.duration, g.context
                        FROM mc_reward_grants g
                        JOIN mc_reward_catalog c ON g.catalog_id = c.id
                        JOIN minecraft_links ml ON g.user_id = ml.user_id
                        WHERE g.executed = false AND g.active = true
-                       AND ml.minecraft_username = ANY(%s::text[])""",
+                       AND ml.minecraft_username = ANY(%s::text[])
+                       ORDER BY ml.minecraft_username, c.tier""",
                     (online_players,)
                 )
-
                 grants = cur.fetchall()
-                for grant_id, user_id, reward_type, reward_value, amount, duration in grants:
-                    player_name = None
-                    # Find player name
-                    for name in online_players:
-                        cur.execute(
-                            "SELECT user_id FROM minecraft_links WHERE minecraft_username = %s",
-                            (name,)
-                        )
-                        if cur.fetchone()[0] == user_id:
-                            player_name = name
-                            break
-
-                    if player_name:
-                        reward = {
-                            'reward_type': reward_type,
-                            'reward': reward_value,
-                            'reward_amount': amount,
-                            'duration': duration
-                        }
-
-                        rcon = RCONClient(MINECRAFT_HOST, MINECRAFT_PORT, RCON_PASSWORD)
-                        if rcon.connect() and deliver_reward(rcon, player_name, reward):
-                            cur.execute(
-                                "UPDATE mc_reward_grants SET executed = true WHERE id = %s",
-                                (grant_id,)
-                            )
-                            conn.commit()
-                            print(f"✓ Offline delivery to {player_name}")
+                if grants:
+                    rcon = RCONClient(MINECRAFT_HOST, MINECRAFT_PORT, RCON_PASSWORD)
+                    if rcon.connect():
+                        announced = set()
+                        for grant_id, player_name, tier, reward_type, reward_value, amount, duration, context in grants:
+                            if deliver_reward(rcon, player_name, {
+                                'reward_type': reward_type, 'reward': reward_value,
+                                'reward_amount': amount, 'duration': duration,
+                                'context': context,
+                            }):
+                                cur.execute(
+                                    "UPDATE mc_reward_grants SET executed = true WHERE id = %s",
+                                    (grant_id,)
+                                )
+                                conn.commit()
+                                if (player_name, tier) not in announced:
+                                    announce_reward(rcon, player_name, tier)
+                                    announced.add((player_name, tier))
+                                print(f"✓ Offline delivery ({tier}) to {player_name}")
                         rcon.close()
 
             finally:

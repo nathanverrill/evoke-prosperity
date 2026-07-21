@@ -178,28 +178,42 @@ def seed_database(db_url):
                 (quest_id, campaign_id, mission_id, title, description, kind)
             )
 
-        # Create Minecraft reward catalog (tier-based rewards)
+        # Create Minecraft reward catalog (tier-based reward SETS -- the
+        # bridge delivers every row for the tier, not LIMIT 1). Design per
+        # MINECRAFT_REWARDS.md: identity > utility, buffs time-bounded,
+        # money grants small vs. earned wages, nothing that skips the
+        # game's own progression (no free high-tier tools -- the old
+        # diamond/netherite pickaxes trivialized the entire mines economy).
+        # For 'effect' rows, reward_amount = the effect amplifier (0 = level
+        # I) and duration is in ticks. 'command' rows may use <player> and
+        # <mission_title> placeholders (rendered by the bridge).
         tiers = ['common', 'uncommon', 'rare', 'epic', 'legendary']
         rewards = {
             'common': [
-                ('item', 'minecraft:stone', 1, None, False),
-                ('item', 'minecraft:dirt', 64, None, False),
+                ('command', 'give <player> minecraft:written_book[minecraft:written_book_content={title:"Field Commendation",author:"B1llbot",pages:[{raw:{text:"Commendation for completing <mission_title>. The Basin grows stronger.\\n\\n— B1llbot"}}]}] 1', 1, None, False),
+                ('command', 'givemoney <player> 10', 1, None, False),
+                ('effect', 'minecraft:haste', 0, 12000, False),
             ],
             'uncommon': [
-                ('item', 'minecraft:iron_pickaxe', 1, None, False),
-                ('effect', 'minecraft:haste', 60, 300, True),
+                ('effect', 'minecraft:night_vision', 0, 12000, False),
+                ('command', 'givemoney <player> 15', 1, None, False),
             ],
             'rare': [
-                ('item', 'minecraft:diamond', 8, None, False),
-                ('effect', 'minecraft:speed', 120, 600, True),
+                ('effect', 'minecraft:speed', 1, 18000, False),
+                ('item', 'minecraft:paper', 1, None, False),
+                ('command', 'givemoney <player> 20', 1, None, False),
             ],
             'epic': [
-                ('item', 'minecraft:diamond_pickaxe', 1, None, False),
-                ('effect', 'minecraft:strength', 180, 900, True),
+                ('effect', 'minecraft:hero_of_the_village', 0, 36000, False),
+                ('command', 'give <player> minecraft:gold_ingot[minecraft:custom_name="Guild Standing",minecraft:lore=["For excellence in the field","— B1llbot"]] 1', 1, None, False),
+                ('command', 'givemoney <player> 30', 1, None, False),
             ],
             'legendary': [
-                ('item', 'minecraft:netherite_pickaxe', 1, None, False),
-                ('command', 'give <player> minecraft:enchanted_golden_apple', 1, None, False),
+                ('command', 'execute at <player> run summon minecraft:allay ~ ~1 ~ {PersistenceRequired:1b,CustomName:"Alpha Courier Drone",CustomNameVisible:1b,Tags:["mission_companion"]}', 1, None, False),
+                ('effect', 'minecraft:glowing', 0, 12000, False),
+                ('command', 'execute at <player> run particle minecraft:firework ~ ~1 ~ 1 1 1 0.15 300', 1, None, False),
+                ('command', 'execute at <player> run playsound minecraft:entity.firework_rocket.large_blast master @a ~ ~ ~ 1 1', 1, None, False),
+                ('command', 'givemoney <player> 50', 1, None, False),
             ],
             # Not a mission-tier award -- delivered by the daily web check-in
             # (POST /api/checkin), reusing this exact same tier-keyed reward
