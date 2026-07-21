@@ -1,5 +1,14 @@
 # MINECRAFT_WORLD_MAP.md — what's actually built in the Basin Simulation
 
+> **2026-07-21:** [`MINECRAFT_GAME_REFERENCE.md`](MINECRAFT_GAME_REFERENCE.md)
+> is now the canonical entry point (deployment truth, mods, economy,
+> integration surfaces, hook-in recipes). This doc remains the deep
+> coordinate/investigation record, but several status claims below are
+> stale: the server is 1.21.11 (not 26.2), billbot v2.0.0 is live (§8's
+> "blocked" is obsolete), savs-common-economy is restored (§4's "abandoned
+> mod" framing), and the original server's world was `true_oasis`, not
+> `basin` (see reference §2).
+
 This documents what's *actually in the world files*, not what's planned —
 the gap between the two turned out to be substantial. Everything here was
 found by exhaustively parsing the real region files (a stdlib-only NBT/Anvil
