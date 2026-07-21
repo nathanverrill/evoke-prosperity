@@ -275,38 +275,47 @@ trigger like `sellCoal` for a command-based equivalent.
 
 ---
 
-## 10. Original-build content NOT yet in the live world
+## 10. Original-build content: port status
 
 From the `basin` vs `true_oasis` command-block diff (2026-07-21, 141
-unique commands), beyond what's already ported:
+unique commands). **Items 1–7 were ported later the same day** — datapacks
+`basin_qol` and `basin_secrets` (new) plus `crafting_factory` extensions,
+all live on Apex. Both new packs use the **self-scheduling tick pattern**
+(`schedule ... 2t replace` armed by a `#minecraft:load` starter) so they
+could go live via `/reload` + one manual `load` call, no restart.
 
-1. **Factory XP-time economy** (the "time scarcity" teaching mechanic):
-   inside Halyard a box grants +1 XP level (cap 60) — CBs at
-   `(40-41,89,104)`; the factory drains 1 level/tick-interval
-   (`(324,118,-150..-152)`), warns at ≤5 ("Time to go!") and ≤1
-   ("I warned you!"), ejects at 0 to `(6,94,98)`, and blocks re-entry
-   under level 60 (`(4,92,100)`). XP levels = time you can afford inside.
-2. **Conveyor emerald drops** — the original conveyor also dropped
-   emeralds via `#roll rng` (needed for the factory villager trades). Our
-   `crafting_factory` port drops only red_sand/obsidian/oak_log/
-   cobblestone. **Real gap: players currently have no emerald source.**
-3. **Craig's secret** — town-hall basement `resetmoney @p` control panel
-   at `(-10,59,194)` (his NPC prompt hints at it under duress).
-4. **Ethan's cookie stand** — dialogue CB at `(-26,64,184)`.
-5. **Diamond-on-bone-block lightning ritual** — easter egg at
-   `(37-39,147-150,501)`: a dropped diamond on a bone block charges
-   (`skelly` counter, crit particles) then a lightning strike.
-6. **Oasis content**: $100 arrival grant box `(86-105,136,1023-1049)`
-   (`givemoney` — mod currency), tp chain into Oasis locations
-   (`57,149,1095`, `97,137,1036`), "Plots for Oasis" tphub destination
-   `(575,74,123)→(756,131,-367)`.
-7. **Mines QoL from true_oasis**: per-tier pickaxe auto-repair
-   (`(-138..-135,60-62,164-167)`), void rescue tp, regeneration box,
-   Halyard `spawnpoint` set on arrival.
-8. **NPC reset buttons** in the tphub (tp each NPC to post) — partially
-   obsolete now that `keel_npcs` re-anchors them.
-9. **Alpha HQ / CEO-reveal ending** — designed (GAME_DESIGN canon), only a
-   hanging sign exists anywhere. New construction, not recovery.
+1. **Factory XP-time economy** — PORTED (`crafting_factory:xp_time`, 5s
+   cadence): Halyard box grants +1 level (cap 60), factory floor drains 1,
+   warns at ≤5/≤1, ejects at 0 to `(6,94,98)`. The entry pad CB at
+   `(2,92,98)` was live-patched back to the original gated command
+   (`tp @p[level=60..] 319 123 -152`). XP levels = time you can afford.
+2. **Conveyor emerald drops** — PORTED: ~1 emerald per 3 conveyor cycles
+   (`random value 1..3` roll in `conveyor_drop`), the currency for the
+   factory villagers.
+3. **Craig's secret** — PORTED (`basin_secrets`): the town-hall basement
+   tunnel was carved via structure export (it never existed in this
+   lineage — solid andesite) and the terminal at `(-10,59,194)` runs
+   `resetmoney` (tag-gated per visit). His NPC persona hints at it.
+4. **Ethan's cookie stand** — covered by the staged `npc_lines` system
+   (Ethan is a pen NPC); the original dialogue CB not separately ported.
+5. **Diamond lightning ritual** — PORTED (`basin_secrets:tick`, global
+   check exactly like the original) plus the mountain shrine structure at
+   `(35-43,142-151,497-505)` with a new bone-block pedestal at
+   `(39,146,501)` — the original world had **no bone block anywhere**, so
+   the easter egg now has a discoverable home.
+6. **Oasis content** — PORTED (`basin_qol`): one-time $100 arrival grant
+   (tag `oasis_granted`, box `(86-105,136,1023-1049)`), and the
+   Halyard→Oasis lift at `(35-38,88-91,57-60)`: consumes a `name_tag`
+   credential → `tp 57 149 1095`; without one, a throttled "You need a
+   ticket!". NOT ported: the "Plots for Oasis" tphub sign (admin
+   convenience; needs a physical sign+button).
+7. **Mines QoL** — PORTED (`basin_qol`): per-tier pickaxe repair station
+   at the entrance, void rescue (deepened to y −30..5) with regeneration,
+   FallDistance zeroing across the mine complex, one-time Halyard
+   `spawnpoint` on train arrival (tag `halyard_spawned`).
+8. **NPC reset buttons** in the tphub — obsolete; `keel_npcs` re-anchors.
+9. **Alpha HQ / CEO-reveal ending** — still unbuilt (design exists in
+   GAME_DESIGN canon; new construction, not recovery).
 
 Also intentionally absent: ThirdBrain/any in-game LLM chat (school-safety
 replacement is the staged-lines system + guarded web B1llBot), and

@@ -1,0 +1,6 @@
+{
+  "pack": {
+    "pack_format": 48,
+    "description": "Quality-of-life systems ported from true_oasis: mines safety, pickaxe repair, Halyard spawnpoint, and the Oasis transit + arrival grant"
+  }
+}
