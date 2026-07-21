@@ -23,6 +23,7 @@ from pypdf import PdfReader
 from pypdf.errors import PdfReadError
 from reportlab.lib.pagesizes import letter
 from reportlab.lib.utils import ImageReader
+from reportlab.lib import colors
 from reportlab.pdfgen import canvas
 from PIL import Image, ImageOps
 
@@ -256,6 +257,36 @@ async def startup():
                 (objective, threshold, quest_title)
             )
 
+        # Basin Archive (playtest 2026-07-21): Billbot's fragmented memory of
+        # the Basin, recovered by exploring — the value-add framing for the
+        # optional Minecraft layer. Each entry is an mc_quest completed
+        # automatically by the bridge (scoreboard/position detection, see
+        # bridge.py's world_progress_loop) and rendered on the Field Tablet
+        # as a locked/unlocked memory (GET /api/basin-archive/{user_id}).
+        # Same optionality rule as every mc_quest: never gates, never grades.
+        db_execute("ALTER TABLE mc_quests DROP CONSTRAINT IF EXISTS mc_quests_kind_check")
+        db_execute("""ALTER TABLE mc_quests ADD CONSTRAINT mc_quests_kind_check
+                      CHECK (kind::text = ANY (ARRAY['mission_quest', 'side_quest', 'basin_archive']::text[]))""")
+        for quest_title, objective in [
+            ("Archive: The Overlook", "basinSeen"),
+            ("Archive: Down into Keel", "keelVisited"),
+            ("Archive: The Mines", "minesVisited"),
+            ("Archive: First Coal", "gotCoal"),
+            ("Archive: The Ticket Up", "halyardVisited"),
+        ]:
+            db_execute(
+                """INSERT INTO mc_quests (campaign_id, title, kind)
+                   SELECT id, %s, 'basin_archive' FROM campaigns WHERE key = 'evoke-prosperity'
+                   AND NOT EXISTS (SELECT 1 FROM mc_quests WHERE title = %s)""",
+                (quest_title, quest_title)
+            )
+            db_execute(
+                """INSERT INTO mc_quest_triggers (quest_id, objective, threshold)
+                   SELECT id, %s, 1 FROM mc_quests WHERE title = %s
+                   ON CONFLICT (quest_id, objective) DO NOTHING""",
+                (objective, quest_title)
+            )
+
         # Wave 3 (BUILD_PLAN_2.md): admin-configurable stages, daily
         # reflections (Words of Wisdom), phone pairing tokens, and the
         # two-channel Minecraft link codes.
@@ -309,6 +340,7 @@ async def startup():
                 ("jim", False, 1, "Yield's down again today. Coal's not what it used to be around here."),
                 ("jim", False, 2, "Keep your credits close. Don't gamble 'em — I've seen it eat men whole."),
                 ("jim", False, 3, "Never miss a shift. That's the only rule that matters down here."),
+                ("jim", False, 4, "New here? Mines are the west end of town, past the coin-flip stand. Grab the free pickaxe at the worker station by the pen first."),
                 ("beth", True, 0, "You want to actually talk sometime? Here. [hands over a scratched relay chip] Towers went dark years back — this is the only way anyone talks anymore."),
                 ("beth", False, 1, "Apartment's still got no walls. Water still comes in warm, if it comes at all."),
                 ("beth", False, 2, "Tough conditions, low pay, fewer resources every season. That's Keel for you."),
@@ -317,6 +349,7 @@ async def startup():
                 ("benjamin", False, 1, "Need tools? Right-click the signs. Alpha's not made of credits, you know."),
                 ("benjamin", False, 2, "Halyard's better than this dust pit, I'll tell you that much."),
                 ("benjamin", False, 3, "Alpha does more for this town than the government ever did. Remember that."),
+                ("benjamin", False, 4, "Saved $100? Type /trigger buyTicket and Alpha will print your train ticket to Halyard. Nothing up there is free either."),
                 ("craig", True, 0, "Eh — take the chip, keep the noise down. [mutters] Not like the old towers are coming back. Frequency's yours."),
                 ("craig", False, 1, "Coal's honest work. Don't let the Oasis crowd tell you otherwise."),
                 ("craig", False, 2, "Keel residents do the hardest work on this mountain. Don't forget it."),
@@ -325,6 +358,7 @@ async def startup():
                 ("billbot", False, 1, "Every credit you don't spend today is a choice you're making about tomorrow."),
                 ("billbot", False, 2, "Ask yourself: who benefits when you don't ask questions about where your pay goes?"),
                 ("billbot", False, 3, "I've got more to say than a few words can hold out here. Open your Field Kit — let's really talk."),
+                ("billbot", False, 4, "Pockets full of coal? Alpha buys it — the shop sign in the mines, or /trigger sellCoal from anywhere. Save $100 and the train up is yours: /trigger buyTicket."),
                 # The starter villager pen (keel_villager_pen datapack) -- decorative
                 # "unemployed" NPCs, no relay-chip mechanic (Billbot/Jim/Beth/Benjamin/
                 # Craig already cover that), just ambient Keel-hardship flavor.
@@ -2927,6 +2961,69 @@ async def get_minecraft_link(user_id: str = Depends(require_self)):
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))
 
+# Basin Archive: the tablet-facing content for the basin_archive quest chain
+# seeded at startup. Hard-coded here on purpose (playtest 2026-07-21) — the
+# teaser is what a locked entry shows, the memory is Billbot's recovered
+# text once the bridge detects the matching in-world act. Every directive in
+# the memory text references a real, verified world mechanic: the free
+# pickaxe station at (-138,63,211), the mines entrance sign at (-140,66,168),
+# the claimReward wage trigger at the mines exit lobby, the bridge's
+# /trigger buyTicket office (bridge.py), and the paper-consuming train at
+# (-137,65,108).
+BASIN_ARCHIVE = [
+    {"key": "tablet", "title": "The Tablet", "quest": None,
+     "teaser": "Billbot's memory of the Basin is fragmented. Sync your tablet from inside the simulation to start recovering it.",
+     "memory": "Signal locked — you're in my world now. You'll wake on the ridge above Keel. Stop. Look around before you move: Keel below you, Halyard's lights upslope, the Oasis glowing at the summit. That's the whole mountain. Then walk downhill into town."},
+    {"key": "overlook", "title": "The Overlook", "quest": "Archive: The Overlook",
+     "teaser": "▓▓▓ corrupted — enter the Basin to recover ▓▓▓",
+     "memory": "You made it in. From up there everything looks small — that's how Alpha liked it. Head down into Keel and find my kiosk near the villager pen. New workers get a free pickaxe at the worker station beside it. Take it. You'll need it."},
+    {"key": "keel", "title": "Down into Keel", "quest": "Archive: Down into Keel",
+     "teaser": "▓▓▓ corrupted — find the town below the ridge ▓▓▓",
+     "memory": "Keel. Home. Not much, but people here get by on each other. Talk to anyone you meet — Jim, Beth, the folks in the pen. The mines are at the west end of town, past the coin-flip stand. Look for the 'Enter the mines' sign."},
+    {"key": "mines", "title": "The Mines", "quest": "Archive: The Mines",
+     "teaser": "▓▓▓ corrupted — find where Keel earns its keep ▓▓▓",
+     "memory": "The lift still runs. Good. Mine coal down there — it's hard, honest work, and it's how everyone in Keel starts. Every piece sells back to Alpha for a dollar: right-click the shop sign in the mines, or type /trigger sellCoal from anywhere."},
+    {"key": "coal", "title": "First Coal", "quest": "Archive: First Coal",
+     "teaser": "▓▓▓ corrupted — bring something back from underground ▓▓▓",
+     "memory": "Coal in hand. That seam kept this town alive for a generation. Now save: a train ticket up to Halyard costs $100. Mine, sell, repeat — and when you've got $100, type /trigger buyTicket near the station."},
+    {"key": "ticket", "title": "The Ticket Up", "quest": "Archive: The Ticket Up",
+     "teaser": "▓▓▓ corrupted — earn your way off the mountain floor ▓▓▓",
+     "memory": "Halyard. Rent, fees, time-clocks — everything up here costs, and the water still isn't free. You earned your way up; nobody gave it to you. Remember what that took. The archive continues…"},
+]
+
+
+@app.get("/api/basin-archive/{user_id}")
+async def get_basin_archive(user_id: str = Depends(require_self)):
+    """The Field Tablet's Basin Archive: BASIN_ARCHIVE entries resolved
+    against this user's link state (entry 1) and mc_quest_completions
+    (the rest, completed by the bridge's world detection)."""
+    try:
+        linked = bool(db_fetch_one(
+            "SELECT 1 FROM minecraft_links WHERE user_id = %s::uuid", (user_id,)
+        ))
+        completed = {r[0] for r in db_fetch_all(
+            """SELECT q.title FROM mc_quest_completions c
+               JOIN mc_quests q ON q.id = c.quest_id
+               WHERE c.user_id = %s::uuid AND q.kind = 'basin_archive'""",
+            (user_id,)
+        )}
+        entries = []
+        for e in BASIN_ARCHIVE:
+            unlocked = linked if e["quest"] is None else e["quest"] in completed
+            entries.append({
+                "key": e["key"], "title": e["title"], "unlocked": unlocked,
+                "text": e["memory"] if unlocked else e["teaser"],
+            })
+        return {
+            "linked": linked,
+            "recovered": sum(1 for e in entries if e["unlocked"]),
+            "total": len(entries),
+            "entries": entries,
+        }
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
 @app.get("/api/mc-quests")
 async def list_mc_quests(campaign_id: Optional[str] = None):
     """List Minecraft quests"""
@@ -3957,42 +4054,54 @@ async def delete_avatar(user_id: str = Depends(require_self)):
 # ========== Field Tablet: Mission Evidence (companion.html) ==========
 # One photo + one observation, filed once per (learner, mission) from the
 # phone while a student is out investigating. This IS real evidence --
-# 2026-07-21 revision: it now goes through the exact same pipeline the
-# desktop Operations Hub uses (_submit_evidence_core/_submit_reflection_core
-# below), via kind='individual_evidence' -- same Kafka event, same
-# Brightspace worker, same completion/XP/badge gate. No separate mobile
-# submission system, no divergence between surfaces.
+# goes through the exact same pipeline the desktop Operations Hub uses
+# (_submit_evidence_core/_submit_reflection_core below), via
+# kind='individual_evidence' -- same Kafka event, same Brightspace worker,
+# same completion/XP/badge gate. No separate mobile submission system, no
+# divergence between surfaces.
 #
-# The photo has to become a PDF first (_build_field_report_pdf) since
-# that's what the AI Coach worker's PdfReader(...) step and the real
-# evidence pipeline both expect -- a raw JPEG would fail exactly the way a
-# non-PDF team_product upload used to. mission_field_reports (the table)
-# still exists, but only now as a display cache: it stores the *original*
-# photo (not the generated PDF) plus the observation, purely so the
-# tablet's own "View Submission" can show back what was actually captured
-# without re-deriving it from the PDF.
+# The uploaded photo is NEVER written to storage, by design -- 2026-07-21
+# revision, after finding the original design (a separate "display cache"
+# S3 object holding the raw photo) carried whatever EXIF the phone attached,
+# GPS location included, with no functional reason to. The photo exists
+# only in memory, for exactly as long as it takes to render it into the PDF
+# (_build_field_report_pdf) -- confirmed live that rendering an image onto
+# a reportlab canvas re-encodes raw pixels into the PDF's image stream and
+# does not carry the source JPEG's EXIF block along with it, so the one
+# artifact that does get stored is already metadata-clean by construction,
+# not by an extra stripping step. The PDF *is* the evidence; there's no
+# separate photo to view or cache, so mission_field_reports (the old
+# display-cache table) is gone -- "filed" state now reads straight from
+# submissions/mission_reflections, the same tables the real pipeline
+# already writes.
 
 @app.get("/api/mission-field-report/{mission_id}")
 async def get_mission_field_report(mission_id: str, user_id: str = Depends(get_current_user)):
     row = db_fetch_one(
-        "SELECT observation, filed_at FROM mission_field_reports WHERE user_id = %s::uuid AND mission_id = %s::uuid",
+        """SELECT s.submitted_at, r.reflection
+           FROM submissions s
+           JOIN mission_reflections r ON r.user_id = s.user_id AND r.mission_id = s.mission_id
+           WHERE s.user_id = %s::uuid AND s.mission_id = %s::uuid AND s.kind = 'individual_evidence'
+           ORDER BY s.submitted_at DESC LIMIT 1""",
         (user_id, mission_id)
     )
     if not row:
         return {"filed": False}
     return {
         "filed": True,
-        "observation": row[0],
-        "filed_at": row[1].isoformat() if row[1] else None,
-        "photo_url": f"/api/mission-field-report/{mission_id}/photo",
+        "observation": row[1],
+        "filed_at": row[0].isoformat() if row[0] else None,
+        "pdf_url": f"/api/mission-field-report/{mission_id}/pdf",
     }
 
 
 def _build_field_report_pdf(photo_bytes: bytes, observation: str, mission_title: str) -> bytes:
-    """One page: mission title, the photo (EXIF-rotated upright -- phone
-    camera JPEGs carry orientation as metadata, not pixels, so skipping
-    this renders sideways/upside-down photos taken in portrait), then the
-    observation text wrapped and paginated below it."""
+    """One page, styled as a real evidence document since this PDF is now
+    the only stored artifact -- EVOKE Field Evidence letterhead, the
+    mission and filing date, the photo (EXIF-rotated upright first --
+    phone camera JPEGs carry orientation as metadata, not pixels, so
+    skipping this renders sideways/upside-down photos taken in portrait),
+    then the observation text, wrapped and paginated below it."""
     img = Image.open(BytesIO(photo_bytes))
     img = ImageOps.exif_transpose(img)
     if img.mode not in ("RGB", "L"):
@@ -4002,23 +4111,44 @@ def _build_field_report_pdf(photo_bytes: bytes, observation: str, mission_title:
     c = canvas.Canvas(buf, pagesize=letter)
     width, height = letter
     margin = 50
+    accent = colors.HexColor("#0d7d74")
 
-    def draw_title(y):
+    def draw_letterhead(y):
+        c.setFillColor(accent)
+        c.setFont("Helvetica-Bold", 10)
+        c.drawString(margin, y, "EVOKE FIELD EVIDENCE")
+        c.setFillColor(colors.black)
         c.setFont("Helvetica-Bold", 16)
-        c.drawString(margin, y, f"Field Report: {mission_title}")
-        return y - 30
+        y -= 20
+        c.drawString(margin, y, mission_title)
+        c.setFont("Helvetica", 9)
+        c.setFillColor(colors.HexColor("#666666"))
+        y -= 14
+        c.drawString(margin, y, f"Filed {datetime.datetime.now().strftime('%B %d, %Y at %I:%M %p')}")
+        c.setFillColor(colors.black)
+        y -= 10
+        c.setStrokeColor(accent)
+        c.setLineWidth(1)
+        c.line(margin, y, width - margin, y)
+        return y - 20
 
-    y = draw_title(height - margin)
+    y = draw_letterhead(height - margin)
 
     iw, ih = img.size
     max_w = width - 2 * margin
-    max_h = height * 0.45
+    max_h = height * 0.42
     scale = min(max_w / iw, max_h / ih, 1.0)
     draw_w, draw_h = iw * scale, ih * scale
     x = margin + (max_w - draw_w) / 2
     y -= draw_h
     c.drawImage(ImageReader(img), x, y, draw_w, draw_h)
-    y -= 24
+    y -= 22
+
+    c.setFont("Helvetica-Bold", 10)
+    c.setFillColor(accent)
+    c.drawString(margin, y, "OBSERVATION")
+    c.setFillColor(colors.black)
+    y -= 18
 
     c.setFont("Helvetica", 11)
     line_height = 15
@@ -4028,7 +4158,7 @@ def _build_field_report_pdf(photo_bytes: bytes, observation: str, mission_title:
         for line in wrapped:
             if y < margin:
                 c.showPage()
-                y = draw_title(height - margin)
+                y = draw_letterhead(height - margin)
                 c.setFont("Helvetica", 11)
             c.drawString(margin, y, line)
             y -= line_height
@@ -4053,6 +4183,8 @@ async def submit_mission_field_report(
     mission_row = db_fetch_one("SELECT title FROM missions WHERE id = %s::uuid", (mission_id,))
     mission_title = mission_row[0] if mission_row else "Field Mission"
 
+    # In memory only -- never written to storage. See this section's header
+    # comment for why, and how the PDF built from it ends up clean anyway.
     photo_bytes = await photo.read()
     try:
         pdf_bytes = _build_field_report_pdf(photo_bytes, observation, mission_title)
@@ -4062,44 +4194,31 @@ async def submit_mission_field_report(
 
     # The real submission -- same pipeline, same Kafka event, same
     # Brightspace sync, same completion gate as the desktop Operations
-    # Hub's evidence + reflection forms.
-    await _submit_evidence_core(
+    # Hub's evidence + reflection forms. This PDF is the one and only
+    # copy of the evidence that gets stored anywhere.
+    result = await _submit_evidence_core(
         user_id, mission_id, "individual_evidence",
         f"field-report-{mission_id}.pdf", pdf_bytes, "application/pdf"
     )
     await _submit_reflection_core(user_id, mission_id, observation)
 
-    # Display cache only (see this section's header comment) -- the
-    # original photo, not the generated PDF, so "View Submission" shows
-    # back what was actually captured.
-    object_key = f"mission-field-reports/{mission_id}/{user_id}"
-    s3_client.put_object(Bucket="default-bucket", Key=object_key, Body=photo_bytes, ContentType=photo.content_type)
-    report_id = str(uuid.uuid4())
-    db_execute(
-        """INSERT INTO mission_field_reports (id, user_id, mission_id, photo_object_key, observation)
-           VALUES (%s::uuid, %s::uuid, %s::uuid, %s, %s)
-           ON CONFLICT (user_id, mission_id) DO UPDATE SET
-               photo_object_key = EXCLUDED.photo_object_key,
-               observation = EXCLUDED.observation,
-               filed_at = CURRENT_TIMESTAMP""",
-        (report_id, user_id, mission_id, object_key, observation)
-    )
     row = db_fetch_one(
-        "SELECT filed_at FROM mission_field_reports WHERE user_id = %s::uuid AND mission_id = %s::uuid",
-        (user_id, mission_id)
+        "SELECT submitted_at FROM submissions WHERE id = %s::uuid", (result["submission_id"],)
     )
     return {
         "filed": True,
         "observation": observation,
         "filed_at": row[0].isoformat() if row and row[0] else None,
-        "photo_url": f"/api/mission-field-report/{mission_id}/photo",
+        "pdf_url": f"/api/mission-field-report/{mission_id}/pdf",
     }
 
 
-@app.get("/api/mission-field-report/{mission_id}/photo")
-async def get_mission_field_report_photo(mission_id: str, user_id: str = Depends(get_current_user)):
+@app.get("/api/mission-field-report/{mission_id}/pdf")
+async def get_mission_field_report_pdf(mission_id: str, user_id: str = Depends(get_current_user)):
     row = db_fetch_one(
-        "SELECT photo_object_key FROM mission_field_reports WHERE user_id = %s::uuid AND mission_id = %s::uuid",
+        """SELECT file_path FROM submissions
+           WHERE user_id = %s::uuid AND mission_id = %s::uuid AND kind = 'individual_evidence'
+           ORDER BY submitted_at DESC LIMIT 1""",
         (user_id, mission_id)
     )
     if not row:
@@ -4107,10 +4226,10 @@ async def get_mission_field_report_photo(mission_id: str, user_id: str = Depends
     try:
         obj = s3_client.get_object(Bucket="default-bucket", Key=row[0])
         return Response(content=obj["Body"].read(),
-                        media_type=obj.get("ContentType", "image/jpeg"),
+                        media_type="application/pdf",
                         headers={"Cache-Control": "no-cache"})
     except Exception:
-        raise HTTPException(status_code=404, detail="Photo not found")
+        raise HTTPException(status_code=404, detail="Report not found")
 
 
 @app.post("/api/profile/{user_id}/sigil")

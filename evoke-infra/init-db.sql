@@ -280,23 +280,6 @@ CREATE TABLE mission_reflections (
     UNIQUE(user_id, mission_id)
 );
 
--- The Field Tablet's (companion.html) single evidence submission per
--- mission -- one photo + one observation, filed once from the phone while
--- a student is out investigating. Deliberately separate from `submissions`
--- (the team's shared evidence, main.py's team-completion AND-gate) and
--- `mission_reflections` (each member's individual reflection) -- this is a
--- personal field capture, not a substitute for either, and must never
--- trigger MissionCompleted/XPGranted/BadgeAwarded.
-CREATE TABLE mission_field_reports (
-    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    user_id UUID NOT NULL REFERENCES users(id),
-    mission_id UUID NOT NULL REFERENCES missions(id),
-    photo_object_key VARCHAR(500) NOT NULL,
-    observation TEXT NOT NULL,
-    filed_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    UNIQUE(user_id, mission_id)
-);
-
 -- Badge to Brightspace Award mapping
 CREATE TABLE badge_brightspace_mapping (
     badge_id UUID NOT NULL REFERENCES badges(id),

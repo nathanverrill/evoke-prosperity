@@ -59,7 +59,7 @@
 
     <div class="fk-tabs" role="tablist" aria-label="Companion tools">
       <button class="fk-tab on" id="fk-tab-chat" data-fpane="chat" role="tab" aria-selected="true" type="button">B1llBot</button>
-      <button class="fk-tab" id="fk-tab-note" data-fpane="note" role="tab" aria-selected="false" type="button">Mission Evidence</button>
+      <button class="fk-tab" id="fk-tab-note" data-fpane="note" role="tab" aria-selected="false" type="button">Mission</button>
       <button class="fk-tab" id="fk-tab-mc" data-fpane="mc" role="tab" aria-selected="false" type="button"><svg aria-hidden="true" width="14" height="14" viewBox="0 0 16 16" style="vertical-align:-2px;margin-right:3px;"><rect width="16" height="16" fill="#7a4a2b"/><rect width="16" height="6" fill="#6cbb3c"/><rect y="5" width="16" height="2" fill="#5a9c30"/></svg>Field Training Simulator</button>
     </div>
 
@@ -128,26 +128,18 @@
       <div id="me-filed" hidden>
         <p style="font-weight:700;margin:0 0 4px;">Mission Evidence ✓</p>
         <p class="empty-state" style="margin:0 0 10px;">Your Field Report has been filed.</p>
-        <button type="button" id="me-view-btn" class="btn" style="width:100%;">View Submission</button>
-        <div id="me-filed-detail" hidden style="margin-top:10px;">
-          <img id="me-filed-photo" style="max-width:100%;border-radius:10px;margin-bottom:10px;">
-          <p id="me-filed-observation" style="margin:0 0 6px;"></p>
-          <p id="me-filed-date" class="empty-state" style="margin:0;"></p>
-        </div>
+        <p id="me-filed-observation" style="margin:0 0 6px;"></p>
+        <p id="me-filed-date" class="empty-state" style="margin:0 0 12px;"></p>
+        <a id="me-view-pdf" href="#" target="_blank" rel="noopener" class="btn" style="display:block;width:100%;text-align:center;text-decoration:none;">View Field Evidence PDF</a>
       </div>
     </section>
 
     <section class="card fk-pane" data-fpane="mc" hidden>
       <div id="connect-body">Loading...</div>
-      <div id="mc-quest-card" hidden style="margin-top:14px;">
-        <div class="card__eyebrow">Minecraft Quests</div>
-        <p class="empty-state" style="margin-top:-4px">Small in-Minecraft activities tied to your missions — self-reported, honor system, never graded.</p>
-        <form id="quest-form" class="stack-sm">
-          <select id="quest-select"></select>
-          <textarea id="quest-observation" placeholder="What did you observe? (optional)" rows="2"></textarea>
-          <button type="submit" class="btn btn-primary">Report Complete</button>
-        </form>
-        <p id="quest-status" class="empty-state"></p>
+      <div id="mc-archive-card" hidden style="margin-top:14px;">
+        <div class="card__eyebrow">Billbot's Basin Archive</div>
+        <p class="empty-state" id="archive-progress" style="margin-top:-4px"></p>
+        <div id="archive-list"></div>
       </div>
     </section>
 
@@ -409,11 +401,9 @@
       document.getElementById("me-form").hidden = true;
       document.getElementById("me-confirm").hidden = true;
       document.getElementById("me-filed").hidden = false;
-      document.getElementById("me-filed-detail").hidden = true;
-      document.getElementById("me-view-btn").textContent = "View Submission";
-      document.getElementById("me-filed-photo").src = report.photo_url;
       document.getElementById("me-filed-observation").textContent = report.observation;
       document.getElementById("me-filed-date").textContent = report.filed_at ? `Filed ${fmtFiledDate(report.filed_at)}` : "Filed";
+      document.getElementById("me-view-pdf").href = report.pdf_url;
     }
     async function loadMissionEvidence() {
       if (!currentMissionId) return;
@@ -430,11 +420,6 @@
       document.getElementById("me-observation").value = "";
       document.getElementById("me-status").textContent = "";
       showEvidenceForm();
-    });
-    document.getElementById("me-view-btn").addEventListener("click", () => {
-      const detail = document.getElementById("me-filed-detail");
-      detail.hidden = !detail.hidden;
-      document.getElementById("me-view-btn").textContent = detail.hidden ? "View Submission" : "Hide Submission";
     });
     function handlePhotoPicked(file) {
       if (!file || !/^image\//.test(file.type)) return;
@@ -501,11 +486,11 @@
         ]);
         mcStopPolling();
         if (link.linked) {
-          body.innerHTML = `<p>Tablet synchronized as <strong>${escapeHtml(link.username)}</strong> ✓</p><p class="empty-state">Rewards, quests, and XP now flow between the Basin and your Field Tablet.</p>`;
-          loadMcQuests();
+          body.innerHTML = `<p>Tablet synchronized as <strong>${escapeHtml(link.username)}</strong> ✓</p><p class="empty-state">Rewards, XP, and Billbot's memories now flow between the Basin and your Field Tablet.</p>`;
+          startArchivePolling();
           return;
         }
-        document.getElementById("mc-quest-card").hidden = true;
+        startArchivePolling();
         body.innerHTML = `
           <h1 class="card__title" style="font-size:1.2em;margin-bottom:10px;">Boot the Field Training Simulator</h1>
           <p>This simulator is older than you are.</p>
@@ -571,38 +556,43 @@
       }
     }
 
-    // Quests are Basin content: revealed only once Minecraft is linked
-    // (BUILD_PLAN_2 §4).
-    async function loadMcQuests() {
-      const card = document.getElementById("mc-quest-card");
+    // Billbot's Basin Archive: the hard-coded discovery chain
+    // (main.py's BASIN_ARCHIVE). Locked entries show corrupted teasers;
+    // the bridge's in-world detection unlocks them. Newly-unlocked entries
+    // are also announced in the B1llBot chat (the primary surface) so the
+    // Basin reads as value-add even for someone who never opens this tab.
+    let archiveKnown = null;   // unlocked keys at last render (session-scoped baseline)
+    let archiveTimer = null;
+    async function loadArchive(announce = true) {
       try {
-        const missions = await fetch(`/api/missions?user_id=${userId}`).then(r => r.json());
-        const questOptions = (missions.missions || [])
-          .filter(mm => mm.quest)
-          .map(mm => `<option value="${mm.quest.id}">${escapeHtml(mm.quest.title)}</option>`)
-          .join("");
-        document.getElementById("quest-select").innerHTML = questOptions || `<option disabled>No quests available</option>`;
+        const a = await fetch(`/api/basin-archive/${userId}`).then(r => r.json());
+        const card = document.getElementById("mc-archive-card");
+        document.getElementById("archive-progress").textContent =
+          a.recovered >= a.total
+            ? "All memories recovered. Billbot remembers the whole mountain."
+            : `${a.recovered} of ${a.total} memories recovered — explore the Basin to restore the rest.`;
+        document.getElementById("archive-list").innerHTML = a.entries.map(e => `
+          <div style="padding:10px 0;border-top:1px solid rgba(0,0,0,0.08);${e.unlocked ? "" : "opacity:0.55;"}">
+            <div style="font-weight:700;font-size:0.95em;">${e.unlocked ? "◈" : "◇"} ${escapeHtml(e.title)}</div>
+            <div style="font-size:0.9em;margin-top:2px;${e.unlocked ? "" : "font-style:italic;"}">${escapeHtml(e.text)}</div>
+          </div>`).join("");
         card.hidden = false;
+        const unlocked = new Set(a.entries.filter(e => e.unlocked).map(e => e.key));
+        if (archiveKnown && announce) {
+          a.entries.filter(e => e.unlocked && !archiveKnown.has(e.key)).forEach(e => {
+            const chat = document.getElementById("chat");
+            chat.insertAdjacentHTML("beforeend",
+              `<div class="billbot-msg" data-from="billbot"><strong>◈ Memory recovered — ${escapeHtml(e.title)}</strong><br>${escapeHtml(e.text)}</div>`);
+            chat.scrollTop = chat.scrollHeight;
+          });
+        }
+        archiveKnown = unlocked;
       } catch (e) {}
     }
-
-    document.getElementById("quest-form").addEventListener("submit", async (e) => {
-      e.preventDefault();
-      const questId = document.getElementById("quest-select").value;
-      const observation = document.getElementById("quest-observation").value;
-      const statusEl = document.getElementById("quest-status");
-      if (!questId) return;
-      const formData = new FormData();
-      formData.append("observation_text", observation);
-      statusEl.textContent = "Reporting...";
-      try {
-        await fetch(`/api/mc-quests/${questId}/submit?user_id=${userId}`, { method: "POST", body: formData });
-        statusEl.textContent = "Logged — self-reported, never graded, never required.";
-        document.getElementById("quest-observation").value = "";
-      } catch (err) {
-        statusEl.textContent = "Couldn't report that just now.";
-      }
-    });
+    function startArchivePolling() {
+      loadArchive(false);
+      if (!archiveTimer) archiveTimer = setInterval(loadArchive, 20000);
+    }
 
     // ---- Two-channel link confirm (push + poll fallback) ----
     async function pollLinkRequest() {
@@ -666,6 +656,9 @@
           }
           if (msg.type === "MissionCompleted" && msg.data && msg.data.user_id === userId) {
             loadCurrentMission();
+          }
+          if (msg.type === "QuestCompleted" && msg.data && msg.data.user_id === userId) {
+            loadArchive();
           }
         };
         ws.onclose = () => { setTimeout(open, retryMs); retryMs = Math.min(retryMs * 2, 15000); };
