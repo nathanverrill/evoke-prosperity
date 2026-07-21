@@ -40,7 +40,7 @@
     <div id="fk-content" hidden>
     <h1 class="card__title">EVOKE Field Kit</h1>
     <p class="empty-state" id="agent-line"></p>
-    <p class="empty-state">Your pocket companion — keep this open on your phone next to Minecraft, or check in here anytime for B1llBot, your Notebook, and Minecraft.</p>
+    <p class="empty-state">Your pocket companion — keep this open on your phone next to Minecraft, or check in here anytime for B1llBot, your Notebook, and the Simulation.</p>
 
     <section class="card" id="link-confirm-card" hidden>
       <div class="card__eyebrow">⛏ Minecraft link request</div>
@@ -54,7 +54,7 @@
     <div class="fk-tabs" role="tablist" aria-label="Companion tools">
       <button class="fk-tab on" id="fk-tab-chat" data-fpane="chat" role="tab" aria-selected="true" type="button">B1llBot</button>
       <button class="fk-tab" id="fk-tab-note" data-fpane="note" role="tab" aria-selected="false" type="button">Notebook</button>
-      <button class="fk-tab" id="fk-tab-mc" data-fpane="mc" role="tab" aria-selected="false" type="button">Minecraft</button>
+      <button class="fk-tab" id="fk-tab-mc" data-fpane="mc" role="tab" aria-selected="false" type="button"><svg aria-hidden="true" width="14" height="14" viewBox="0 0 16 16" style="vertical-align:-2px;margin-right:3px;"><rect width="16" height="16" fill="#7a4a2b"/><rect width="16" height="6" fill="#6cbb3c"/><rect y="5" width="16" height="2" fill="#5a9c30"/></svg>Simulation</button>
     </div>
 
     <section class="card fk-pane" data-fpane="chat">
@@ -66,8 +66,25 @@
     </section>
 
     <section class="card fk-pane" data-fpane="note" hidden>
-      <div class="card__eyebrow">Daily Field Report</div>
+      <div class="card__eyebrow">Current Mission</div>
+      <div id="nb-mission-title" style="font-weight:700;font-size:1.05em;margin-bottom:6px;">Loading…</div>
+      <p id="nb-mission-desc" class="empty-state" style="margin:0 0 6px;"></p>
+      <button id="nb-mission-more-btn" type="button" style="background:none;border:none;padding:0;cursor:pointer;color:inherit;opacity:0.75;font-size:0.85em;font-weight:600;">More ▾</button>
+      <div id="nb-mission-more" hidden style="margin-top:8px;padding-top:8px;border-top:1px solid rgba(0,0,0,0.1);font-size:0.92em;line-height:1.5;"></div>
+
+      <div class="card__eyebrow" style="margin-top:18px;">Daily Field Report</div>
       <div id="reflect-body">Loading...</div>
+
+      <div class="card__eyebrow" style="margin-top:18px;">Field Notes</div>
+      <button id="fn-add-btn" type="button" class="btn btn-primary" style="width:100%;margin-bottom:10px;">+ Add Field Note</button>
+      <div id="fn-entry" hidden style="margin-bottom:10px;">
+        <textarea id="fn-input" rows="3" placeholder="What did you earn, build, or notice…" style="width:100%;"></textarea>
+        <div class="row" style="margin-top:6px;">
+          <button type="button" id="fn-save" class="btn btn-primary" style="flex:1;">Save</button>
+          <button type="button" id="fn-cancel" class="btn" style="flex:1;">Cancel</button>
+        </div>
+      </div>
+      <ul id="fn-list" style="list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:8px;"></ul>
     </section>
 
     <section class="card fk-pane" data-fpane="mc" hidden>
@@ -85,25 +102,6 @@
       </div>
     </section>
 
-    <section class="card world-meter">
-      <div class="card__eyebrow">Keel Restoration</div>
-      <div id="world">Loading...</div>
-    </section>
-
-    <section class="card">
-      <div class="card__eyebrow"><span class="presence-dot" id="presence-dot"></span> In the Basin</div>
-      <div id="presence" class="empty-state">Loading...</div>
-    </section>
-
-    <section class="card">
-      <div class="card__eyebrow">Current Mission</div>
-      <div id="mission">Loading...</div>
-    </section>
-
-    <section class="card">
-      <div class="card__eyebrow">Pending Awards</div>
-      <div id="awards" class="stack-sm"></div>
-    </section>
     </div>
   </div>
 
@@ -204,12 +202,103 @@
       document.getElementById("agent-line").textContent = `Agent: ${displayName || "…"}`;
       fetch(`/api/minigames/kit/piece?user_id=${userId}`, { method: "POST", body: (() => { const f = new FormData(); f.append("piece", "cap"); return f; })() }).catch(() => {});
       connectLive();
-      await loadData();
+      loadNotebookMission();
       loadReflect();
       loadConnect();
-      setInterval(loadData, 10000);
       setInterval(pollLinkRequest, 8000);
     }
+
+    // ---- Notebook tab: current mission title/desc + "More" (real
+    // curriculum narrative, same pbl_description field the desktop app's
+    // Notebook tab reads from this same /api/missions response) ----
+    async function loadNotebookMission() {
+      const titleEl = document.getElementById("nb-mission-title"), descEl = document.getElementById("nb-mission-desc");
+      try {
+        const [missionsRes, profile] = await Promise.all([
+          fetch(`/api/missions?user_id=${userId}`).then(r => r.json()),
+          fetch(`/api/profile/player/${userId}`).then(r => r.ok ? r.json() : null),
+        ]);
+        const missions = missionsRes.missions || [];
+        const completed = new Set(((profile && profile.missions_completed) || []).map(String));
+        const current = missions.find(m => !completed.has(String(m.id))) || missions[missions.length - 1];
+        if (!current) { titleEl.textContent = "No missions yet."; return; }
+        titleEl.textContent = current.title;
+        descEl.textContent = current.brief || "";
+        const moreBtn = document.getElementById("nb-mission-more-btn"), moreBox = document.getElementById("nb-mission-more");
+        let expanded = false;
+        moreBtn.addEventListener("click", () => {
+          expanded = !expanded;
+          moreBox.hidden = !expanded;
+          moreBtn.textContent = expanded ? "Less ▴" : "More ▾";
+          if (expanded && !moreBox.dataset.loaded) {
+            moreBox.dataset.loaded = "1";
+            moreBox.innerHTML = current.pbl_description ? formatNarrative(current.pbl_description) : "No additional detail yet for this mission.";
+          }
+        });
+      } catch (e) { titleEl.textContent = "Couldn't load your mission right now."; }
+    }
+    // Same light "Step N:" bold / "- " bullet structure the desktop app's
+    // Notebook tab uses for this same field.
+    function formatNarrative(text) {
+      return text.split(/\n\n+/).map((block) => {
+        const lines = block.split("\n");
+        let html = "", bullets = [];
+        const flush = () => { if (bullets.length) { html += `<ul style="margin:6px 0;padding-left:20px;">${bullets.map(b => `<li>${escapeHtml(b)}</li>`).join("")}</ul>`; bullets = []; } };
+        lines.forEach((line, i) => {
+          if (/^-\s+/.test(line)) { bullets.push(line.replace(/^-\s+/, "")); return; }
+          flush();
+          if (!line.trim()) return;
+          const isStepHeader = i === 0 && /^Step \d+/.test(line);
+          html += isStepHeader ? `<p style="margin:0 0 6px;"><strong>${escapeHtml(line)}</strong></p>` : `<p style="margin:0 0 6px;">${escapeHtml(line)}</p>`;
+        });
+        flush();
+        return html;
+      }).join("");
+    }
+
+    // ---- Field Notes: same plain localStorage journal as the desktop
+    // app's Notebook tab -- same key, so notes made on this device show up
+    // in either place, same browser. ----
+    (function () {
+      const KEY = "evoke-field-notes";
+      const addBtn = document.getElementById("fn-add-btn"), entry = document.getElementById("fn-entry"),
+        input = document.getElementById("fn-input"), saveBtn = document.getElementById("fn-save"),
+        cancelBtn = document.getElementById("fn-cancel"), list = document.getElementById("fn-list");
+      function load() { try { return JSON.parse(localStorage.getItem(KEY) || "[]"); } catch (e) { return []; } }
+      function persist(notes) { try { localStorage.setItem(KEY, JSON.stringify(notes)); } catch (e) {} }
+      function fmtTime(ts) { try { return new Date(ts).toLocaleString(undefined, { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" }); } catch (e) { return ""; } }
+      function render() {
+        const notes = load();
+        list.innerHTML = notes.length ? "" : `<li class="empty-state">No field notes yet.</li>`;
+        notes.slice().reverse().forEach((n) => {
+          const li = document.createElement("li");
+          li.style.cssText = "padding:9px 11px;border-radius:8px;background:rgba(0,0,0,0.04);";
+          const meta = document.createElement("div");
+          meta.className = "empty-state";
+          meta.style.cssText = "font-size:0.78em;margin-bottom:4px;";
+          meta.textContent = fmtTime(n.ts);
+          const text = document.createElement("div");
+          text.style.cssText = "white-space:pre-wrap;";
+          text.textContent = n.text;
+          li.appendChild(meta); li.appendChild(text);
+          list.appendChild(li);
+        });
+      }
+      function openEntry() { entry.hidden = false; addBtn.hidden = true; input.value = ""; input.focus(); }
+      function closeEntry() { entry.hidden = true; addBtn.hidden = false; }
+      addBtn.addEventListener("click", openEntry);
+      cancelBtn.addEventListener("click", closeEntry);
+      saveBtn.addEventListener("click", () => {
+        const text = (input.value || "").trim();
+        if (!text) return;
+        const notes = load();
+        notes.push({ text, ts: Date.now() });
+        persist(notes);
+        render();
+        closeEntry();
+      });
+      render();
+    })();
 
     // ---- Daily Field Report (the Notebook tab's real content) ----
     // Wisdom generates async now (workers.py's FIELD REPORT WORKER) and
@@ -420,69 +509,13 @@
             showWisdom(msg.data.wisdom);
             return;
           }
-          if (["MinecraftPresence", "WorldStateAdvanced", "AwardGranted", "MissionCompleted"].includes(msg.type)) loadData();
+          if (msg.type === "MissionCompleted" && msg.data && msg.data.user_id === userId) {
+            loadNotebookMission();
+          }
         };
         ws.onclose = () => { setTimeout(open, retryMs); retryMs = Math.min(retryMs * 2, 15000); };
       }
       open();
-    }
-
-    async function loadWorldAndPresence() {
-      try {
-        const world = await fetch("/api/world-state").then(r => r.json());
-        const pct = Math.round((world.stage / world.total_stages) * 100);
-        document.getElementById("world").innerHTML = `
-          <strong>Stage ${world.stage}: ${escapeHtml(world.current.title)}</strong>
-          <div class="world-meter__track" style="margin-top:8px"><div class="world-meter__fill" style="width:${pct}%"></div></div>
-          <p class="empty-state" style="margin-top:8px">${escapeHtml(world.current.narrative)}</p>`;
-      } catch (e) { /* leave last reading */ }
-      try {
-        const st = await fetch("/api/minecraft/status").then(r => r.json());
-        document.getElementById("presence-dot").classList.toggle("is-online", !!st.server_online);
-        const players = st.online_players || [];
-        document.getElementById("presence").innerHTML = st.server_online
-          ? (players.length
-              ? players.map(p => {
-                  const l = (st.linked_players || {})[p];
-                  return `<p>${l ? `<strong>${escapeHtml(l.display_name)}</strong> as ${escapeHtml(p)}` : escapeHtml(p)}</p>`;
-                }).join("")
-              : `<span class="empty-state">The Basin is quiet.</span>`)
-          : `<span class="empty-state">Status unknown right now.</span>`;
-      } catch (e) { /* leave last reading */ }
-    }
-
-    async function loadData() {
-      if (!userId) return;
-      loadWorldAndPresence();
-      try {
-        const missions = await fetch(`/api/missions?user_id=${userId}`).then(r => r.json());
-        const m = (missions.missions || [])[0];
-        document.getElementById("mission").innerHTML = m
-          ? `<strong>${escapeHtml(m.title)}</strong><br><span class="empty-state">Week ${m.week} · ${m.arc}</span>`
-          : `<span class="empty-state">No missions yet.</span>`;
-
-        const notifs = await fetch(`/api/notifications/${userId}`).then(r => r.json());
-        const pending = (notifs.notifications || []).filter(n => !n.read);
-        document.getElementById("awards").innerHTML = pending.length
-          ? pending.map(n => `
-              <div class="award is-pending">
-                <span>Award pending</span>
-                <button data-award-id="${n.award_id}" class="btn collect-btn">Collect</button>
-              </div>
-            `).join("")
-          : `<p class="empty-state">Nothing pending.</p>`;
-
-        document.querySelectorAll(".collect-btn").forEach(btn => {
-          btn.addEventListener("click", async () => {
-            // Query params, not a JSON body -- /api/awards/{id}/collect reads
-            // user_id as a query param (previously this page sent a JSON
-            // body here, which the endpoint never reads, so Collect silently
-            // 422'd every time).
-            await fetch(`/api/awards/${btn.dataset.awardId}/collect?user_id=${userId}`, { method: "POST" });
-            loadData();
-          });
-        });
-      } catch (e) { console.error(e); }
     }
 
     document.getElementById("chat-form").addEventListener("submit", async (e) => {

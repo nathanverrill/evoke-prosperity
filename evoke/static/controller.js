@@ -1589,6 +1589,47 @@
         }
       });
     })();
+    // Daily Field Report -- ported from companion.html (the phone-scanned
+    // QR page), which has always had this as its Notebook tab's real
+    // content, wired to a real backend reflection + async AI "wisdom" reply
+    // (workers.py's Field Report Worker, arriving over /ws's WisdomReady --
+    // see connectLive() below). Same endpoints, same event shape, so a
+    // report filed on one surface shows as filed on the other.
+    (function(){
+      var body=document.getElementById('comp-reflect-body');
+      if(!body || !STATE.userId) return;
+      function showFiled(latestWisdom){
+        body.innerHTML='';
+        body.appendChild(el('<p style="font-family:var(--font-body);font-size:13.5px;color:var(--teal-050);margin:0 0 6px;">Filed today ✓</p>'));
+        var w=el('<p id="comp-reflect-wisdom" class="hud" style="font-size:11px;color:var(--text-faint);line-height:1.5;"></p>');
+        w.textContent = latestWisdom ? ('“'+latestWisdom+'” — B1llBot') : 'B1llBot’s still thinking of a word of wisdom…';
+        body.appendChild(w);
+      }
+      function showForm(){
+        body.innerHTML='';
+        var form=el('<form style="display:flex;flex-direction:column;gap:8px;"><textarea id="comp-reflect-text" rows="2" maxlength="600" placeholder="What did you do today? What are you thinking about?" style="width:100%;min-height:70px;padding:10px 12px;border-radius:10px;border:none;background:rgba(0,150,136,0.06);box-shadow:inset 0 0 0 1px var(--border-ui);color:var(--text-heading);font-family:var(--font-body);font-size:13.5px;resize:vertical;"></textarea><button type="submit" class="btn" style="width:100%;">File Report</button></form>');
+        var status=el('<p id="comp-reflect-status" class="hud" style="font-size:11px;color:var(--text-faint);margin-top:6px;"></p>');
+        body.appendChild(form); body.appendChild(status);
+        form.addEventListener('submit', function(e){
+          e.preventDefault();
+          var t=document.getElementById('comp-reflect-text'), text=(t.value||'').trim();
+          if(!text) return;
+          status.textContent='Filing…';
+          var fd=new FormData(); fd.append('text', text);
+          fetch('/api/reflection?user_id='+encodeURIComponent(STATE.userId), {method:'POST', body:fd}).then(function(){
+            showFiled(null);
+          }).catch(function(){ status.textContent='Couldn’t file that — try again.'; });
+        });
+      }
+      window.__compShowWisdom = function(wisdom){
+        var w=document.getElementById('comp-reflect-wisdom');
+        if(w) w.textContent = '“'+wisdom+'” — B1llBot';
+      };
+      fetch('/api/reflections/'+encodeURIComponent(STATE.userId)).then(function(r){ return r.ok?r.json():null; }).then(function(r){
+        if(r && r.filed_today){ showFiled((r.journal||[])[0] && (r.journal||[])[0].wisdom); }
+        else { showForm(); }
+      }).catch(showForm);
+    })();
     // Field Notes: a plain running journal, local to this device (same
     // localStorage-only pattern the old What-did-you-earn/notice fields
     // used) -- add-button reveals an entry box, saving appends to a list.
@@ -1858,6 +1899,10 @@
       ws.onopen = function(){ retryMs = 2000; };
       ws.onmessage = function(e){
         var msg; try{ msg = JSON.parse(e.data); }catch(err){ return; }
+        if(msg.type==='WisdomReady' && msg.data && msg.data.user_id===STATE.userId){
+          if(window.__compShowWisdom) window.__compShowWisdom(msg.data.wisdom);
+          return;
+        }
         if(msg.type!=='MissionCompleted' || !msg.data || msg.data.user_id!==STATE.userId) return;
         var no = STATE.missionIds.indexOf(msg.data.mission_id) + 1;
         if(no>0 && missionState(no)!=='complete'){
