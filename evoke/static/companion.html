@@ -117,6 +117,14 @@
         <p id="me-status" class="empty-state" style="margin-top:8px;"></p>
       </div>
 
+      <div id="me-confirm" hidden>
+        <p style="font-weight:700;margin:0 0 6px;">Submit your Field Report?</p>
+        <p class="empty-state" style="margin:0 0 16px;">This will be graded and can't be changed after you submit — same as submitting on Brightspace.</p>
+        <button type="button" id="me-confirm-submit" class="btn btn-primary" style="width:100%;margin-bottom:8px;">Submit</button>
+        <button type="button" id="me-confirm-back" class="btn" style="width:100%;">Go Back</button>
+        <p id="me-confirm-status" class="empty-state" style="margin-top:8px;"></p>
+      </div>
+
       <div id="me-filed" hidden>
         <p style="font-weight:700;margin:0 0 4px;">Mission Evidence ✓</p>
         <p class="empty-state" style="margin:0 0 10px;">Your Field Report has been filed.</p>
@@ -380,16 +388,26 @@
     function showEvidenceEmpty() {
       document.getElementById("me-empty").hidden = false;
       document.getElementById("me-form").hidden = true;
+      document.getElementById("me-confirm").hidden = true;
       document.getElementById("me-filed").hidden = true;
     }
     function showEvidenceForm() {
       document.getElementById("me-empty").hidden = true;
       document.getElementById("me-form").hidden = false;
+      document.getElementById("me-confirm").hidden = true;
       document.getElementById("me-filed").hidden = true;
+    }
+    function showEvidenceConfirm() {
+      document.getElementById("me-empty").hidden = true;
+      document.getElementById("me-form").hidden = true;
+      document.getElementById("me-confirm").hidden = false;
+      document.getElementById("me-filed").hidden = true;
+      document.getElementById("me-confirm-status").textContent = "";
     }
     function showEvidenceFiled(report) {
       document.getElementById("me-empty").hidden = true;
       document.getElementById("me-form").hidden = true;
+      document.getElementById("me-confirm").hidden = true;
       document.getElementById("me-filed").hidden = false;
       document.getElementById("me-filed-detail").hidden = true;
       document.getElementById("me-view-btn").textContent = "View Submission";
@@ -434,13 +452,26 @@
     document.getElementById("me-choose-photo").addEventListener("click", () => document.getElementById("me-photo-input-choose").click());
     document.getElementById("me-photo-input-camera").addEventListener("change", (e) => handlePhotoPicked(e.target.files[0]));
     document.getElementById("me-photo-input-choose").addEventListener("change", (e) => handlePhotoPicked(e.target.files[0]));
-    document.getElementById("me-submit").addEventListener("click", async () => {
+    // "Submit Field Report" only validates and hands off to a confirm step
+    // -- this has real academic consequences (real Brightspace submission,
+    // real grading), so it gets the same are-you-sure weight a real
+    // Brightspace submit would, not a casual save.
+    document.getElementById("me-submit").addEventListener("click", () => {
       const status = document.getElementById("me-status");
       const observation = document.getElementById("me-observation").value.trim();
       if (!evidencePhotoFile) { status.textContent = "Take or choose a photo first."; return; }
       if (!observation) { status.textContent = "Describe your evidence before filing."; return; }
       if (!currentMissionId) { status.textContent = "No active mission to file against."; return; }
+      status.textContent = "";
+      showEvidenceConfirm();
+    });
+    document.getElementById("me-confirm-back").addEventListener("click", showEvidenceForm);
+    document.getElementById("me-confirm-submit").addEventListener("click", async () => {
+      const status = document.getElementById("me-confirm-status");
+      const observation = document.getElementById("me-observation").value.trim();
+      const confirmBtn = document.getElementById("me-confirm-submit");
       status.textContent = "Filing…";
+      confirmBtn.disabled = true;
       try {
         const fd = new FormData();
         fd.append("mission_id", currentMissionId);
@@ -452,6 +483,7 @@
         showEvidenceFiled(data);
       } catch (err) {
         status.textContent = err.message || "Couldn't file that — try again.";
+        confirmBtn.disabled = false;
       }
     });
 

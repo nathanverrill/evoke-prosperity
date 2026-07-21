@@ -6,6 +6,7 @@ import random
 import re
 import uuid
 import hashlib
+import textwrap
 from typing import Optional, List
 from fastapi import FastAPI, HTTPException, File, UploadFile, Form, Depends, Response, Request, WebSocket, WebSocketDisconnect
 from fastapi.staticfiles import StaticFiles
@@ -20,6 +21,10 @@ import logging
 from io import BytesIO
 from pypdf import PdfReader
 from pypdf.errors import PdfReadError
+from reportlab.lib.pagesizes import letter
+from reportlab.lib.utils import ImageReader
+from reportlab.pdfgen import canvas
+from PIL import Image, ImageOps
 
 from evoke.clients import s3_client, os_client, get_producer, topic_for_event
 from evoke.workers import evoke_workers_loop
@@ -320,6 +325,21 @@ async def startup():
                 ("billbot", False, 1, "Every credit you don't spend today is a choice you're making about tomorrow."),
                 ("billbot", False, 2, "Ask yourself: who benefits when you don't ask questions about where your pay goes?"),
                 ("billbot", False, 3, "I've got more to say than a few words can hold out here. Open your Field Kit — let's really talk."),
+                # The starter villager pen (keel_villager_pen datapack) -- decorative
+                # "unemployed" NPCs, no relay-chip mechanic (Billbot/Jim/Beth/Benjamin/
+                # Craig already cover that), just ambient Keel-hardship flavor.
+                ("chuzz", True, 0, "Oh — you're new. Don't mind me, I'm just... between jobs. Aren't we all."),
+                ("chuzz", False, 1, "Alpha stopped hiring out of the pen years back. Now we just... exist."),
+                ("chuzz", False, 2, "Used to work the mines. The coal took my knees before it took my job."),
+                ("chuzz", False, 3, "Ethan says the Oasis is hiring. Ethan says a lot of things."),
+                ("ethan", True, 0, "Welcome to Keel. Don't expect much — most of us don't."),
+                ("ethan", False, 1, "I hear things. Traders talk more than they think they do."),
+                ("ethan", False, 2, "Fredster's convinced there's easy credits up the mountain. There aren't."),
+                ("ethan", False, 3, "Nobody's coming to fix this place. We just get by."),
+                ("fredster", True, 0, "Hey! New face! Wouldn't get your hopes up about this town, though."),
+                ("fredster", False, 1, "Had a plan once. Involved coal, a cart, and not thinking it through."),
+                ("fredster", False, 2, "Want advice? Keep your credits. Don't trust anyone selling a \"sure thing.\""),
+                ("fredster", False, 3, "Chuzz and Ethan don't talk much. Suits me — more room for me to."),
             ]
             for _name, _greeting, _order, _text in _npc_seed:
                 db_execute(
@@ -1597,9 +1617,19 @@ async def _complete_mission_for_user(user_id: str, mission_id: str, team_id: str
     if already:
         return
 
+    # team_product: any teammate's shared submission satisfies this half of
+    # the gate for everyone (unchanged, existing behavior). individual_evidence
+    # (Field Tablet, no team artifact concept): only THIS user's own
+    # submission counts -- reusing team_product's team-wide check here would
+    # let one teammate's Field Tablet submission silently complete another's
+    # gate despite them never submitting anything themselves.
     evidence = db_fetch_one(
-        "SELECT 1 FROM submissions WHERE team_id = %s::uuid AND mission_id = %s::uuid AND kind = 'team_product' LIMIT 1",
-        (team_id, mission_id)
+        """SELECT 1 FROM submissions
+           WHERE mission_id = %s::uuid
+             AND ((kind = 'team_product' AND team_id = %s::uuid)
+               OR (kind = 'individual_evidence' AND user_id = %s::uuid))
+           LIMIT 1""",
+        (mission_id, team_id, user_id)
     )
     reflected = db_fetch_one(
         "SELECT 1 FROM mission_reflections WHERE user_id = %s::uuid AND mission_id = %s::uuid LIMIT 1",
@@ -1704,6 +1734,162 @@ async def _complete_mission_for_user(user_id: str, mission_id: str, team_id: str
     )
 
 
+async def _submit_evidence_core(user_id: str, mission_id: str, kind: str, filename: str, file_bytes: bytes, content_type: Optional[str]) -> dict:
+    """The one real evidence-submission path -- same DB writes, same S3
+    put, same Kafka event, same completion gate, regardless of caller.
+    /api/submit-evidence (desktop) and the Field Tablet's Mission Evidence
+    flow (evoke-web PDF built from a photo+observation) both call this
+    directly, so there is no separate mobile pipeline to drift out of sync.
+
+    `kind='team_product'` is the TEAM's shared artifact -- any member can
+    call it, and it closes the completion AND-gate (see
+    _complete_mission_for_user) for any teammate who already reflected.
+    `kind='individual_task'` is a learner's own piece (Submission Redesign
+    doc, missions 1-4): stored + hash-recorded for the roster/assessment,
+    but it does not fire team-completion effects.
+    `kind='individual_evidence'` (Field Tablet, 2026-07-21) is one
+    learner's own submission for an individually-graded assignment -- no
+    team artifact concept at all. Resubmission-guarded and gate-checked
+    per (user_id, mission_id), not per team, so one teammate's Field
+    Tablet submission can never silently satisfy another's gate the way
+    reusing team_product would have."""
+    if kind not in ("team_product", "individual_task", "individual_evidence"):
+        raise HTTPException(status_code=400, detail="kind must be 'team_product', 'individual_task', or 'individual_evidence'")
+
+    mission_release = db_fetch_one(
+        "SELECT released_at FROM missions WHERE id = %s::uuid", (mission_id,)
+    )
+    if not mission_release or mission_release[0] is None:
+        # Real gating, not just a UI hint -- a locked mission's evidence
+        # form is hidden client-side too (screens.js), but this is the
+        # enforcement that actually matters. See GAPS.md's resolved
+        # "mission ordering" item: admin-release, not order-of-completion.
+        raise HTTPException(status_code=403, detail="This mission hasn't been released yet")
+
+    team_id = _get_user_team(user_id)
+    if not team_id:
+        raise HTTPException(status_code=400, detail="You're not on a team yet -- ask your teacher to add you to a group in Brightspace")
+
+    submission_id = str(uuid.uuid4())
+
+    # Revise-and-resubmit is a first-class path (GAPS.md #3): a later
+    # submission re-runs the AI review (which can upgrade the award tier)
+    # but must NOT re-fire the one-time completion effects for anyone
+    # already completed -- previously every resubmission re-published
+    # MissionCompleted/XPGranted/BadgeAwarded and duplicate AwardGranted
+    # feed events, which both spammed the feed and made resubmission an
+    # infinite +100 XP faucet.
+    # team_product's guard is scoped to the TEAM (any member's earlier
+    # submission counts); individual_evidence's is scoped to THIS user --
+    # each learner has their own first-submission guard, since there's no
+    # shared artifact. individual_task never resubmission-guards (it
+    # doesn't gate anything to begin with).
+    if kind == "team_product":
+        prior = db_fetch_one(
+            "SELECT 1 FROM submissions WHERE team_id = %s::uuid AND mission_id = %s::uuid AND kind = 'team_product' LIMIT 1",
+            (team_id, mission_id)
+        )
+    elif kind == "individual_evidence":
+        prior = db_fetch_one(
+            "SELECT 1 FROM submissions WHERE user_id = %s::uuid AND mission_id = %s::uuid AND kind = 'individual_evidence' LIMIT 1",
+            (user_id, mission_id)
+        )
+    else:
+        prior = None
+    is_resubmission = bool(prior)
+
+    # The AI Coach worker actually reads this file (evoke/workers.py's
+    # PdfReader(...) on EvidenceSubmitted/TeamEvidenceSubmitted) -- a
+    # non-PDF used to sail through here, then fail silently downstream with
+    # a broken "Error parsing document" string sent to learners as if it
+    # were real AI feedback (confirmed live). Reject it here instead, where
+    # the uploader gets an actual error message. individual_task files are
+    # never AI-parsed, so they aren't restricted.
+    if kind in ("team_product", "individual_evidence"):
+        try:
+            PdfReader(BytesIO(file_bytes))
+        except PdfReadError:
+            raise HTTPException(status_code=400, detail="Evidence must be a PDF")
+
+    content_hash = hashlib.sha256(file_bytes).hexdigest()
+    object_key = f"evoke-evidence/{mission_id}/{kind}/{user_id}_{filename}"
+    s3_client.put_object(
+        Bucket="default-bucket",
+        Key=object_key,
+        Body=file_bytes,
+        ContentType=content_type or "application/octet-stream"
+    )
+
+    # Create submission record. content_hash lets the roster flag whether
+    # each member turned in the SAME team file (Option A hash-check) --
+    # only meaningful for team_product; individual_evidence rows are never
+    # compared against each other this way.
+    db_execute(
+        """INSERT INTO submissions (id, user_id, mission_id, team_id, file_path, status, kind, content_hash)
+           VALUES (%s::uuid, %s::uuid, %s::uuid, %s::uuid, %s, 'submitted', %s, %s)""",
+        (submission_id, user_id, mission_id, team_id, object_key, kind, content_hash)
+    )
+
+    # An individual task is a learner's own piece -- store it and stop.
+    # No Brightspace team sync, no AI team review, no completion effects.
+    if kind == "individual_task":
+        return {"status": "success", "submission_id": submission_id, "kind": kind}
+
+    # Brightspace sync (real adapter or simulator fallback) is no longer
+    # inline here -- it used to be a live network round-trip blocking
+    # this request's response. It's now event-based: the
+    # TeamEvidenceSubmitted publish just below is consumed by
+    # workers.py's BRIGHTSPACE SUBMISSION WORKER, which does the exact
+    # same real/simulator push this block used to do, off the request
+    # path. See BRIGHTSPACE.md.
+    # individual_evidence fans out to just the submitter -- same event
+    # type and shape as team_product (workers.py doesn't branch on kind,
+    # only on the team_members list it's handed), just a roster of one.
+    team_members = [user_id] if kind == "individual_evidence" else _team_member_ids(team_id)
+
+    # Publish TeamEvidenceSubmitted (fans out AI-coach feedback to every
+    # member independently -- see workers.py's AI COACH WORKER, which
+    # already expected this event and just needed a real publisher).
+    await publish_event("TeamEvidenceSubmitted", {
+        "submission_id": submission_id,
+        "user_id": user_id,
+        "team_id": team_id,
+        "team_members": team_members,
+        "mission_id": mission_id,
+        "object_key": object_key,
+        "filename": filename
+    })
+
+    # AI review is event-based now, not an inline blocking call here --
+    # the TeamEvidenceSubmitted event published just above is already
+    # consumed by workers.py's AI COACH WORKER, which grants the epic-
+    # tier award itself once its own AI pass completes (same worker
+    # that already fetches the real file and extracts real text, so
+    # this also removes what used to be a second, redundant OpenWebUI
+    # call that only ever got a filename, not the actual content).
+    # This request no longer blocks on an AI call that measured up to
+    # ~90s cold -- resubmission and first-time paths both just return
+    # once the event's published; the upgrade lands async, same as
+    # every other award in this app.
+    if is_resubmission:
+        return {"status": "success", "submission_id": submission_id, "resubmission": True}
+
+    # Evidence alone doesn't complete anyone's mission -- only close the
+    # gate for teammates who already reflected before this landed.
+    # Teammates who haven't reflected yet complete later, from
+    # submit-reflection, when they do. (For individual_evidence,
+    # team_members is just [user_id], so this only ever checks the
+    # submitter's own gate.)
+    for member_id in team_members:
+        await _complete_mission_for_user(member_id, mission_id, team_id)
+
+    return {
+        "status": "success",
+        "submission_id": submission_id,
+        "resubmission": False
+    }
+
+
 @app.post("/api/submit-evidence")
 async def submit_evidence(
     mission_id: str = Form(...),
@@ -1711,135 +1897,11 @@ async def submit_evidence(
     kind: str = Form("team_product"),
     user_id: str = Depends(get_current_user),
 ):
-    """Submit evidence for a mission. `kind='team_product'` (default) is the
-    TEAM's shared artifact -- any member can call it, and it closes the
-    completion AND-gate (see _complete_mission_for_user) for any teammate who
-    already reflected. `kind='individual_task'` is a learner's own piece
-    (Submission Redesign doc, missions 1-4): stored + hash-recorded for the
-    roster/assessment, but it does not fire team-completion effects."""
-    if kind not in ("team_product", "individual_task"):
-        raise HTTPException(status_code=400, detail="kind must be 'team_product' or 'individual_task'")
+    """Submit evidence for a mission -- see _submit_evidence_core for the
+    real logic; this route just adapts the HTTP layer to it."""
     try:
-        mission_release = db_fetch_one(
-            "SELECT released_at FROM missions WHERE id = %s::uuid", (mission_id,)
-        )
-        if not mission_release or mission_release[0] is None:
-            # Real gating, not just a UI hint -- a locked mission's evidence
-            # form is hidden client-side too (screens.js), but this is the
-            # enforcement that actually matters. See GAPS.md's resolved
-            # "mission ordering" item: admin-release, not order-of-completion.
-            raise HTTPException(status_code=403, detail="This mission hasn't been released yet")
-
-        team_id = _get_user_team(user_id)
-        if not team_id:
-            raise HTTPException(status_code=400, detail="You're not on a team yet -- ask your teacher to add you to a group in Brightspace")
-
-        submission_id = str(uuid.uuid4())
-
-        # Revise-and-resubmit is a first-class path (GAPS.md #3): a later
-        # submission of the same TEAM's evidence re-runs the AI review
-        # (which can upgrade the award tier) but must NOT re-fire the
-        # one-time completion effects for anyone already completed --
-        # previously every resubmission re-published MissionCompleted/
-        # XPGranted/BadgeAwarded and duplicate AwardGranted feed events,
-        # which both spammed the feed and made resubmission an infinite
-        # +100 XP faucet.
-        # Resubmission is scoped to the team's PRODUCT (the shared artifact that
-        # drives AI review + completion); individual-task and per-member product
-        # uploads don't count against the team-product first-submission guard.
-        prior = db_fetch_one(
-            "SELECT 1 FROM submissions WHERE team_id = %s::uuid AND mission_id = %s::uuid AND kind = 'team_product' LIMIT 1",
-            (team_id, mission_id)
-        )
-        is_resubmission = bool(prior)
-
-        # Store file in MinIO
         file_bytes = await file.read()
-
-        # The team's shared product is the one file the AI Coach worker
-        # actually reads (evoke/workers.py's PdfReader(...) on
-        # EvidenceSubmitted/TeamEvidenceSubmitted) -- a non-PDF used to sail
-        # through here, then fail silently downstream with a broken
-        # "Error parsing document" string sent to learners as if it were
-        # real AI feedback (confirmed live). Reject it here instead, where
-        # the uploader gets an actual error message. individual_task files
-        # are never AI-parsed, so they aren't restricted.
-        if kind == "team_product":
-            try:
-                PdfReader(BytesIO(file_bytes))
-            except PdfReadError:
-                raise HTTPException(status_code=400, detail="Your team's shared product must be a PDF")
-
-        content_hash = hashlib.sha256(file_bytes).hexdigest()
-        object_key = f"evoke-evidence/{mission_id}/{kind}/{user_id}_{file.filename}"
-        s3_client.put_object(
-            Bucket="default-bucket",
-            Key=object_key,
-            Body=file_bytes,
-            ContentType=file.content_type or "application/octet-stream"
-        )
-
-        # Create submission record. content_hash lets the roster flag whether
-        # each member turned in the SAME team file (Option A hash-check).
-        db_execute(
-            """INSERT INTO submissions (id, user_id, mission_id, team_id, file_path, status, kind, content_hash)
-               VALUES (%s::uuid, %s::uuid, %s::uuid, %s::uuid, %s, 'submitted', %s, %s)""",
-            (submission_id, user_id, mission_id, team_id, object_key, kind, content_hash)
-        )
-
-        # An individual task is a learner's own piece -- store it and stop.
-        # No Brightspace team sync, no AI team review, no completion effects.
-        if kind == "individual_task":
-            return {"status": "success", "submission_id": submission_id, "kind": kind}
-
-        # Brightspace sync (real adapter or simulator fallback) is no longer
-        # inline here -- it used to be a live network round-trip blocking
-        # this request's response. It's now event-based: the
-        # TeamEvidenceSubmitted publish just below is consumed by
-        # workers.py's BRIGHTSPACE SUBMISSION WORKER, which does the exact
-        # same real/simulator push this block used to do, off the request
-        # path. See BRIGHTSPACE.md.
-        team_members = _team_member_ids(team_id)
-
-        # Publish TeamEvidenceSubmitted (fans out AI-coach feedback to every
-        # member independently -- see workers.py's AI COACH WORKER, which
-        # already expected this event and just needed a real publisher).
-        await publish_event("TeamEvidenceSubmitted", {
-            "submission_id": submission_id,
-            "user_id": user_id,
-            "team_id": team_id,
-            "team_members": team_members,
-            "mission_id": mission_id,
-            "object_key": object_key,
-            "filename": file.filename
-        })
-
-        # AI review is event-based now, not an inline blocking call here --
-        # the TeamEvidenceSubmitted event published just above is already
-        # consumed by workers.py's AI COACH WORKER, which grants the epic-
-        # tier award itself once its own AI pass completes (same worker
-        # that already fetches the real file and extracts real text, so
-        # this also removes what used to be a second, redundant OpenWebUI
-        # call that only ever got a filename, not the actual content).
-        # This request no longer blocks on an AI call that measured up to
-        # ~90s cold -- resubmission and first-time paths both just return
-        # once the event's published; the upgrade lands async, same as
-        # every other award in this app.
-        if is_resubmission:
-            return {"status": "success", "submission_id": submission_id, "resubmission": True}
-
-        # Evidence alone doesn't complete anyone's mission -- only close the
-        # gate for teammates who already reflected before this landed.
-        # Teammates who haven't reflected yet complete later, from
-        # submit-reflection, when they do.
-        for member_id in team_members:
-            await _complete_mission_for_user(member_id, mission_id, team_id)
-
-        return {
-            "status": "success",
-            "submission_id": submission_id,
-            "resubmission": False
-        }
+        return await _submit_evidence_core(user_id, mission_id, kind, file.filename, file_bytes, file.content_type)
     except HTTPException:
         raise
     except Exception as e:
@@ -2082,37 +2144,46 @@ async def get_team_messages(user_id: str = Depends(require_self)):
         raise HTTPException(status_code=400, detail=str(e))
 
 
+async def _submit_reflection_core(user_id: str, mission_id: str, reflection: str) -> dict:
+    """An individual team member's own reflection on a mission -- always
+    personal, always available regardless of who submitted the team's
+    evidence. Closes the completion AND-gate for this one user once their
+    half of the evidence check (team or individual, see
+    _complete_mission_for_user) already exists. Shared by
+    /api/submit-reflection and the Field Tablet's Mission Evidence flow, so
+    there's no separate mobile reflection path."""
+    mission_release = db_fetch_one(
+        "SELECT released_at FROM missions WHERE id = %s::uuid", (mission_id,)
+    )
+    if not mission_release or mission_release[0] is None:
+        raise HTTPException(status_code=403, detail="This mission hasn't been released yet")
+
+    team_id = _get_user_team(user_id)
+    if not team_id:
+        raise HTTPException(status_code=400, detail="You're not on a team yet -- ask your teacher to add you to a group in Brightspace")
+
+    db_execute(
+        """INSERT INTO mission_reflections (user_id, mission_id, team_id, reflection)
+           VALUES (%s::uuid, %s::uuid, %s::uuid, %s)
+           ON CONFLICT (user_id, mission_id) DO UPDATE SET reflection = EXCLUDED.reflection""",
+        (user_id, mission_id, team_id, reflection)
+    )
+
+    await _complete_mission_for_user(user_id, mission_id, team_id)
+
+    return {"status": "success"}
+
+
 @app.post("/api/submit-reflection")
 async def submit_reflection(
     mission_id: str = Form(...),
     reflection: str = Form(...),
     user_id: str = Depends(get_current_user),
 ):
-    """An individual team member's own reflection on a mission -- always
-    personal, always available regardless of who submitted the team's
-    evidence. Closes the completion AND-gate for this one user if the
-    team's evidence already exists (see _complete_mission_for_user)."""
+    """Submit a reflection -- see _submit_reflection_core for the real
+    logic; this route just adapts the HTTP layer to it."""
     try:
-        mission_release = db_fetch_one(
-            "SELECT released_at FROM missions WHERE id = %s::uuid", (mission_id,)
-        )
-        if not mission_release or mission_release[0] is None:
-            raise HTTPException(status_code=403, detail="This mission hasn't been released yet")
-
-        team_id = _get_user_team(user_id)
-        if not team_id:
-            raise HTTPException(status_code=400, detail="You're not on a team yet -- ask your teacher to add you to a group in Brightspace")
-
-        db_execute(
-            """INSERT INTO mission_reflections (user_id, mission_id, team_id, reflection)
-               VALUES (%s::uuid, %s::uuid, %s::uuid, %s)
-               ON CONFLICT (user_id, mission_id) DO UPDATE SET reflection = EXCLUDED.reflection""",
-            (user_id, mission_id, team_id, reflection)
-        )
-
-        await _complete_mission_for_user(user_id, mission_id, team_id)
-
-        return {"status": "success"}
+        return await _submit_reflection_core(user_id, mission_id, reflection)
     except HTTPException:
         raise
     except Exception as e:
@@ -3885,13 +3956,21 @@ async def delete_avatar(user_id: str = Depends(require_self)):
 
 # ========== Field Tablet: Mission Evidence (companion.html) ==========
 # One photo + one observation, filed once per (learner, mission) from the
-# phone while a student is out investigating. Deliberately its own table
-# and its own tiny pipeline -- NOT a route into the real evidence/AND-gate
-# machinery (submit_evidence, submit_reflection, _complete_mission_for_user)
-# used by the desktop Operations Hub, so filing one of these can never
-# accidentally fire MissionCompleted/XPGranted/BadgeAwarded. If this ever
-# needs to count as real mission evidence, that's a deliberate later
-# decision, not something that should happen by construction.
+# phone while a student is out investigating. This IS real evidence --
+# 2026-07-21 revision: it now goes through the exact same pipeline the
+# desktop Operations Hub uses (_submit_evidence_core/_submit_reflection_core
+# below), via kind='individual_evidence' -- same Kafka event, same
+# Brightspace worker, same completion/XP/badge gate. No separate mobile
+# submission system, no divergence between surfaces.
+#
+# The photo has to become a PDF first (_build_field_report_pdf) since
+# that's what the AI Coach worker's PdfReader(...) step and the real
+# evidence pipeline both expect -- a raw JPEG would fail exactly the way a
+# non-PDF team_product upload used to. mission_field_reports (the table)
+# still exists, but only now as a display cache: it stores the *original*
+# photo (not the generated PDF) plus the observation, purely so the
+# tablet's own "View Submission" can show back what was actually captured
+# without re-deriving it from the PDF.
 
 @app.get("/api/mission-field-report/{mission_id}")
 async def get_mission_field_report(mission_id: str, user_id: str = Depends(get_current_user)):
@@ -3909,6 +3988,55 @@ async def get_mission_field_report(mission_id: str, user_id: str = Depends(get_c
     }
 
 
+def _build_field_report_pdf(photo_bytes: bytes, observation: str, mission_title: str) -> bytes:
+    """One page: mission title, the photo (EXIF-rotated upright -- phone
+    camera JPEGs carry orientation as metadata, not pixels, so skipping
+    this renders sideways/upside-down photos taken in portrait), then the
+    observation text wrapped and paginated below it."""
+    img = Image.open(BytesIO(photo_bytes))
+    img = ImageOps.exif_transpose(img)
+    if img.mode not in ("RGB", "L"):
+        img = img.convert("RGB")
+
+    buf = BytesIO()
+    c = canvas.Canvas(buf, pagesize=letter)
+    width, height = letter
+    margin = 50
+
+    def draw_title(y):
+        c.setFont("Helvetica-Bold", 16)
+        c.drawString(margin, y, f"Field Report: {mission_title}")
+        return y - 30
+
+    y = draw_title(height - margin)
+
+    iw, ih = img.size
+    max_w = width - 2 * margin
+    max_h = height * 0.45
+    scale = min(max_w / iw, max_h / ih, 1.0)
+    draw_w, draw_h = iw * scale, ih * scale
+    x = margin + (max_w - draw_w) / 2
+    y -= draw_h
+    c.drawImage(ImageReader(img), x, y, draw_w, draw_h)
+    y -= 24
+
+    c.setFont("Helvetica", 11)
+    line_height = 15
+    max_chars = 92
+    for para in observation.split("\n"):
+        wrapped = textwrap.wrap(para, max_chars) or [""]
+        for line in wrapped:
+            if y < margin:
+                c.showPage()
+                y = draw_title(height - margin)
+                c.setFont("Helvetica", 11)
+            c.drawString(margin, y, line)
+            y -= line_height
+
+    c.save()
+    return buf.getvalue()
+
+
 @app.post("/api/mission-field-report")
 async def submit_mission_field_report(
     mission_id: str = Form(...),
@@ -3921,14 +4049,31 @@ async def submit_mission_field_report(
     observation = observation.strip()
     if not observation:
         raise HTTPException(status_code=400, detail="Describe your evidence before filing")
-    mission_release = db_fetch_one("SELECT released_at FROM missions WHERE id = %s::uuid", (mission_id,))
-    if not mission_release or mission_release[0] is None:
-        raise HTTPException(status_code=403, detail="This mission hasn't been released yet")
 
-    data = await photo.read()
+    mission_row = db_fetch_one("SELECT title FROM missions WHERE id = %s::uuid", (mission_id,))
+    mission_title = mission_row[0] if mission_row else "Field Mission"
+
+    photo_bytes = await photo.read()
+    try:
+        pdf_bytes = _build_field_report_pdf(photo_bytes, observation, mission_title)
+    except Exception as e:
+        logger.error(f"Field report PDF build failed: {e}")
+        raise HTTPException(status_code=400, detail="Couldn't process that photo -- try a different one")
+
+    # The real submission -- same pipeline, same Kafka event, same
+    # Brightspace sync, same completion gate as the desktop Operations
+    # Hub's evidence + reflection forms.
+    await _submit_evidence_core(
+        user_id, mission_id, "individual_evidence",
+        f"field-report-{mission_id}.pdf", pdf_bytes, "application/pdf"
+    )
+    await _submit_reflection_core(user_id, mission_id, observation)
+
+    # Display cache only (see this section's header comment) -- the
+    # original photo, not the generated PDF, so "View Submission" shows
+    # back what was actually captured.
     object_key = f"mission-field-reports/{mission_id}/{user_id}"
-    s3_client.put_object(Bucket="default-bucket", Key=object_key, Body=data, ContentType=photo.content_type)
-
+    s3_client.put_object(Bucket="default-bucket", Key=object_key, Body=photo_bytes, ContentType=photo.content_type)
     report_id = str(uuid.uuid4())
     db_execute(
         """INSERT INTO mission_field_reports (id, user_id, mission_id, photo_object_key, observation)
