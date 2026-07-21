@@ -155,6 +155,7 @@ the world save (no source file); "DP" = datapack in
 | Admin teleport hub | `(575-576,74,113-121)` | `tag=admin` + `/trigger tphub`; 5 signed destinations + NPC-reset buttons existed in true_oasis |
 | Keel Restoration Beacon | anchored via `world_meta` or `KEEL_BEACON_POS` | bridge builds a growing monument per cohort world-stage (`WorldStateAdvanced`) |
 | Basin Archive detection | boxes in bridge.py `POSITION_FLAGS` | see §7 |
+| **Build system** | protected cuboid `(-214,0,27)→(32,255,306)`; buildable everywhere else | DP `basin_qol` gamemode enforcement (adventure in town, survival outside; creative/spectator untouched). Ported 1:1 from the deliverable's yawp region data (`true_oasis/data/yawp/minecraft_overworld.dat`: region `keel`, break-blocks + access-container denied, global explosion denial). Server default gamemode: survival (`server.properties`). Container denial not replicated — vanilla adventure still opens chests |
 
 ---
 
@@ -243,6 +244,15 @@ trigger like `sellCoal` for a command-based equivalent.
 **In-game reaction to a web event:** add a handler in bridge
 `process_event` — the bridge consumes every `evoke-events` /
 `minecraft-events` topic message.
+
+**Datapack needs a mod command (economy etc.):** it can't call one
+directly (§9). Use the scoreboard mailbox: datapack sets a flag objective
+on the player (`scoreboard players set @s <mailbox> 1`, create the
+objective in `load`); the bridge's `ticket_office_loop` reads the flag,
+runs the mod command over RCON (where mod commands work), sends the
+player feedback, and advances the flag so it can't double-fire. Existing
+mailboxes: `stipendDue` (1 = pay $100 → set 2), `balanceWipe` (1 =
+resetmoney → set 0).
 
 **Direct world edits:** RCON `setblock`/`data merge block`. Verify with
 `data get block` (RCON `execute if block` is flaky — see memory/gotchas).
@@ -483,6 +493,15 @@ source of "the shop is broken" during OP testing**).
    `gamemode survival`, `clear`, `xp set 0 levels` + `0 points`,
    `advancement revoke <p> everything`, `kill` (respawns at world spawn).
 4. Leave them whitelisted — the fresh link flow requires joining.
+
+**Build-system admin:** the enforcement only ever flips
+survival↔adventure, so put yourself in creative (`gamemode creative`)
+to be exempt anywhere, including in town. To change the protected area,
+edit the cuboid coordinates in `basin_qol/tick.mcfunction` (two lines,
+same box in both), redeploy, `/reload` + run `basin_qol:load`. The
+authoritative source for the original bounds is the deliverable's yawp
+region NBT (`servers/playtest/true_oasis/data/yawp/minecraft_overworld.dat`,
+readable with the stdlib NBT tools).
 
 **Other admin notes:** keep the scoreboard sidebar clear
 (`scoreboard objectives setdisplay sidebar` with no argument clears it);
