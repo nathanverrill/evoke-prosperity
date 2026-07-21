@@ -28,6 +28,20 @@ services:
       BRIGHTSPACE_CLIENT_SECRET: ${BRIGHTSPACE_CLIENT_SECRET:-}
       BRIGHTSPACE_TENANT_URL: ${BRIGHTSPACE_TENANT_URL:-}
       BRIGHTSPACE_ORG_UNIT_ID: ${BRIGHTSPACE_ORG_UNIT_ID:-}
+      # Service-account creds for real submission push/grade pull
+      # (evoke/lms/brightspace_lms.py's get_brightspace_lms(), D2L's older
+      # ID/Key scheme -- distinct from the OAuth client id/secret above).
+      # Names differ on purpose: .env uses BRIGHTSPACE_APPLICATION_ID/_KEY,
+      # matching the labels Brightspace's own Manage Extensibility admin
+      # tool shows; the Python code reads BRIGHTSPACE_APP_KEY/_SECRET. This
+      # block was missing entirely before, so setting either .env name did
+      # nothing -- get_brightspace_lms() always fell back to simulator mode.
+      BRIGHTSPACE_APP_KEY: ${BRIGHTSPACE_APPLICATION_ID:-}
+      BRIGHTSPACE_APP_SECRET: ${BRIGHTSPACE_APPLICATION_KEY:-}
+      # RS256 private key (base64 PEM) for signing the client_credentials JWT
+      # assertion the Trusted service app requires -- see /.well-known/jwks.json
+      # (main.py) for the matching public key served over the ngrok tunnel.
+      BRIGHTSPACE_SERVICE_PRIVATE_KEY_B64: ${BRIGHTSPACE_SERVICE_PRIVATE_KEY_B64:-}
       # OAuth 2.0 login (evoke/oauth_providers.py) -- like BRIGHTSPACE_CLIENT_ID
       # above, these were sitting in .env but never reaching this container
       # since this block is an explicit allowlist, not env_file: .env.

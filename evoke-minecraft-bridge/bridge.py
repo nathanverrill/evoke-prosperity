@@ -255,6 +255,9 @@ async def process_event(event: dict):
         if event_type == 'WorldStateAdvanced':
             handle_world_advanced(data)
             return
+        if event_type == 'MinecraftLinked':
+            handle_minecraft_linked(data)
+            return
         if event_type != 'RewardCollected':
             return
 
@@ -874,6 +877,29 @@ def handle_team_wheel(data: dict):
         ])
         rcon.execute_command(f"tellraw @a {payload}")
         rcon.execute_command("playsound minecraft:ui.toast.challenge_complete master @a")
+    finally:
+        rcon.close()
+
+
+def handle_minecraft_linked(data: dict):
+    """The web app's two-channel link flow (evoke/main.py's confirm_link)
+    is the first point a real minecraft_username is confirmed for a real
+    EVOKE student -- whitelist them here instead of requiring a manual
+    admin step. WHITELIST.md §4 originally proposed hooking this off the
+    admin roster-import endpoint, but that endpoint no longer exists (team/
+    roster provisioning moved to automatic Brightspace-login sync); this
+    event does the same job at the point identity is actually confirmed.
+    Doesn't require the player to still be online -- whitelist add works
+    regardless of connection state."""
+    username = data.get('minecraft_username')
+    if not username:
+        return
+    rcon = _rcon()
+    if not rcon:
+        return
+    try:
+        rcon.execute_command(f"whitelist add {username}")
+        print(f"✓ Whitelisted {username} after Minecraft link confirmation")
     finally:
         rcon.close()
 

@@ -11,6 +11,7 @@ from psycopg2.pool import SimpleConnectionPool
 from evoke.clients import s3_client, os_client, ai_client, get_producer, REDPANDA_BROKER, AI_ENABLED, AI_MODEL, topic_for_event
 from evoke import skills_framework, progression, world_state
 from evoke.live import live_hub
+from evoke.oauth_providers import get_auth_provider, OAuthLoginError
 
 # Small, self-contained Postgres pool for the PROFILE WORKER's team-membership
 # lookups. Deliberately not shared with main.py's db_pool (a separate pool
@@ -104,14 +105,135 @@ def generate_ai_insight(preview_text: str) -> str:
         )
 
 
-def _process_event(event: dict, producer):
+async def _get_student_token(evoke_user_id: str):
+    """A valid access token for this student's own Brightspace login,
+    refreshing it first if expired -- mirrors main.py's _get_service_token,
+    but reads/writes via this module's own sync pool (_db_fetch_one/
+    _db_execute above) since this worker doesn't share main.py's asyncpg
+    pool. Returns None if the student's never logged in via Brightspace, or
+    if the refresh itself fails (refresh token revoked/expired -- they'd
+    need to log in again for future submissions to sync)."""
+    row = _db_fetch_one(
+        "SELECT brightspace_access_token, brightspace_refresh_token, brightspace_token_expires_at FROM evoke_identities WHERE user_id = %s::uuid",
+        (evoke_user_id,)
+    )
+    if not row or not row[0]:
+        return None
+    access_token, refresh_token, expires_at = row
+    if expires_at and expires_at > datetime.datetime.now() + datetime.timedelta(seconds=60):
+        return access_token
+    if not refresh_token:
+        return None
+    provider = get_auth_provider()
+    if not provider:
+        return None
+    try:
+        refreshed = await provider.refresh_access_token(refresh_token)
+    except OAuthLoginError as e:
+        print(f"[BRIGHTSPACE WORKER] Token refresh failed for user {evoke_user_id}: {e}")
+        return None
+    new_expires_at = datetime.datetime.now() + datetime.timedelta(seconds=refreshed.get("expires_in", 3600))
+    _db_execute(
+        """UPDATE evoke_identities SET
+               brightspace_access_token = %s, brightspace_refresh_token = %s, brightspace_token_expires_at = %s
+           WHERE user_id = %s::uuid""",
+        (refreshed["access_token"], refreshed.get("refresh_token", refresh_token), new_expires_at, evoke_user_id)
+    )
+    return refreshed["access_token"]
+
+
+async def _process_event(event: dict, producer):
     """Handles one event from the evoke-events stream. Split out from the poll
     loop so a bad event can be caught and skipped per-message (see the caller)
     instead of taking down the whole worker for the rest of the process's life
     — which is exactly what a pre-existing field-name mismatch was doing here
     (this loop's single outer try/except meant one uncaught KeyError silently
-    ended the coroutine permanently)."""
+    ended the coroutine permanently). async now that the Brightspace submission
+    worker below needs to await real network calls -- the poll loop already
+    processes one event at a time, so awaiting here doesn't change ordering,
+    it just makes the existing sequential processing explicit."""
     event_type = event.get("event_type")
+
+    # -------------------------------------------------------------
+    # 0. BRIGHTSPACE SUBMISSION WORKER
+    # -------------------------------------------------------------
+    # Pushing a team's evidence to the (real or simulated) Brightspace
+    # dropbox used to be a synchronous call inside /api/submit-evidence
+    # itself -- a live network round-trip to an external service blocking
+    # the learner's HTTP response, the same shape of problem the AI Coach
+    # Worker below was already split out for (see its own comment on
+    # trigger_ai_review). Moved here, off the request path, consuming the
+    # same TeamEvidenceSubmitted event the AI Coach Worker already consumes
+    # (fired for every team_product submission, first-time or resubmission
+    # -- individual_task submissions never reach this event at all, same as
+    # before). Failure here is logged and dropped, same "continue anyway,
+    # submission stored locally" behavior the inline version had -- no
+    # retry queue exists yet.
+    if event_type == "TeamEvidenceSubmitted":
+        submission_id = event['data']['submission_id']
+        evoke_user_id = event['data']['user_id']
+        mission_id = event['data']['mission_id']
+        object_key = event['data']['object_key']
+        filename = event['data']['filename']
+
+        # mission_brightspace_mapping, not missions.lms_assignment_ref --
+        # the former is the one with a real UNIQUE(campaign_id,
+        # brightspace_assignment_id) constraint behind it (see BRIGHTSPACE.md),
+        # so it's the definitive source now that both are populated by the
+        # admin Mission Sync's link step.
+        assignment_row = _db_fetch_one(
+            "SELECT brightspace_assignment_id FROM mission_brightspace_mapping WHERE mission_id = %s::uuid LIMIT 1",
+            (mission_id,)
+        )
+        assignment_id = assignment_row[0] if assignment_row else None
+
+        # submissions.status tracks only this genuinely causal chain --
+        # submitted -> brightspace / brightspace_sync_failed -> graded (the
+        # grade webhook/sync-grades job sets the last one, once Brightspace
+        # itself confirms a grade, which can only happen for a submission
+        # that really landed there). AI review is deliberately NOT a value
+        # in this column: it's an independent, concurrent branch off the
+        # same event (see the AI COACH WORKER right below), not a step in
+        # this sequence -- it already has its own durable record (the
+        # 'epic'/'ai_review' awards row), and folding it in here would
+        # sometimes lie about ordering if the two branches finish out of
+        # sequence.
+        sync_status = "brightspace_sync_failed"
+
+        if not assignment_id:
+            print(f"[BRIGHTSPACE WORKER] Mission {mission_id} isn't linked to a Brightspace assignment; skipping push")
+        else:
+            # The submitting student's own token, not a shared service
+            # connection -- .../mysubmissions/ submits as whichever identity
+            # authorizes the call, so this is what makes the evidence
+            # attribute to the real student in Brightspace's gradebook.
+            token = await _get_student_token(evoke_user_id)
+            if not token:
+                print(f"[BRIGHTSPACE WORKER] No usable Brightspace token for user {evoke_user_id}; skipping push")
+            else:
+                try:
+                    file_response = s3_client.get_object(Bucket="default-bucket", Key=object_key)
+                    file_content = file_response['Body'].read()
+                except Exception as e:
+                    print(f"[BRIGHTSPACE WORKER ERROR] Couldn't fetch {object_key}: {e}")
+                    file_content = None
+
+                if file_content is not None:
+                    provider = get_auth_provider()
+                    if not provider:
+                        print("[BRIGHTSPACE WORKER] No OAuth login provider configured; skipping push")
+                    else:
+                        try:
+                            await provider.submit_dropbox_file(token, assignment_id, filename, file_content)
+                            sync_status = "brightspace"
+                            print(f"[BRIGHTSPACE WORKER] Submission {submission_id} synced to Brightspace as user {evoke_user_id}")
+                        except OAuthLoginError as e:
+                            print(f"[BRIGHTSPACE WORKER ERROR] Submit failed (non-blocking): {e}")
+
+        _db_execute(
+            "UPDATE submissions SET status = %s WHERE id = %s::uuid",
+            (sync_status, submission_id)
+        )
 
     # -------------------------------------------------------------
     # 1. AI COACH WORKER
@@ -726,7 +848,7 @@ async def evoke_workers_loop():
             for tp, messages in msg_pack.items():
                 for message in messages:
                     try:
-                        _process_event(message.value, producer)
+                        await _process_event(message.value, producer)
                     except Exception as e:
                         # One bad/malformed event must not take down every
                         # consumer downstream of it for the rest of the

@@ -146,6 +146,10 @@
 
   // ----- the designer's screen logic, verbatim, booted after seeding -----
   seedFromBackend().then(function(){
+  // Auth is now resolved one way or the other -- reveal whichever of
+  // Home / the logged-out gate applies (see the auth-pending CSS rule
+  // in index.html, which kept both hidden until this point).
+  document.body.classList.remove('auth-pending');
 
   var SCREENS = [["home","Learn"],["ops","Ops Hub"],["progress","Progress"],["vault","Vault"],["billbot","B1llBot"],["profile","Profile"],["welcome","Intro"],["novel","Novel"],["story","Transmission"],["assignment","Assignment"],["evidence","Evidence"],["minecraft","Minecraft"],["companion","Companion"],["reward","Complete"]];
 
@@ -181,8 +185,17 @@
   /* which mission is the student currently on? Sequential: mission N unlocks once N-1 is complete.
      In developer mode, the selected mission is shown directly. */
   function curMission(){ if(devOn()) return devSel(); for(var i=1;i<=12;i++){ if(missionState(i)!=='complete') return i; } return 12; }
-  /* resolve per-mission content (novel / transmission / assignment) for the current mission */
-  function MD(key){ var m=curMission(); return CONTENT[key+'_m'+m] || CONTENT[key]; }
+  // Every mission-bound screen's content resolves through activeMission, not
+  // a hardcoded curMission() call each time -- this is the one real "which
+  // mission is this page showing" concept, set by go() (see below) from
+  // either an explicit caller (e.g. rereading an old mission) or the URL
+  // (#screen/N, parsed at boot/back-forward), falling back to curMission()
+  // only when neither applies. This is what actually makes #assignment/3 or
+  // #novel/3 show mission 3, not just display its number decoratively.
+  var MISSION_SCREENS = ['novel','story','assignment','evidence','submission','reward'];
+  var activeMission = null;
+  /* resolve per-mission content (novel / transmission / assignment) for the active mission */
+  function MD(key){ var m=activeMission||curMission(); return CONTENT[key+'_m'+m] || CONTENT[key]; }
   window.curMission=curMission;
   function syncAllXP(){
     var X=evokeXP(), pct=Math.round(X.xp/X.max*100);
@@ -239,9 +252,53 @@
       if(parts.length===1) return parts[0].toUpperCase();
       return parts[parts.length-1].toUpperCase()+'//'+parts[0].toUpperCase();
     }
+    // Every evoke-* localStorage key belongs to whichever human is currently
+    // signed in (avatar, agent name, onboarding-seen, per-mission submitted
+    // flags, notebook drafts, settings toggles -- ~14 keys as of this pass).
+    // None of it is scoped by user id; it's scoped by *browser*. On a shared
+    // school computer that means every one of these silently carries over to
+    // the next person who logs in -- found live: an account that had never
+    // touched onboarding landed straight past it, because a *different*
+    // account's earlier session on the same machine had already marked it
+    // seen. Same underlying problem as the Brightspace SSO session leak,
+    // just in Evoke's own client state instead of Brightspace's.
+    function clearLocalUserState(){
+      try{
+        var keys = [];
+        for(var i=0;i<localStorage.length;i++){ var k=localStorage.key(i); if(k && k.indexOf('evoke')===0) keys.push(k); }
+        keys.forEach(function(k){ localStorage.removeItem(k); });
+      }catch(e){}
+    }
     function logoutAgent(){
-      try{ localStorage.removeItem('evoke_user_id'); }catch(e){}
-      postJSON('/api/session/logout', {}).catch(function(){}).then(function(){ location.href = '/'; });
+      clearLocalUserState();
+      // Evoke's own session is only half the story on a shared/lab
+      // computer -- Brightspace keeps its own separate session, and
+      // without ending that too, the next person to click "Login with
+      // Central Registry" here gets silently signed in as whoever just
+      // "logged out" (no credentials prompt at all, confirmed live).
+      // A full-page redirect through Brightspace's logout page dead-ends
+      // there though -- it's a generic LMS confirmation page with no idea
+      // Evoke exists, so it never sends the browser back (tried that,
+      // confirmed it strands the user on Brightspace). Opening it in a
+      // separate tab instead lets this tab go straight back to Evoke's own
+      // logged-out home while Brightspace's logout happens alongside it.
+      // The blank tab is opened synchronously, before the async response,
+      // specifically so the popup blocker doesn't treat it as an
+      // unrequested popup -- setting its location later still counts as
+      // the same user gesture.
+      var bsTab = window.open('', '_blank');
+      postJSON('/api/session/logout', {}).catch(function(){ return {}; }).then(function(d){
+        if(d && d.brightspace_logout_url && bsTab){ bsTab.location = d.brightspace_logout_url; }
+        else if(bsTab){ bsTab.close(); }
+        // Explicit hash reset, not just relying on '/' to imply it -- the
+        // boot sequence (seedFromBackend) reads location.hash directly to
+        // decide the first screen, so a stray leftover hash from before
+        // this reload would otherwise land the *next* person on whatever
+        // screen the *previous* person happened to be on (e.g. Ops Hub)
+        // instead of Home.
+        location.hash = '';
+        location.href = '/';
+      });
     }
     var codeEl = document.getElementById('agent-codename');
     var logoutBtn = document.getElementById('agent-logout-btn');
@@ -434,7 +491,7 @@
           '<span style="font-family:var(--font-mono);font-size:11px;letter-spacing:.1em;text-transform:uppercase;color:'+col+';">'+(mode==='Begin'?'\u25b6 Begin':mode==='Continue'?'\u25b6 Continue \u00b7 '+doneInWeek+'/'+msCount:mode==='Complete'?'\u2713 Complete':mode)+'</span>'+
           '<span style="display:flex;align-items:center;gap:6px;">'+dots+'</span>'+
         '</span>';
-      if(!isLocked) card.addEventListener('click', function(){ currentWeek=wi; novelForce=wi*2+1; renderMissions(wi); go(wi===0 ? 'welcome' : 'novel'); });
+      if(!isLocked) card.addEventListener('click', function(){ currentWeek=wi; renderMissions(wi); go(wi===0 ? 'welcome' : 'novel', false, wi*2+1); });
       row.appendChild(card); tl.appendChild(row);
     });
   }
@@ -574,6 +631,19 @@
     try{ localStorage.setItem('evoke-recap-'+v.mission, text); }catch(e){}
     if(recapV && recapV.mission===v.mission && recapEl.classList.contains('open')) box.textContent=text;
   }
+  function loadRecapGrading(v){
+    var box=document.getElementById('recap-grading');
+    box.style.display='none';
+    var mid = STATE.missionIds && STATE.missionIds[v.mission-1];
+    if(!mid || !STATE.userId) return;
+    fetch('/api/submissions/'+STATE.userId+'/'+mid).then(function(r){return r.json();}).then(function(data){
+      var g = data && data.grading;
+      if(!g || !g.status || g.status!=='graded' || g.grade===null || g.grade===undefined) return;
+      document.getElementById('recap-grade-value').textContent = g.grade+' / 100';
+      document.getElementById('recap-grade-feedback').textContent = g.feedback || '';
+      box.style.display='block';
+    }).catch(function(){});
+  }
   function openRecap(v){
     recapV=v;
     document.getElementById('recap-tag').textContent=(v.n?v.n+' · ':'')+'Mission Recap';
@@ -584,11 +654,12 @@
     recapEl.classList.add('open');
     document.getElementById('recap-close').focus();
     loadRecapSummary(v);
+    loadRecapGrading(v);
   }
   function closeRecap(){ recapEl.classList.remove('open'); recapV=null; }
   document.getElementById('recap-x').addEventListener('click',closeRecap);
   document.getElementById('recap-close').addEventListener('click',closeRecap);
-  document.getElementById('recap-reread').addEventListener('click',function(){ if(!recapV) return; var m=recapV.mission; closeRecap(); novelForce=m; novelReturn='vault'; go('novel'); });
+  document.getElementById('recap-reread').addEventListener('click',function(){ if(!recapV) return; var m=recapV.mission; closeRecap(); novelReturn='vault'; go('novel', false, m); });
   recapEl.addEventListener('click',function(e){ if(e.target===recapEl) closeRecap(); });
   document.addEventListener('keydown',function(e){ if(e.key==='Escape' && recapEl.classList.contains('open')) closeRecap(); });
 
@@ -600,7 +671,7 @@
   }
 
   /* ---- graphic novel (multi-page comic reader, mission-aware) ---- */
-  var renderNovel; var novelForce=null; var novelReturn=null;
+  var renderNovel; var novelReturn=null;
   (function(){
     var spreadIdx=0, pages=[], spreads=[], single=false, n=null, zoomIdx=0, sessionReturn=null;
     var book=document.getElementById('novel-book');
@@ -649,8 +720,10 @@
       backBtn.textContent='\u25c0 Back';
     }
     renderNovel=function(){
-      var target = novelForce || ((typeof curMission==='function') ? curMission() : 1);
-      novelForce=null;
+      // go() already set activeMission (explicit override, URL, or
+      // curMission()) before calling this -- no separate novelForce
+      // variable or reset step needed, activeMission IS the answer.
+      var target = activeMission || ((typeof curMission==='function') ? curMission() : 1);
       n = (target===1) ? CONTENT.novel : (CONTENT['novel_m'+target] || null);
       sessionReturn = novelReturn; novelReturn=null;
       pages=(n&&n.pages)||[];
@@ -694,6 +767,80 @@
       }
     });
     renderNovel();
+  })();
+
+  /* ---- onboarding: B1llBot prologue + two forced-choice taps, Mission 1 only ----
+     Shown exactly once per browser (evoke-onboarding-seen), same localStorage-gate
+     pattern as the Ops Hub guide (evoke-ops-guide-seen). Sequence: welcome ->
+     prologue -> novel (Chapter 1) -> onboard-motive -> onboard-avatar -> assignment.
+     A returning user (or anyone re-reading Chapter 1 later, e.g. from Vault) skips
+     straight to novel/missions as before -- this only intercepts the very first
+     "Review the Records" click on Mission 1's welcome screen. */
+  (function(){
+    function seen(){ try{ return localStorage.getItem('evoke-onboarding-seen')==='1'; }catch(e){ return false; } }
+    function markSeen(){ try{ localStorage.setItem('evoke-onboarding-seen','1'); }catch(e){} }
+
+    document.getElementById('welcome-continue-btn').addEventListener('click', function(){
+      if(seen()){ go('novel'); return; }
+      go('prologue');
+    });
+
+    document.getElementById('prologue-continue').addEventListener('click', function(){
+      novelReturn='onboard-motive';
+      go('novel');
+    });
+
+    // Screen 3 (redefined): a single forced-choice question about the player's
+    // own motivation -- replaces the script's original "One Truck" water/finance
+    // dilemma. No option is ever treated as fact about the player later (same
+    // design rule the original dilemma followed) -- stored only as flavor.
+    var MOTIVE_OPTIONS = [
+      { key:'volunteer', label:'Because somebody needs to fix this.' },
+      { key:'business',  label:'Because there’s real money to be made here.' },
+      { key:'later',     label:'Because it’ll matter later, even if not today.' },
+      { key:'unsure',     label:'Honestly? Not sure yet.' }
+    ];
+    (function(){
+      var wrap=document.getElementById('onboard-motive-options');
+      MOTIVE_OPTIONS.forEach(function(opt){
+        var b=el('<button type="button" class="btn" style="text-align:left;">'+opt.label+'</button>');
+        b.addEventListener('click', function(){
+          try{ localStorage.setItem('evoke-onboard-motive', opt.key); }catch(e){}
+          wrap.querySelectorAll('button').forEach(function(x){ x.disabled=true; x.style.opacity = x===b ? '1' : '0.45'; });
+          document.getElementById('onboard-motive-ack').style.display='block';
+          document.getElementById('onboard-motive-continue').style.display='inline-flex';
+        });
+        wrap.appendChild(b);
+      });
+    })();
+    document.getElementById('onboard-motive-continue').addEventListener('click', function(){
+      go('onboard-avatar');
+    });
+
+    // Screen 4 (redefined): pick an avatar icon -- same icon set + localStorage
+    // key ('evoke-avatar') the Profile screen's own picker uses, so this is the
+    // real avatar, not a separate onboarding-only choice. Kept in sync by hand
+    // with PF_AVATARS in the agent-profile block above -- update both if either
+    // changes.
+    var ONBOARD_AVATARS=['person','smart_toy','rocket_launch','bolt','shield','military_tech','psychology','water_drop'];
+    (function(){
+      var grid=document.getElementById('onboard-avatar-grid');
+      ONBOARD_AVATARS.forEach(function(ic){
+        var b=el('<button type="button" aria-label="Avatar '+ic+'" style="aspect-ratio:1;border-radius:16px;background:rgba(0,150,136,0.08);border:1px solid var(--line-soft, rgba(0,150,136,0.3));display:flex;align-items:center;justify-content:center;"><span class="ms" aria-hidden="true" style="font-size:30px;color:var(--cyan-300);">'+ic+'</span></button>');
+        b.addEventListener('click', function(){
+          try{ localStorage.removeItem('evoke-avatar-photo'); localStorage.setItem('evoke-avatar', ic); }catch(e){}
+          grid.querySelectorAll('button').forEach(function(x){ x.style.opacity = x===b ? '1' : '0.45'; x.style.borderColor = x===b ? 'var(--cyan-300)' : ''; });
+          document.getElementById('onboard-avatar-ack').style.display='block';
+          document.getElementById('onboard-avatar-continue').style.display='inline-flex';
+        });
+        grid.appendChild(b);
+      });
+    })();
+    document.getElementById('onboard-avatar-continue').addEventListener('click', function(){
+      markSeen();
+      if(window.renderProfile2) window.renderProfile2();
+      go('assignment');
+    });
   })();
 
   /* ---- agent transmission (monologue, mission-aware) ---- */
@@ -1474,14 +1621,34 @@
   // button had nothing to step through and exited straight to whatever page
   // was open before this app loaded. Skipped entirely for the popped-out
   // phone-preview window (#companion-window), which owns its own hash.
+  // Real route, not a decorative label: #mission/{n}/{screen} for any of the
+  // 6 mission-bound screens (novel/story/assignment/evidence/submission/
+  // reward), plain #{screen} for everything else (home/ops/profile/etc,
+  // which have no mission dimension at all). activeMission (declared up by
+  // curMission()/MD()) is the single thing every mission-bound render
+  // function actually reads -- this is what makes #mission/3/novel really
+  // show mission 3, not just say so. parseHash() is the one place that
+  // understands this grammar; boot and popstate both call it instead of
+  // each re-implementing their own hash-splitting.
+  function parseHash(){
+    var raw = location.hash ? location.hash.slice(1) : '';
+    if(raw.indexOf('mission/')===0){
+      var parts = raw.split('/'); // ['mission','3','assignment']
+      var n = parseInt(parts[1],10);
+      return { screen: parts[2]||'', mission: (n>=1&&n<=12) ? n : null };
+    }
+    return { screen: raw, mission: null };
+  }
   function syncHash(name){
     if(document.body.classList.contains('companion-window')) return;
-    var newHash = '#' + name;
+    var mission = MISSION_SCREENS.indexOf(name)>-1 ? activeMission : null;
+    var newHash = mission ? ('#mission/'+mission+'/'+name) : ('#'+name);
     if(location.hash === newHash) return;
-    if(!_hashSynced){ history.replaceState({screen:name}, '', newHash); _hashSynced = true; }
-    else { history.pushState({screen:name}, '', newHash); }
+    if(!_hashSynced){ history.replaceState({screen:name, mission:mission}, '', newHash); _hashSynced = true; }
+    else { history.pushState({screen:name, mission:mission}, '', newHash); }
   }
-  function go(name, fromBack){
+  function go(name, fromBack, missionNum){
+    if(MISSION_SCREENS.indexOf(name)>-1){ activeMission = missionNum || curMission(); }
     var activeEl = document.querySelector('.screen.active');
     var cur = activeEl ? activeEl.dataset.screen : null;
     if(!fromBack && cur && cur!==name) navHist.push(cur);
@@ -1572,11 +1739,15 @@
     try{ var _sh=window.screen.availHeight, _w=Math.min(480,window.screen.availWidth), _sx=window.screen.availLeft||0, _sy=window.screen.availTop||0; window.moveTo(_sx,_sy); window.resizeTo(_w,_sh); }catch(e){}
     go('companion');
   } else {
-    // Prefer an existing #screen hash (a shared/bookmarked/reloaded link)
-    // over ?screen=, so reloading mid-app doesn't bounce back to Home.
-    var _hashScreen = location.hash ? location.hash.slice(1) : '';
-    var _boot = (VALID_SCREENS.indexOf(_hashScreen) > -1) ? _hashScreen : (_sp.get('screen') || 'home');
-    go(_boot);
+    // Prefer an existing hash (a shared/bookmarked/reloaded link) over
+    // ?screen=, so reloading mid-app doesn't bounce back to Home.
+    // #mission/{n}/{screen} (see parseHash/syncHash) -- the mission number
+    // actually drives activeMission here, so a reload or a shared link to
+    // e.g. #mission/5/novel really reproduces mission 5's comic, not just
+    // whatever's currently in progress.
+    var _parsed = parseHash();
+    var _boot = (VALID_SCREENS.indexOf(_parsed.screen) > -1) ? _parsed.screen : (_sp.get('screen') || 'home');
+    go(_boot, false, _parsed.mission);
   }
   // Native browser Back/Forward: without this, go() only ever changed which
   // .screen had the "active" class -- no URL change, no history entry -- so
@@ -1589,9 +1760,17 @@
   // which is always true by the time this fires (the browser updates the
   // hash before dispatching popstate).
   window.addEventListener('popstate', function(e){
-    var name = (e.state && e.state.screen) || (location.hash ? location.hash.slice(1) : '');
+    var name, missionNum;
+    if(e.state && e.state.screen){
+      name = e.state.screen; missionNum = e.state.mission;
+    } else {
+      // Older history entry from before this route existed, or a hash
+      // edited/pasted by hand -- same parseHash() boot uses, not a second
+      // hand-rolled parser.
+      var p = parseHash(); name = p.screen; missionNum = p.mission;
+    }
     if(VALID_SCREENS.indexOf(name) === -1) return;
-    go(name, true);
+    go(name, true, missionNum);
   });
 
   /* ---- live layer (evoke/live.py's /ws) ----
@@ -1817,8 +1996,8 @@
         + '<div style="display:flex;align-items:center;gap:12px;margin-bottom:6px;flex-wrap:wrap;"><span class="ms" aria-hidden="true" style="font-size:24px;color:var(--cyan-300);">groups</span><h2 class="hud" style="font-size:12px;margin:0;color:var(--cyan-300);">Step '+(hasInd?3:2)+' · Team Product</h2>'+statusChip(prodStatus==='done'?'Submitted':'Your turn', prodStatus)+'</div>'
         + '<p style="font-family:var(--font-body);font-size:14px;color:var(--teal-100);margin:0 0 14px;">Your team’s shared deliverable. Everyone turns in the <strong style="color:var(--cyan-100);">same file</strong> — that’s how we know the whole team signed off. Include:</p>'
         + reqList(m.teamProduct.items)
-        + '<div class="ev-drop" id="sub-team-drop" role="button" tabindex="0" style="margin-bottom:18px;"><span class="ms" aria-hidden="true">cloud_upload</span><div class="ev-drop-title">Drag &amp; drop your team’s Evokation</div><div class="ev-drop-sub">or <span class="ev-browse">browse from your device</span></div><div class="ev-drop-hint">Should match your teammates’ file</div></div>'
-        + '<input type="file" id="sub-team-file" class="sr-only" aria-hidden="true">'
+        + '<div class="ev-drop" id="sub-team-drop" role="button" tabindex="0" style="margin-bottom:18px;"><span class="ms" aria-hidden="true">cloud_upload</span><div class="ev-drop-title">Drag &amp; drop your team’s Evokation</div><div class="ev-drop-sub">or <span class="ev-browse">browse from your device</span></div><div class="ev-drop-hint">PDF only — should match your teammates’ file</div></div>'
+        + '<input type="file" id="sub-team-file" class="sr-only" aria-hidden="true" accept="application/pdf,.pdf">'
         + '<div class="hud" style="font-size:10px;color:var(--cyan-300);margin-bottom:10px;">Team Roster · who’s turned it in</div>'
         + '<div style="display:flex;flex-wrap:wrap;gap:10px;">'+chips+'</div>'+divNote+'</div>';
 
@@ -1841,8 +2020,14 @@
           var fd = new FormData();
           fd.append('user_id', STATE.userId); fd.append('mission_id', mid); fd.append('kind', kind); fd.append('file', file.files[0]);
           drop.querySelector('.ev-drop-title').textContent = 'Uploading…';
-          fetch('/api/submit-evidence', {method:'POST', body:fd}).then(function(r){return r.json();})
-            .then(function(){ refresh(no); }).catch(function(){ drop.querySelector('.ev-drop-title').textContent = 'Upload failed — try again'; });
+          fetch('/api/submit-evidence', {method:'POST', body:fd}).then(function(r){
+            // A 4xx (e.g. non-PDF team product, see main.py's submit_evidence)
+            // still resolves here rather than rejecting -- fetch only rejects
+            // on network failure -- so status has to be checked explicitly or
+            // the error detail silently gets treated as a success.
+            return r.json().then(function(d){ if(!r.ok) throw new Error(d && d.detail || 'Upload failed'); return d; });
+          }).then(function(){ refresh(no); })
+            .catch(function(e){ drop.querySelector('.ev-drop-title').textContent = e.message || 'Upload failed — try again'; });
         });
       }
       hookUpload('sub-ind-drop','sub-ind-file','individual_task');

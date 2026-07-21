@@ -17,10 +17,12 @@ from psycopg2.pool import SimpleConnectionPool
 import httpx
 import asyncpg
 import logging
+from io import BytesIO
+from pypdf import PdfReader
+from pypdf.errors import PdfReadError
 
 from evoke.clients import s3_client, os_client, get_producer, topic_for_event
 from evoke.workers import evoke_workers_loop
-from evoke.lms import get_brightspace_lms
 from evoke.lti import BrightspaceLTIProvider
 from evoke import skills_framework, progression, world_state, gear as gear_catalog
 from evoke.live import live_hub
@@ -35,7 +37,6 @@ logger = logging.getLogger(__name__)
 
 # ========== Configuration ==========
 DATABASE_URL = os.getenv("DATABASE_URL", "postgresql://evoke:devsecret123@localhost:5432/evoke")
-BRIGHTSPACE_SIM_URL = os.getenv("BRIGHTSPACE_SIM_URL", "http://brightspace-sim:8001")
 # billbot_chat() below no longer talks to OpenWebUI directly -- it points
 # at the LiteLLM gateway (GUARDRAILS_PLAN.md Phase 0/1), which forwards to
 # OpenWebUI as its one real backend and applies the content-filter/Presidio
@@ -61,19 +62,9 @@ MINECRAFT_PUBLIC_PORT_BEDROCK = os.getenv("MINECRAFT_PUBLIC_PORT_BEDROCK", "1913
 # future server upgrade is a one-line env change, not a frontend redeploy.
 MINECRAFT_JAVA_VERSION = os.getenv("MINECRAFT_JAVA_VERSION", "1.21.10")
 
-# Brightspace integration (adapter or simulator)
-BRIGHTSPACE_SIMULATOR_MODE = os.getenv("BRIGHTSPACE_SIMULATOR_MODE", "true").lower() == "true"
-BRIGHTSPACE_TENANT_URL = os.getenv("BRIGHTSPACE_TENANT_URL")
-BRIGHTSPACE_APP_KEY = os.getenv("BRIGHTSPACE_APP_KEY")
-BRIGHTSPACE_APP_SECRET = os.getenv("BRIGHTSPACE_APP_SECRET")
-BRIGHTSPACE_ORG_UNIT_ID = os.getenv("BRIGHTSPACE_ORG_UNIT_ID")
-
 # ========== Database Pool ==========
 db_pool = SimpleConnectionPool(1, 20, DATABASE_URL)
 async_db_pool: Optional[asyncpg.Pool] = None
-# Test-harness only -- see auth_brightspace_callback and /api/test/brightspace/*.
-_test_brightspace_tokens: dict = {}
-brightspace_lms = None
 brightspace_lti: Optional[BrightspaceLTIProvider] = None
 
 def get_db_connection():
@@ -93,105 +84,23 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# ========== Mission Catalog Sync ==========
-async def sync_missions_from_lms():
-    """The LMS (brightspace-sim now; real Brightspace later) is the system
-    of record for the mission catalog -- this pulls its assignment list and
-    upserts EVOKE's missions table, keyed by (campaign_id, lms_assignment_ref)
-    (see the UNIQUE constraint added in init-db.sql). Postgres becomes a
-    synced cache, not an independent catalog: missions are no longer seeded
-    directly (see evoke-infra/seed.py). Sim-only for this build pass, per
-    BUILD_PLAN.md's non-goals -- a real-Brightspace path would call the
-    equivalent authenticated BrightspaceLMS method instead of hitting
-    BRIGHTSPACE_SIM_URL directly."""
-    campaign_row = db_fetch_one("SELECT id FROM campaigns WHERE key = 'evoke-prosperity'")
-    if not campaign_row:
-        logger.warning("Mission sync skipped: no 'evoke-prosperity' campaign found")
-        return
-    campaign_id = campaign_row[0]
-
-    try:
-        async with httpx.AsyncClient() as client:
-            response = await client.get(
-                f"{BRIGHTSPACE_SIM_URL}/d2l/api/lp/1.96/dropbox/assignments", timeout=10
-            )
-            response.raise_for_status()
-            assignments = response.json().get("Assignments", [])
-    except Exception as e:
-        logger.error(f"Mission sync failed (LMS unreachable, keeping existing missions): {e}")
-        return
-
-    synced = 0
-    for assignment in assignments:
-        fields = assignment.get("CustomFields", {})
-        db_execute(
-            """INSERT INTO missions
-               (id, campaign_id, lms_assignment_ref, week, sequence, title, arc,
-                superpower, primary_skill, secondary_skill, pfl_domain, mission_brief_md,
-                pbl_description, evidence_requirements_md)
-               VALUES (gen_random_uuid(), %s::uuid, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
-               ON CONFLICT (campaign_id, lms_assignment_ref) DO UPDATE SET
-                   week = EXCLUDED.week, sequence = EXCLUDED.sequence, title = EXCLUDED.title,
-                   arc = EXCLUDED.arc, superpower = EXCLUDED.superpower,
-                   primary_skill = EXCLUDED.primary_skill, secondary_skill = EXCLUDED.secondary_skill,
-                   pfl_domain = EXCLUDED.pfl_domain, mission_brief_md = EXCLUDED.mission_brief_md,
-                   pbl_description = EXCLUDED.pbl_description,
-                   evidence_requirements_md = EXCLUDED.evidence_requirements_md""",
-            (
-                campaign_id, assignment["AssignmentId"], fields.get("Week"), fields.get("Sequence"),
-                assignment["Name"], fields.get("Arc"), fields.get("Superpower"),
-                fields.get("PrimarySkill"), fields.get("SecondarySkill"), fields.get("PflDomain"),
-                fields.get("Description"),
-                # pbl_description holds the full "Evoke Mission (direct to
-                # students)" narrative (the "Your Mission" framing + Step
-                # 1/2/3) -- not literally the docx's separate, instructor-
-                # facing "Activity (PBL Description)" paragraph, which is
-                # what the column name suggests. Reusing this existing,
-                # previously-unpopulated column rather than adding a new one
-                # for content that's genuinely the richer version of the
-                # same "what is this mission" idea `mission_brief_md` (the
-                # short summary) already carries.
-                fields.get("MissionNarrative"),
-                fields.get("EvidenceRequirements"),
-            )
-        )
-        synced += 1
-
-    # Per GAME_DESIGN.md §6.1 ("Mission 1: the entire Basin is open") and
-    # the now-resolved mission-ordering gap in GAPS.md, week 1/sequence 1 is
-    # the only mission released by default -- every other mission needs an
-    # admin to manually release it (POST /api/admin/missions/{id}/release).
-    # Only touches missions that have never been released, so re-running
-    # this sync never re-locks something an admin already opened.
-    db_execute(
-        """UPDATE missions SET released_at = CURRENT_TIMESTAMP
-           WHERE campaign_id = %s::uuid AND week = 1 AND sequence = 1 AND released_at IS NULL""",
-        (campaign_id,)
-    )
-
-    logger.info(f"Mission sync complete: {synced} assignments synced from LMS")
-
+# Mission Catalog Sync -- sync_missions_from_lms() used to live here,
+# auto-upserting from brightspace-sim on every startup. Removed: real
+# missions now come from the admin Mission Sync flow (POST /api/admin/missions
+# + link-brightspace, see BRIGHTSPACE.md), not an LMS the app treats as
+# nonexistent. The 12 missions that flow already populated keep their real
+# curriculum content -- nothing lost by no longer re-pulling from the sim.
 
 # ========== Startup/Shutdown ==========
 @app.on_event("startup")
 async def startup():
-    """Initialize async database pool, Brightspace adapter, and LTI provider"""
-    global async_db_pool, brightspace_lms, brightspace_lti
+    """Initialize async database pool and LTI provider"""
+    global async_db_pool, brightspace_lti
 
     try:
-        # Create async database pool for BrightspaceLMS and LTI
+        # Create async database pool for LTI and everything else
         async_db_pool = await asyncpg.create_pool(DATABASE_URL, min_size=5, max_size=20)
         logger.info("Async database pool created")
-
-        # Initialize Brightspace adapter (real or simulator mode)
-        if not BRIGHTSPACE_SIMULATOR_MODE and BRIGHTSPACE_TENANT_URL:
-            brightspace_lms = get_brightspace_lms(async_db_pool)
-            if brightspace_lms:
-                logger.info(f"BrightspaceLMS adapter initialized for {BRIGHTSPACE_TENANT_URL}")
-            else:
-                logger.warning("Brightspace adapter not configured, falling back to simulator")
-        else:
-            logger.info("Using Brightspace simulator mode")
 
         # Initialize LTI 1.3 provider if configured
         try:
@@ -203,8 +112,6 @@ async def startup():
                 logger.info("LTI not configured (optional feature)")
         except ImportError:
             logger.warning("LTI provider not available")
-
-        await sync_missions_from_lms()
 
         # Idempotent DDL for tables newer than a deployment's Postgres
         # volume -- init-db.sql only runs on a *fresh* volume, so anything
@@ -227,6 +134,37 @@ async def startup():
         # Same split for the Mob Gauntlet (evoke-infra/minecraft/datapacks/mob_gauntlet) --
         # bridge-owned table, mirrors mc_arena_best.
         db_execute("CREATE TABLE IF NOT EXISTS mc_gauntlet_best (user_id UUID PRIMARY KEY, best_wave INT NOT NULL DEFAULT 0)")
+        # mission_brightspace_mapping's own UNIQUE(mission_id, campaign_id)
+        # (init-db.sql) only stops one mission from having two mapping rows
+        # -- nothing stopped two *different* missions from both claiming the
+        # same brightspace_assignment_id. The Brightspace Mission Sync flow
+        # (admin_link_brightspace_assignment) requires a true 1:1: one Evoke
+        # mission is the container for exactly one Brightspace assignment.
+        # init-db.sql only runs on a fresh volume, so this needs the same
+        # idempotent create-if-missing treatment as the tables above.
+        db_execute("""
+            CREATE UNIQUE INDEX IF NOT EXISTS idx_mission_brightspace_mapping_assignment
+            ON mission_brightspace_mapping (campaign_id, brightspace_assignment_id)
+        """)
+        # Real Brightspace integration (no simulator): a student's own
+        # OAuth tokens, captured at login, used to push their own
+        # submissions -- see BRIGHTSPACE.md. init-db.sql has this inline for
+        # fresh volumes; same idempotent treatment for an existing one.
+        db_execute("ALTER TABLE evoke_identities ADD COLUMN IF NOT EXISTS brightspace_access_token TEXT")
+        db_execute("ALTER TABLE evoke_identities ADD COLUMN IF NOT EXISTS brightspace_refresh_token TEXT")
+        db_execute("ALTER TABLE evoke_identities ADD COLUMN IF NOT EXISTS brightspace_token_expires_at TIMESTAMP")
+        db_execute("ALTER TABLE mission_brightspace_mapping ADD COLUMN IF NOT EXISTS brightspace_grade_item_id VARCHAR(50)")
+        db_execute("""
+            CREATE TABLE IF NOT EXISTS brightspace_service_connection (
+                id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                brightspace_user_id INTEGER,
+                access_token TEXT NOT NULL,
+                refresh_token TEXT,
+                expires_at TIMESTAMP NOT NULL,
+                connected_by_admin_id UUID REFERENCES users(id),
+                connected_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        """)
         # evoke/identity.py's get_or_create_evoke_player needs this for its
         # ON CONFLICT (email, org_id) clause -- found live (2026-07-16) that
         # it never actually existed, so LTI auto-provisioning of a genuinely
@@ -403,16 +341,12 @@ async def startup():
 
 @app.on_event("shutdown")
 async def shutdown():
-    """Close database pool and Brightspace adapter"""
-    global async_db_pool, brightspace_lms
+    """Close database pool"""
+    global async_db_pool
 
     if async_db_pool:
         await async_db_pool.close()
         logger.info("Async database pool closed")
-
-    if brightspace_lms:
-        await brightspace_lms.close()
-        logger.info("BrightspaceLMS adapter closed")
 
 # ========== Pydantic Models ==========
 class Mission(BaseModel):
@@ -587,47 +521,16 @@ async def admin_login(response: Response, username: str = Form(...), password: s
 
 
 # ========== Identity Management ==========
-class LinkBrightspaceRequest(BaseModel):
-    evoke_user_id: str
-    brightspace_user_id: int
-    brightspace_access_token: str
-
+# /api/identity/link-brightspace used to live here -- removed. It verified
+# against brightspace-sim directly and took evoke_user_id/brightspace_user_id
+# straight from an unauthenticated request body (no session check at all),
+# exactly the client-supplied-identity pattern the real OAuth login work
+# replaced everywhere else. Superseded entirely by auth_brightspace_callback
+# + get_or_create_evoke_player -- nothing in the frontend called this route.
 class LinkMinecraftRequest(BaseModel):
     evoke_user_id: str
     minecraft_uuid: str
     minecraft_username: str
-
-@app.post("/api/identity/link-brightspace")
-async def link_brightspace_identity(request: LinkBrightspaceRequest):
-    """Link EVOKE user to Brightspace user ID and verify token"""
-    try:
-        # Verify token with Brightspace simulator
-        async with httpx.AsyncClient() as client:
-            verify_response = await client.get(
-                f"{BRIGHTSPACE_SIM_URL}/d2l/api/lp/1.96/users/whoami",
-                headers={"Authorization": f"Bearer {request.brightspace_access_token}"}
-            )
-            if verify_response.status_code != 200:
-                raise HTTPException(status_code=401, detail="Invalid Brightspace token")
-
-        # Create or update identity mapping
-        db_execute(
-            """INSERT INTO evoke_identities (user_id, brightspace_user_id)
-               VALUES (%s::uuid, %s)
-               ON CONFLICT (brightspace_user_id) DO UPDATE
-               SET updated_at = CURRENT_TIMESTAMP""",
-            (request.evoke_user_id, request.brightspace_user_id)
-        )
-
-        return {
-            "evoke_user_id": request.evoke_user_id,
-            "brightspace_user_id": request.brightspace_user_id,
-            "status": "linked"
-        }
-    except HTTPException:
-        raise
-    except Exception as e:
-        raise HTTPException(status_code=400, detail=f"Identity linking failed: {str(e)}")
 
 @app.post("/api/identity/link-minecraft")
 async def link_minecraft_identity(request: LinkMinecraftRequest):
@@ -809,6 +712,37 @@ async def auth_brightspace_callback(request: Request, code: str = None, state: s
     if not code or not state:
         raise HTTPException(status_code=400, detail="Missing code/state")
 
+    # Admin token-only connect (see admin_brightspace_connect above) --
+    # same redirect URI as a real learner login, distinguished by its own
+    # state cookie. Caches the token against the already-logged-in Evoke
+    # Admin session and stops there -- never provisions/logs in as a
+    # Brightspace user, so the admin account stays exactly as
+    # Brightspace-independent as it was before this button was ever clicked.
+    admin_state = request.cookies.get("admin_oauth_state")
+    if admin_state and state == admin_state:
+        admin_id = get_current_admin(request)
+        try:
+            profile = await provider.exchange_code(code)
+        except OAuthLoginError as e:
+            logger.error(f"Brightspace admin-connect failed: {e}")
+            raise HTTPException(status_code=401, detail=str(e))
+        # Always exactly one row -- this connection is shared across every
+        # admin/course-wide operation (roster, assignment pull, grades),
+        # not tied to whichever admin happened to click Connect. Whoever
+        # authenticates here needs to be an instructor/TA-level Brightspace
+        # account for roster pulls specifically to work -- see BRIGHTSPACE.md.
+        expires_at = datetime.datetime.now() + datetime.timedelta(seconds=profile.get("expires_in", 3600))
+        db_execute("DELETE FROM brightspace_service_connection")
+        db_execute(
+            """INSERT INTO brightspace_service_connection
+               (brightspace_user_id, access_token, refresh_token, expires_at, connected_by_admin_id)
+               VALUES (%s, %s, %s, %s, %s::uuid)""",
+            (profile["subject"], profile["access_token"], profile.get("refresh_token"), expires_at, admin_id)
+        )
+        redirect_response = RedirectResponse(url="/admin/", status_code=302)
+        redirect_response.delete_cookie("admin_oauth_state")
+        return redirect_response
+
     expected_state = request.cookies.get("oauth_state")
     if not expected_state or state != expected_state:
         raise HTTPException(status_code=400, detail="Invalid OAuth state")
@@ -833,12 +767,20 @@ async def auth_brightspace_callback(request: Request, code: str = None, state: s
     if org_row and profile.get("team_name"):
         await sync_team_membership(async_db_pool, str(org_row["id"]), evoke_user_id, profile["team_name"])
 
-    # Test-harness only (see /api/test/brightspace/* and
-    # static/test-brightspace.html below) -- caches this OAuth session's
-    # access token in memory so the test page can make real Dropbox calls
-    # without a second Brightspace redirect-URI registration. Never read by
-    # the production login/session path.
-    _test_brightspace_tokens[evoke_user_id] = profile.get("access_token")
+    # This student's own token, persisted (not just cached in memory) so
+    # the Brightspace Submission Worker can push their evidence as them --
+    # see evoke/workers.py and BRIGHTSPACE.md. Refreshed on demand via
+    # brightspace_refresh_token rather than needing them to log in again
+    # every time it's used.
+    expires_at = datetime.datetime.now() + datetime.timedelta(seconds=profile.get("expires_in", 3600))
+    db_execute(
+        """UPDATE evoke_identities SET
+               brightspace_access_token = %s,
+               brightspace_refresh_token = %s,
+               brightspace_token_expires_at = %s
+           WHERE user_id = %s::uuid""",
+        (profile.get("access_token"), profile.get("refresh_token"), expires_at, evoke_user_id)
+    )
 
     # No more ?login=<email> round-trip: the callback itself is the only
     # place that ever saw a verified identity, so it's the only place that
@@ -849,44 +791,13 @@ async def auth_brightspace_callback(request: Request, code: str = None, state: s
     redirect_response.delete_cookie("oauth_state")
     return redirect_response
 
-# ========== Brightspace real-API test harness (static/test-brightspace.html) ==========
-# Confirms mission-pulling and evidence-submission are technically possible
-# against the real tenant, using the access token from the last real OAuth
-# login above -- deliberately NOT wired into sync_missions_from_lms or
-# submit_evidence. Real Brightspace DropboxFolders have no field for
-# Evoke's curriculum metadata (arc, superpower, skills, PFL domain, the
-# "Your Mission" narrative, the Evidence checklist -- see CONCEPTS.md's
-# Mission glossary entry), so a real integration there needs its own design
-# (keep Evoke's own mission catalog, matched to a real folder only by
-# lms_assignment_ref), not a drop-in replacement of the sim-based sync.
-
-@app.get("/api/test/brightspace/assignments")
-async def test_brightspace_assignments(user_id: str = Depends(get_current_user)):
-    token = _test_brightspace_tokens.get(user_id)
-    if not token:
-        raise HTTPException(status_code=400, detail="No cached Brightspace token for this user -- log in again via Login with Central Registry, then reload this page")
-    provider = get_auth_provider()
-    if not provider:
-        raise HTTPException(status_code=503, detail="No OAuth login provider configured")
-    try:
-        folders = await provider.list_dropbox_folders(token)
-    except OAuthLoginError as e:
-        raise HTTPException(status_code=502, detail=str(e))
-    return {"folders": folders}
-
-@app.post("/api/test/brightspace/submit")
-async def test_brightspace_submit(folder_id: int = Form(...), text: str = Form(...), user_id: str = Depends(get_current_user)):
-    token = _test_brightspace_tokens.get(user_id)
-    if not token:
-        raise HTTPException(status_code=400, detail="No cached Brightspace token for this user -- log in again via Login with Central Registry, then reload this page")
-    provider = get_auth_provider()
-    if not provider:
-        raise HTTPException(status_code=503, detail="No OAuth login provider configured")
-    try:
-        result = await provider.submit_test_file(token, folder_id, text)
-    except OAuthLoginError as e:
-        raise HTTPException(status_code=502, detail=str(e))
-    return {"status": "ok", "result": result}
+# The Brightspace real-API test harness (/api/test/brightspace/*,
+# static/test-brightspace.html) that used to live here is superseded:
+# static/admin's Mission Sync panel does the real assignments pull for
+# real now (/api/admin/brightspace/assignments), and real submission goes
+# through the Brightspace Submission Worker using each student's own
+# persisted token (evoke/workers.py), not a request-scoped in-memory cache.
+# The static HTML page still exists but its backend routes are gone.
 
 @app.get("/api/session/validate")
 async def validate_session(user_id: str = Depends(get_current_user)):
@@ -904,13 +815,27 @@ async def validate_session(user_id: str = Depends(get_current_user)):
 @app.post("/api/session/logout")
 async def logout_session(response: Response):
     """Logout and clear the session cookie, plus the old cookie names in
-    case a browser still has them from before this change."""
+    case a browser still has them from before this change.
+
+    Clearing Evoke's own session cookie is all this endpoint can actually
+    do -- it has no way to touch Brightspace's separate session in the same
+    browser. On a shared/lab computer, that gap is a real problem: if
+    Brightspace's own session is still alive, the next person to click
+    "Login with Central Registry" gets silently signed in as whoever just
+    "logged out," no credentials prompt at all (found live -- confirmed
+    charge.yacenter.org/d2l/lp/auth/logout/LogoutConfirmation.d2l is a real,
+    working per-tenant logout page). Returning that URL here lets the
+    frontend send the browser through it right after -- one extra
+    confirmation click on Brightspace's own page, but it's what actually
+    closes the SSO session, not just Evoke's half of it."""
     clear_session(response)
     response.delete_cookie("session_token")
     response.delete_cookie("user_id")
     response.delete_cookie("user_display_name")
     logger.info("User logged out")
-    return {"status": "success", "message": "Logged out successfully"}
+    tenant_url = os.getenv("BRIGHTSPACE_TENANT_URL")
+    brightspace_logout_url = f"{tenant_url}/d2l/lp/auth/logout/LogoutConfirmation.d2l" if tenant_url else None
+    return {"status": "success", "message": "Logged out successfully", "brightspace_logout_url": brightspace_logout_url}
 
 # ========== Brightspace Grade Webhook ==========
 @app.post("/api/webhooks/brightspace/grade")
@@ -938,10 +863,6 @@ async def brightspace_grade_webhook(
     6. Sync award to Brightspace (push_badge_award)
     7. Publish TeacherReviewed event
     """
-    if not brightspace_lms:
-        logger.warning("Grade webhook received but Brightspace LMS not configured")
-        return {"status": "warning", "message": "Brightspace LMS not configured"}
-
     try:
         logger.info(f"Grade webhook: user {brightspace_user_id}, grade {grade}")
 
@@ -957,9 +878,12 @@ async def brightspace_grade_webhook(
 
         evoke_user_id = evoke_user[0]
 
-        # Update submission with grade
+        # Update submission with grade. status='graded' is this pipeline's
+        # terminal state (see workers.py's BRIGHTSPACE SUBMISSION WORKER
+        # comment) -- can only ever land on a row that already reached
+        # 'brightspace', since Brightspace has nothing to grade otherwise.
         db_execute(
-            """UPDATE submissions SET grade = %s, feedback = %s, graded_at = CURRENT_TIMESTAMP
+            """UPDATE submissions SET grade = %s, feedback = %s, graded_at = CURRENT_TIMESTAMP, status = 'graded'
                WHERE brightspace_submission_id = %s""",
             (grade, feedback, submission_id)
         )
@@ -1032,19 +956,13 @@ async def brightspace_grade_webhook(
                 (award_id, evoke_user_id, mission_id, tier)
             )
 
-            # Sync badge to Brightspace
-            try:
-                await brightspace_lms.push_badge_award(
-                    evoke_user_id=evoke_user_id,
-                    badge_id=badge_id,
-                    campaign_id=campaign_id,
-                    criteria=f"Teacher graded submission: {grade}/100",
-                    evidence=f"Submission ID: {submission_id}"
-                )
-                logger.info(f"Award {tier} synced to Brightspace for user {evoke_user_id}")
-            except Exception as e:
-                logger.error(f"Failed to sync award to Brightspace: {e}")
-                # Continue anyway - award created locally
+            # Pushing this award into Brightspace's own Award Service (BAS)
+            # used to happen here via the now-removed service-account
+            # adapter -- out of scope for this pass (roster/assignments/
+            # submissions/grades, not badge push-back). The award is still
+            # real and local (INSERT INTO awards above); only the optional
+            # "also show it in Brightspace's own gamification feature" step
+            # is gone, and it was already best-effort/non-blocking.
 
             # Publish event
             await publish_event("TeacherReviewed", {
@@ -1079,86 +997,11 @@ async def brightspace_grade_webhook(
         logger.error(f"Grade webhook error: {e}")
         return {"status": "error", "message": str(e)}
 
-@app.get("/api/webhooks/brightspace/poll")
-async def poll_brightspace_grades():
-    """
-    Polling fallback for Brightspace grades.
-
-    If Brightspace doesn't support webhooks, call this endpoint periodically
-    (e.g., every 5 minutes) to fetch new grades and sync them.
-
-    This is a backup mechanism; webhooks are preferred.
-
-    Returns count of grades synced.
-    """
-    if not brightspace_lms:
-        return {"status": "error", "message": "Brightspace LMS not configured"}
-
-    try:
-        # Find ungraded submissions
-        ungraded = db_fetch_all(
-            """SELECT s.id, s.user_id, s.mission_id, s.brightspace_submission_id
-               FROM submissions s
-               WHERE s.status = 'submitted' AND s.grade IS NULL
-               AND s.brightspace_submission_id IS NOT NULL
-               LIMIT 100"""
-        )
-
-        if not ungraded:
-            return {"status": "success", "count": 0, "message": "No ungraded submissions"}
-
-        synced_count = 0
-
-        for submission_id, user_id, mission_id, bs_sub_id in ungraded:
-            try:
-                # Get mission's assignment ID
-                mission = db_fetch_one(
-                    "SELECT brightspace_assignment_id FROM mission_brightspace_mapping WHERE mission_id = %s::uuid LIMIT 1",
-                    (mission_id,)
-                )
-
-                if not mission:
-                    logger.warning(f"No assignment mapping for mission {mission_id}")
-                    continue
-
-                assignment_id = mission[0]
-
-                # Poll Brightspace for submissions
-                submissions = await brightspace_lms.get_submissions_for_assignment(assignment_id)
-
-                if not submissions:
-                    continue
-
-                # Find matching submission
-                for bs_sub in submissions:
-                    if bs_sub.get("SubmissionId") == bs_sub_id:
-                        grade = bs_sub.get("Grade")
-                        feedback = bs_sub.get("Feedback", "")
-
-                        if grade is not None:
-                            # Update EVOKE submission
-                            db_execute(
-                                """UPDATE submissions SET grade = %s, feedback = %s, graded_at = CURRENT_TIMESTAMP
-                                   WHERE id = %s::uuid""",
-                                (grade, feedback, submission_id)
-                            )
-                            synced_count += 1
-                            logger.info(f"Polled grade: submission {submission_id}, grade {grade}")
-                        break
-
-            except Exception as e:
-                logger.error(f"Error polling submission {submission_id}: {e}")
-                continue
-
-        return {
-            "status": "success",
-            "count": synced_count,
-            "message": f"Synced {synced_count} grades from Brightspace"
-        }
-
-    except Exception as e:
-        logger.error(f"Grade polling error: {e}")
-        return {"status": "error", "message": str(e)}
+# The backup grade-polling route (/api/webhooks/brightspace/poll) that used
+# to live here depended on the now-removed service-account adapter.
+# Superseded by POST /api/admin/missions/{id}/sync-grades, which does the
+# same job (pull grade values, write them onto the matching submission)
+# via the shared service connection instead.
 
 # ========== Mission API ==========
 @app.get("/api/missions")
@@ -1234,7 +1077,7 @@ async def admin_list_missions(user_id: str = Depends(get_current_admin)):
             raise HTTPException(status_code=404, detail="Organization not found")
 
         missions_data = db_fetch_all(
-            """SELECT id, title, week, sequence, arc, released_at, stage
+            """SELECT id, title, week, sequence, arc, released_at, stage, lms_assignment_ref
                FROM missions WHERE campaign_id = %s::uuid ORDER BY week, sequence""",
             (org_result[0],)
         )
@@ -1243,6 +1086,7 @@ async def admin_list_missions(user_id: str = Depends(get_current_admin)):
             "released": m[5] is not None,
             "released_at": m[5].isoformat() if m[5] else None,
             "stage": m[6],
+            "lms_assignment_ref": m[7],
         } for m in missions_data]}
     except HTTPException:
         raise
@@ -1296,6 +1140,432 @@ async def admin_unrelease_mission(mission_id: str, admin_id: str = Depends(get_c
         raise HTTPException(status_code=400, detail=str(e))
 
 
+# ========== Brightspace Mission Sync (Evoke Admin) ==========
+# Pull real assignments from the live tenant, validate them, and let an
+# admin decide what becomes a mission -- distinct from sync_missions_from_lms
+# above, which blind-upserts from brightspace-sim on every startup. Real
+# DropboxFolders carry no Evoke curriculum metadata (arc, superpower,
+# skills, PFL domain, narrative, evidence checklist -- see CONCEPTS.md's
+# Mission glossary entry and the test-harness note further up this file),
+# so this only ever writes lms_assignment_ref + title; curriculum fields are
+# authored afterward via PUT /api/admin/missions/{id}, a pure Postgres
+# write with no Brightspace call -- mission content stays editable with
+# zero live LMS connectivity once a mission has been pulled once.
+#
+# The Evoke Admin account (POST /api/admin/login) is deliberately
+# Brightspace-independent -- but pulling real assignment data unavoidably
+# needs a live Brightspace credential from *somewhere*. admin_brightspace_connect
+# below gets one without giving the admin account a Brightspace identity: it
+# reuses the same OAuth authorize/callback round-trip real logins use, but a
+# separate admin_oauth_state cookie tells auth_brightspace_callback to just
+# cache the resulting token against this already-logged-in admin session
+# (see the branch near the top of that function) instead of provisioning a
+# Brightspace-linked EVOKE Player. No second Brightspace redirect-URI
+# registration needed -- same callback URL, distinguished by that cookie.
+
+async def _get_service_token() -> Optional[str]:
+    """A valid access token for the one shared brightspace_service_connection
+    row (roster, assignment pull, grade reads -- course-wide operations),
+    refreshing it first if it's expired or about to be. Returns None if
+    nothing's ever connected, or if the refresh itself fails (refresh token
+    revoked/expired) -- callers should treat that as 'reconnect via Connect
+    Brightspace', not retry."""
+    row = db_fetch_one(
+        "SELECT access_token, refresh_token, expires_at FROM brightspace_service_connection LIMIT 1"
+    )
+    if not row:
+        return None
+    access_token, refresh_token, expires_at = row
+    if expires_at and expires_at > datetime.datetime.now() + datetime.timedelta(seconds=60):
+        return access_token
+    if not refresh_token:
+        return None
+    provider = get_auth_provider()
+    if not provider:
+        return None
+    try:
+        refreshed = await provider.refresh_access_token(refresh_token)
+    except OAuthLoginError as e:
+        logger.warning(f"Brightspace service connection refresh failed: {e}")
+        return None
+    new_expires_at = datetime.datetime.now() + datetime.timedelta(seconds=refreshed.get("expires_in", 3600))
+    db_execute(
+        "UPDATE brightspace_service_connection SET access_token = %s, refresh_token = %s, expires_at = %s",
+        (refreshed["access_token"], refreshed.get("refresh_token", refresh_token), new_expires_at)
+    )
+    return refreshed["access_token"]
+
+
+@app.get("/api/admin/brightspace/connect")
+async def admin_brightspace_connect(admin_id: str = Depends(get_current_admin)):
+    """Kicks off the token-only OAuth round-trip described above. The admin
+    session itself is untouched by this -- it only ever ends with a cached
+    access token for API calls, never a new login/session."""
+    provider = get_auth_provider()
+    if not provider:
+        raise HTTPException(status_code=503, detail="No OAuth login provider configured")
+    state = uuid.uuid4().hex
+    response = RedirectResponse(url=provider.authorize_url(state), status_code=302)
+    response.set_cookie(
+        key="admin_oauth_state", value=state, httponly=True, secure=True, samesite="Lax", max_age=600,
+    )
+    return response
+
+
+@app.get("/api/admin/brightspace/assignments")
+async def admin_brightspace_assignments(admin_id: str = Depends(get_current_admin)):
+    """Live pull + validate, no writes. Uses the one shared service
+    connection (see _get_service_token, admin_brightspace_connect) and
+    list_dropbox_folders. Safe to call repeatedly while an admin reviews."""
+    token = await _get_service_token()
+    if not token:
+        raise HTTPException(
+            status_code=400,
+            detail="No Brightspace connection yet -- click \"Connect Brightspace\" first, then try the pull again",
+        )
+    provider = get_auth_provider()
+    if not provider:
+        raise HTTPException(status_code=503, detail="No OAuth login provider configured")
+    try:
+        folders = await provider.list_dropbox_folders(token)
+    except OAuthLoginError as e:
+        raise HTTPException(status_code=502, detail=str(e))
+
+    mapped = {
+        str(row[0]): str(row[1])
+        for row in db_fetch_all("SELECT brightspace_assignment_id, mission_id FROM mission_brightspace_mapping")
+    }
+
+    seen_ids = set()
+    assignments = []
+    for folder in (folders or []):
+        raw_id = folder.get("Id")
+        name = folder.get("Name")
+        assignment_id = str(raw_id) if raw_id not in (None, "") else None
+        # DropboxFolder carries its own linked Grade Item ID directly (per
+        # docs.valence.desire2learn.com/res/dropbox.html) -- captured here
+        # so the Link step can store it for later grade reads, which need
+        # this ID, not the assignment ID.
+        grade_item_id = folder.get("GradeItemId")
+
+        errors = []
+        if assignment_id is None:
+            errors.append("Missing assignment ID")
+        if not name or not str(name).strip():
+            errors.append("Missing name")
+        if assignment_id and assignment_id in seen_ids:
+            errors.append("Duplicate assignment ID in this pull")
+        if assignment_id:
+            seen_ids.add(assignment_id)
+
+        assignments.append({
+            "id": assignment_id,
+            "name": name,
+            "grade_item_id": str(grade_item_id) if grade_item_id not in (None, "") else None,
+            "already_mapped": mapped.get(assignment_id) if assignment_id else None,
+            "errors": errors,
+        })
+    return {"assignments": assignments}
+
+
+@app.get("/api/admin/brightspace/roster")
+async def admin_brightspace_roster(admin_id: str = Depends(get_current_admin)):
+    """Real course roster via the shared service connection. Needs
+    enrollment:orgunit:read, which (per
+    docs.valence.desire2learn.com/res/enroll.html) requires an
+    instructor/TA-level Brightspace account -- connecting as a student
+    will 403 here even though it's fine for the assignments pull above.
+    Cross-referenced against evoke_identities so an admin can see who's
+    enrolled in Brightspace vs. who's actually logged into EVOKE yet --
+    visibility only, not a reintroduction of the old manual roster-import
+    flow (deliberately removed in favor of automatic OAuth-login
+    provisioning)."""
+    token = await _get_service_token()
+    if not token:
+        raise HTTPException(
+            status_code=400,
+            detail="No Brightspace connection yet -- click \"Connect Brightspace\" first, then try the roster pull again",
+        )
+    provider = get_auth_provider()
+    if not provider:
+        raise HTTPException(status_code=503, detail="No OAuth login provider configured")
+    try:
+        classlist = await provider.list_classlist(token)
+    except OAuthLoginError as e:
+        raise HTTPException(status_code=502, detail=str(e))
+
+    linked = {
+        row[0]: str(row[1])
+        for row in db_fetch_all("SELECT brightspace_user_id, user_id FROM evoke_identities WHERE brightspace_user_id IS NOT NULL")
+    }
+
+    roster = []
+    for entry in (classlist or []):
+        bs_user_id = entry.get("Identifier")
+        try:
+            bs_user_id_int = int(bs_user_id) if bs_user_id is not None else None
+        except (TypeError, ValueError):
+            bs_user_id_int = None
+        roster.append({
+            "brightspace_user_id": bs_user_id,
+            "display_name": entry.get("DisplayName") or " ".join(filter(None, [entry.get("FirstName"), entry.get("LastName")])),
+            "logged_into_evoke": bs_user_id_int in linked if bs_user_id_int is not None else False,
+            "evoke_user_id": linked.get(bs_user_id_int),
+        })
+    return {"roster": roster}
+
+
+class MissionCreateRequest(BaseModel):
+    title: str
+    arc: Optional[str] = None
+    superpower: Optional[str] = None
+    primary_skill: Optional[str] = None
+    secondary_skill: Optional[str] = None
+    pfl_domain: Optional[str] = None
+    week: Optional[int] = None
+    sequence: Optional[int] = None
+    mission_brief_md: Optional[str] = None
+    pbl_description: Optional[str] = None
+    evidence_requirements_md: Optional[str] = None
+
+
+@app.post("/api/admin/missions")
+async def admin_create_mission(body: MissionCreateRequest, admin_id: str = Depends(get_current_admin)):
+    """The Evoke mission is the container: created here with its
+    Evoke-authored curriculum fields, independent of Brightspace. A
+    Brightspace assignment is attached afterward, one at a time, via
+    admin_link_brightspace_assignment below -- never the other way
+    around. lms_assignment_ref starts NULL."""
+    title = (body.title or "").strip()
+    if not title:
+        raise HTTPException(status_code=400, detail="Title is required")
+    org_result = db_fetch_one(
+        "SELECT o.active_campaign_id FROM organizations o JOIN users u ON u.org_id = o.id WHERE u.id = %s::uuid",
+        (admin_id,)
+    )
+    if not org_result:
+        raise HTTPException(status_code=404, detail="Organization not found")
+    campaign_id = org_result[0]
+
+    mission_id = str(uuid.uuid4())
+    try:
+        db_execute(
+            """INSERT INTO missions
+               (id, campaign_id, title, arc, superpower, primary_skill, secondary_skill,
+                pfl_domain, week, sequence, mission_brief_md, pbl_description, evidence_requirements_md)
+               VALUES (%s::uuid, %s::uuid, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)""",
+            (
+                mission_id, campaign_id, title, body.arc, body.superpower,
+                body.primary_skill, body.secondary_skill, body.pfl_domain, body.week,
+                body.sequence, body.mission_brief_md, body.pbl_description, body.evidence_requirements_md,
+            )
+        )
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    return {"status": "created", "mission_id": mission_id}
+
+
+class LinkBrightspaceAssignmentRequest(BaseModel):
+    brightspace_assignment_id: str
+    # From the assignments pull's own "grade_item_id" field (DropboxFolder's
+    # linked GradeItemId) -- optional since a folder isn't required to have
+    # a grade item attached. Needed later for grade reads, a separate
+    # resource from the assignment ID itself.
+    grade_item_id: Optional[str] = None
+
+
+@app.post("/api/admin/missions/{mission_id}/link-brightspace")
+async def admin_link_brightspace_assignment(
+    mission_id: str, body: LinkBrightspaceAssignmentRequest, admin_id: str = Depends(get_current_admin)
+):
+    """Attaches one real Brightspace assignment to an already-created Evoke
+    mission -- the container-first flow: create the mission (with its Evoke
+    curriculum fields) via POST /api/admin/missions, then link it to the
+    one Brightspace assignment it represents. True 1:1, enforced at the
+    database level in both directions: missions' own
+    UNIQUE(campaign_id, lms_assignment_ref) stops two missions sharing an
+    assignment via that column, and idx_mission_brightspace_mapping_assignment
+    (added at startup, see below) does the same for
+    mission_brightspace_mapping. An assignment already linked to a
+    *different* mission 409s naming that mission rather than silently
+    stealing the link."""
+    org_result = db_fetch_one(
+        "SELECT o.active_campaign_id FROM organizations o JOIN users u ON u.org_id = o.id WHERE u.id = %s::uuid",
+        (admin_id,)
+    )
+    if not org_result:
+        raise HTTPException(status_code=404, detail="Organization not found")
+    campaign_id = org_result[0]
+
+    mission_row = db_fetch_one(
+        "SELECT id FROM missions WHERE id = %s::uuid AND campaign_id = %s::uuid", (mission_id, campaign_id)
+    )
+    if not mission_row:
+        raise HTTPException(status_code=404, detail="Mission not found")
+
+    conflict = db_fetch_one(
+        """SELECT m.id, m.title FROM mission_brightspace_mapping mbm
+           JOIN missions m ON m.id = mbm.mission_id
+           WHERE mbm.campaign_id = %s::uuid AND mbm.brightspace_assignment_id = %s AND mbm.mission_id != %s::uuid""",
+        (campaign_id, body.brightspace_assignment_id, mission_id)
+    )
+    if conflict:
+        raise HTTPException(
+            status_code=409,
+            detail=f"That assignment is already linked to mission \"{conflict[1]}\"",
+        )
+
+    try:
+        db_execute(
+            "UPDATE missions SET lms_assignment_ref = %s WHERE id = %s::uuid",
+            (body.brightspace_assignment_id, mission_id)
+        )
+        db_execute(
+            """INSERT INTO mission_brightspace_mapping
+               (mission_id, brightspace_assignment_id, campaign_id, brightspace_grade_item_id)
+               VALUES (%s::uuid, %s, %s::uuid, %s)
+               ON CONFLICT (mission_id, campaign_id) DO UPDATE SET
+                   brightspace_assignment_id = EXCLUDED.brightspace_assignment_id,
+                   brightspace_grade_item_id = EXCLUDED.brightspace_grade_item_id""",
+            (mission_id, body.brightspace_assignment_id, campaign_id, body.grade_item_id)
+        )
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    return {"status": "linked"}
+
+
+@app.post("/api/admin/missions/{mission_id}/sync-grades")
+async def admin_sync_grades(mission_id: str, admin_id: str = Depends(get_current_admin)):
+    """Pulls every student's grade for this mission's linked assignment via
+    the shared service connection, maps each back to an EVOKE user via
+    evoke_identities, and writes it onto that user's most recent
+    team_product submission for this mission -- same terminal
+    status='graded' state the webhook path already sets (see BRIGHTSPACE.md).
+    NOTE: the GradeValue field names below (PointsNumerator/DisplayedGrade/
+    Comments) are a best-effort reading of the Valence grade resource, not
+    yet confirmed against a real response -- verify field names the first
+    time this actually runs against a linked assignment with real grades."""
+    org_result = db_fetch_one(
+        "SELECT o.active_campaign_id FROM organizations o JOIN users u ON u.org_id = o.id WHERE u.id = %s::uuid",
+        (admin_id,)
+    )
+    if not org_result:
+        raise HTTPException(status_code=404, detail="Organization not found")
+    campaign_id = org_result[0]
+
+    mapping = db_fetch_one(
+        "SELECT brightspace_grade_item_id FROM mission_brightspace_mapping WHERE mission_id = %s::uuid AND campaign_id = %s::uuid",
+        (mission_id, campaign_id)
+    )
+    if not mapping or not mapping[0]:
+        raise HTTPException(status_code=400, detail="This mission has no linked Brightspace grade item yet")
+    grade_item_id = mapping[0]
+
+    token = await _get_service_token()
+    if not token:
+        raise HTTPException(status_code=400, detail="No Brightspace connection yet -- click \"Connect Brightspace\" first")
+    provider = get_auth_provider()
+    if not provider:
+        raise HTTPException(status_code=503, detail="No OAuth login provider configured")
+    try:
+        grade_values = await provider.list_grade_values(token, grade_item_id)
+    except OAuthLoginError as e:
+        raise HTTPException(status_code=502, detail=str(e))
+
+    synced = []
+    skipped = []
+    for gv in (grade_values or []):
+        # Real shape confirmed live 2026-07-20 (see list_grade_values's own
+        # comment): each row is {"User": {"Identifier": "<id>", ...},
+        # "GradeValue": {...} | null} -- there's no top-level "UserId"/
+        # "PointsNumerator" at all, which is what the previous version of
+        # this loop assumed and crashed on the first real run.
+        user = gv.get("User") or {}
+        bs_user_id_raw = user.get("Identifier")
+        if bs_user_id_raw is None:
+            continue
+        bs_user_id = int(bs_user_id_raw)
+        grade_value = gv.get("GradeValue")
+        if grade_value is None:
+            # Enrolled but not yet graded (real, unremarkable case -- two of
+            # three rows in the first live test were exactly this).
+            continue
+        evoke_row = db_fetch_one(
+            "SELECT user_id FROM evoke_identities WHERE brightspace_user_id = %s", (bs_user_id,)
+        )
+        if not evoke_row:
+            skipped.append(bs_user_id)
+            continue
+        evoke_user_id = evoke_row[0]
+        grade = grade_value.get("PointsNumerator")
+        comments = grade_value.get("Comments") or {}
+        # Confirmed live: an instructor grading through Brightspace's rich-text
+        # feedback field leaves Comments.Text empty and puts the real content
+        # in Comments.Html -- preferring Text alone silently drops it.
+        feedback = (comments.get("Text") or "").strip()
+        if not feedback and comments.get("Html"):
+            feedback = re.sub(r"<[^>]+>", "", comments["Html"]).strip()
+        submission_row = db_fetch_one(
+            """SELECT id FROM submissions WHERE user_id = %s::uuid AND mission_id = %s::uuid AND kind = 'team_product'
+               ORDER BY submitted_at DESC LIMIT 1""",
+            (evoke_user_id, mission_id)
+        )
+        if not submission_row:
+            skipped.append(bs_user_id)
+            continue
+        db_execute(
+            """UPDATE submissions SET grade = %s, feedback = %s, graded_at = CURRENT_TIMESTAMP, status = 'graded'
+               WHERE id = %s::uuid""",
+            (grade, feedback, submission_row[0])
+        )
+        synced.append(str(evoke_user_id))
+
+    return {"status": "ok", "synced": synced, "skipped_no_match": skipped}
+
+
+class MissionUpdateRequest(BaseModel):
+    arc: Optional[str] = None
+    superpower: Optional[str] = None
+    primary_skill: Optional[str] = None
+    secondary_skill: Optional[str] = None
+    pfl_domain: Optional[str] = None
+    week: Optional[int] = None
+    sequence: Optional[int] = None
+    mission_brief_md: Optional[str] = None
+    pbl_description: Optional[str] = None
+    evidence_requirements_md: Optional[str] = None
+
+
+@app.put("/api/admin/missions/{mission_id}")
+async def admin_update_mission(mission_id: str, body: MissionUpdateRequest, admin_id: str = Depends(get_current_admin)):
+    """Hand-edit a mission's Evoke-only curriculum fields. Pure Postgres
+    write, no Brightspace call. COALESCE makes this a partial update --
+    any field the admin's form didn't send is left unchanged."""
+    try:
+        db_execute(
+            """UPDATE missions SET
+                   arc = COALESCE(%s, arc),
+                   superpower = COALESCE(%s, superpower),
+                   primary_skill = COALESCE(%s, primary_skill),
+                   secondary_skill = COALESCE(%s, secondary_skill),
+                   pfl_domain = COALESCE(%s, pfl_domain),
+                   week = COALESCE(%s, week),
+                   sequence = COALESCE(%s, sequence),
+                   mission_brief_md = COALESCE(%s, mission_brief_md),
+                   pbl_description = COALESCE(%s, pbl_description),
+                   evidence_requirements_md = COALESCE(%s, evidence_requirements_md)
+               WHERE id = %s::uuid""",
+            (
+                body.arc, body.superpower, body.primary_skill, body.secondary_skill,
+                body.pfl_domain, body.week, body.sequence, body.mission_brief_md,
+                body.pbl_description, body.evidence_requirements_md, mission_id,
+            )
+        )
+        return {"status": "updated"}
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
 # ========== Evidence Submission ==========
 def _get_user_team(user_id: str) -> Optional[str]:
     """A learner belongs to exactly one team (see the admin roster/team
@@ -1345,34 +1615,6 @@ async def _complete_mission_for_user(user_id: str, mission_id: str, team_id: str
            ON CONFLICT (user_id, mission_id, tier, source) DO NOTHING""",
         (award_id, user_id, mission_id)
     )
-
-    # Get campaign for badge mapping
-    campaign_id = db_fetch_one(
-        "SELECT active_campaign_id FROM organizations o JOIN users u ON u.org_id = o.id WHERE u.id = %s::uuid",
-        (user_id,)
-    )
-    if campaign_id:
-        campaign_id = campaign_id[0]
-
-        # Get common tier badge for this campaign
-        badge_id = db_fetch_one(
-            "SELECT id FROM badges WHERE campaign_id = %s::uuid AND key = 'common-tier' LIMIT 1",
-            (campaign_id,)
-        )
-
-        # Sync badge to Brightspace if adapter available
-        if brightspace_lms and badge_id:
-            try:
-                await brightspace_lms.push_badge_award(
-                    evoke_user_id=user_id,
-                    badge_id=badge_id[0],
-                    campaign_id=campaign_id,
-                    criteria="Completed mission (team evidence + reflection)",
-                    evidence=f"Mission ID: {mission_id}"
-                )
-                logger.info(f"Badge synced to Brightspace for user {user_id}")
-            except Exception as e:
-                logger.error(f"Badge sync failed: {e}")
 
     # Publish AwardGranted event
     await publish_event("AwardGranted", {
@@ -1512,6 +1754,21 @@ async def submit_evidence(
 
         # Store file in MinIO
         file_bytes = await file.read()
+
+        # The team's shared product is the one file the AI Coach worker
+        # actually reads (evoke/workers.py's PdfReader(...) on
+        # EvidenceSubmitted/TeamEvidenceSubmitted) -- a non-PDF used to sail
+        # through here, then fail silently downstream with a broken
+        # "Error parsing document" string sent to learners as if it were
+        # real AI feedback (confirmed live). Reject it here instead, where
+        # the uploader gets an actual error message. individual_task files
+        # are never AI-parsed, so they aren't restricted.
+        if kind == "team_product":
+            try:
+                PdfReader(BytesIO(file_bytes))
+            except PdfReadError:
+                raise HTTPException(status_code=400, detail="Your team's shared product must be a PDF")
+
         content_hash = hashlib.sha256(file_bytes).hexdigest()
         object_key = f"evoke-evidence/{mission_id}/{kind}/{user_id}_{file.filename}"
         s3_client.put_object(
@@ -1534,81 +1791,13 @@ async def submit_evidence(
         if kind == "individual_task":
             return {"status": "success", "submission_id": submission_id, "kind": kind}
 
-        # Sync to Brightspace if adapter available
-        if brightspace_lms:
-            try:
-                bs_id = await brightspace_lms.submit_assignment(
-                    evoke_user_id=user_id,
-                    mission_id=mission_id,
-                    file_name=file.filename,
-                    file_content=file_bytes,
-                    submission_id=submission_id
-                )
-                if bs_id:
-                    logger.info(f"Submission synced to Brightspace: {bs_id}")
-            except Exception as e:
-                logger.error(f"Brightspace sync failed: {e}")
-                # Continue anyway - submission stored locally
-        else:
-            # Fallback: use simulator for demo. This used to always post to
-            # the sim's "m1" dropbox regardless of which mission was actually
-            # submitted, and sent a JSON body to an endpoint that only
-            # accepts form fields (submit_to_dropbox's Form(...) params) --
-            # meaning this call has always 422'd and been silently swallowed
-            # by the except below. Fixed: resolve the mission's real
-            # lms_assignment_ref and post as form data with the field names
-            # the sim endpoint actually expects.
-            mission_ref = db_fetch_one(
-                "SELECT lms_assignment_ref FROM missions WHERE id = %s::uuid", (mission_id,)
-            )
-            assignment_ref = mission_ref[0] if mission_ref and mission_ref[0] else mission_id
-
-            # The sim's dropbox just stores whatever 'user_id' string it's
-            # given, without validating it -- so passing EVOKE's own UUID
-            # (as this used to) "worked" for storing the submission, but
-            # broke the round trip: grading later echoes that same value
-            # back as UserId, and the grading webhook needs a real
-            # Brightspace-native numeric ID to resolve back to an EVOKE
-            # user via evoke_identities. Resolve it here instead.
-            bs_identity = db_fetch_one(
-                "SELECT brightspace_user_id FROM evoke_identities WHERE user_id = %s::uuid", (user_id,)
-            )
-            brightspace_user_id = bs_identity[0] if bs_identity and bs_identity[0] else None
-
-            if brightspace_user_id is not None:
-                async with httpx.AsyncClient() as client:
-                    try:
-                        # The sim's dropbox endpoint requires a real bearer
-                        # token (previously this call sent none at all and
-                        # would have 401'd even after fixing the encoding
-                        # above). This pass doesn't model true per-learner
-                        # OAuth for the demo/sim path -- acquiring a token via
-                        # the sim's own login as a fixed service identity,
-                        # since the sim accepts any password for its seeded
-                        # users (matching how a real integration would use a
-                        # service account, not a per-learner login, for
-                        # server-to-server calls).
-                        token_response = await client.post(
-                            f"{BRIGHTSPACE_SIM_URL}/oauth2/token",
-                            data={"grant_type": "password", "username": "teacher@evoke.local", "password": "sim-demo"}
-                        )
-                        sim_token = token_response.json().get("access_token") if token_response.status_code == 200 else None
-
-                        if sim_token:
-                            await client.post(
-                                f"{BRIGHTSPACE_SIM_URL}/d2l/api/lp/1.96/dropbox/{assignment_ref}/submissions",
-                                data={
-                                    "user_id": str(brightspace_user_id),
-                                    "file_name": file.filename,
-                                    "file_content": object_key
-                                },
-                                headers={"Authorization": f"Bearer {sim_token}"}
-                            )
-                    except Exception as e:
-                        logger.warning(f"Simulator sync failed (non-blocking): {e}")
-            else:
-                logger.info(f"No Brightspace identity linked for {user_id}; skipping sim dropbox sync")
-
+        # Brightspace sync (real adapter or simulator fallback) is no longer
+        # inline here -- it used to be a live network round-trip blocking
+        # this request's response. It's now event-based: the
+        # TeamEvidenceSubmitted publish just below is consumed by
+        # workers.py's BRIGHTSPACE SUBMISSION WORKER, which does the exact
+        # same real/simulator push this block used to do, off the request
+        # path. See BRIGHTSPACE.md.
         team_members = _team_member_ids(team_id)
 
         # Publish TeamEvidenceSubmitted (fans out AI-coach feedback to every
@@ -2226,6 +2415,111 @@ async def get_achievements(user_id: str = Depends(require_self)):
         raise HTTPException(status_code=400, detail=str(e))
 
 
+# ========== Test/debug: anonymous student report ==========
+# Deliberately unauthenticated -- a shareable read-only report for one
+# provided user_id, not gated behind require_self/get_current_user like
+# every other route in this file. Same tradeoff as the pre-existing
+# static/test-brightspace.html harness (its own backend routes are gone,
+# see the comment above admin_link_brightspace_assignment's block), just a
+# new instance of it: real grade/feedback/XP/Powers data for a real,
+# specific student, visible to anyone who has this exact URL. Requested as
+# a "vanilla test page," not part of the authenticated product surface --
+# do not link this from anywhere a real student would find it.
+@app.get("/api/test/students")
+async def test_list_students():
+    """Backs the report page's user picker -- every learner, not just the
+    one currently in a browser session, since this page is meant to be
+    usable for any student without needing their session cookie. Same
+    no-auth tradeoff as the report endpoint below; deliberately excludes
+    role='admin' rows (e.g. admin@evoke.local) since those aren't real
+    students and have no missions/grades to show."""
+    rows = db_fetch_all(
+        "SELECT id, display_name, email FROM users WHERE role = 'learner' ORDER BY display_name"
+    )
+    return {"students": [{"id": str(r[0]), "display_name": r[1], "email": r[2]} for r in rows]}
+
+
+@app.get("/api/test/student-report/{user_id}")
+async def test_student_report(user_id: str):
+    user_row = db_fetch_one("SELECT display_name, email FROM users WHERE id = %s::uuid", (user_id,))
+    if not user_row:
+        raise HTTPException(status_code=404, detail="No such user")
+    display_name, email = user_row
+
+    org_result = db_fetch_one(
+        "SELECT o.active_campaign_id FROM organizations o JOIN users u ON u.org_id = o.id WHERE u.id = %s::uuid",
+        (user_id,)
+    )
+    campaign_id = org_result[0] if org_result else None
+
+    try:
+        profile = os_client.get(index="player-profile", id=user_id)["_source"]
+    except Exception:
+        profile = {"xp": 0, "level": 1, "badges": {}}
+
+    team_id = _get_user_team(user_id)
+
+    missions = []
+    if campaign_id:
+        rows = db_fetch_all(
+            """SELECT id, title, week, arc, superpower FROM missions
+               WHERE campaign_id = %s::uuid ORDER BY week, sequence""",
+            (campaign_id,)
+        )
+        for mission_id, title, week, arc, superpower in rows:
+            grade_row = db_fetch_one(
+                """SELECT status, grade, feedback, graded_at, submitted_at FROM submissions
+                   WHERE team_id = %s::uuid AND mission_id = %s::uuid AND kind = 'team_product'
+                   ORDER BY submitted_at DESC LIMIT 1""",
+                (team_id, mission_id)
+            ) if team_id else None
+            reflection_row = db_fetch_one(
+                "SELECT reflection, submitted_at FROM mission_reflections WHERE user_id = %s::uuid AND mission_id = %s::uuid",
+                (user_id, mission_id)
+            )
+            missions.append({
+                "id": str(mission_id),
+                "title": title,
+                "week": week,
+                "arc": arc,
+                "superpower": superpower,
+                "submission_status": grade_row[0] if grade_row else "not_started",
+                "grade": grade_row[1] if grade_row else None,
+                "feedback": grade_row[2] if grade_row else None,
+                "graded_at": grade_row[3].isoformat() if grade_row and grade_row[3] else None,
+                "submitted_at": grade_row[4].isoformat() if grade_row and grade_row[4] else None,
+                "reflection": reflection_row[0] if reflection_row else None,
+                "reflected_at": reflection_row[1].isoformat() if reflection_row and reflection_row[1] else None,
+            })
+
+    badges = profile.get("badges", {})
+    powers = {}
+    for power_key, (quality, definition) in skills_framework.POWERS.items():
+        earned_state = badges.get(quality, {}).get("powers", {}).get(power_key)
+        powers[power_key] = {
+            "quality": quality,
+            "definition": definition,
+            "earned": bool(earned_state and earned_state.get("earned")),
+        }
+    qualities = {
+        quality: {"earned": bool(badges.get(quality, {}).get("earned")),
+                  "powers_earned": badges.get(quality, {}).get("progress", 0), "powers_total": 4}
+        for quality in skills_framework.QUALITIES
+    }
+
+    return {
+        "user_id": user_id,
+        "display_name": display_name,
+        "email": email,
+        "xp": profile.get("xp", 0),
+        "level": profile.get("level", 1),
+        "rank_title": progression.level_title(profile.get("level", 1)),
+        "qualities": qualities,
+        "powers": powers,
+        "missions": missions,
+    }
+
+
 @app.get("/api/profile/team/{team_id}")
 async def get_team_profile(team_id: str):
     """Team profile. Aggregated from members' individual events (missions
@@ -2337,19 +2631,42 @@ async def get_submission(mission_id: str, user_id: str = Depends(require_self)):
     submitted. Feeds the Vault retrospective screen, which needed a way to
     show what the learner actually wrote, not just the timeline's
     system-generated insights. Reflections are personal (mission_reflections)
-    even though the evidence file itself is team-owned (submissions)."""
+    even though the evidence file itself is team-owned (submissions).
+
+    Also carries the team's grade/feedback, once it exists: confirmed live
+    (2026-07-20) that admin_sync_grades correctly writes grade/feedback/
+    status='graded' onto the team_product submission row, but until now
+    nothing anywhere read those columns back out -- a real student had a
+    real 100% sitting in Postgres with no way to ever see it. This is the
+    minimal fix: surface the team's latest team_product row alongside the
+    existing reflection payload."""
     row = db_fetch_one(
         """SELECT reflection, submitted_at FROM mission_reflections
            WHERE user_id = %s::uuid AND mission_id = %s::uuid""",
         (user_id, mission_id)
     )
+    team_id = _get_user_team(user_id)
+    grade_row = db_fetch_one(
+        """SELECT status, grade, feedback, graded_at FROM submissions
+           WHERE team_id = %s::uuid AND mission_id = %s::uuid AND kind = 'team_product'
+           ORDER BY submitted_at DESC LIMIT 1""",
+        (team_id, mission_id)
+    ) if team_id else None
+    grading = {
+        "status": grade_row[0] if grade_row else None,
+        "grade": grade_row[1] if grade_row else None,
+        "feedback": grade_row[2] if grade_row else None,
+        "graded_at": grade_row[3].isoformat() if grade_row and grade_row[3] else None,
+    } if grade_row else None
+
     if not row:
-        return {"submitted": False}
+        return {"submitted": False, "grading": grading}
     return {
         "submitted": True,
         "reflection": row[0],
         "submitted_at": row[1].isoformat() if row[1] else None,
         "status": "submitted",
+        "grading": grading,
     }
 
 
@@ -3136,26 +3453,9 @@ async def admin_cohort(user_id: str = Depends(get_current_admin)):
 # the rest of /api/admin (see admin_cohort's note) -- not introducing a new,
 # inconsistent auth model just for these.
 
-async def _fetch_classlist():
-    """Real adapter in production mode; the simulator's own classlist call
-    (same service-account-token pattern submit_evidence's fallback already
-    uses) when brightspace_lms is None."""
-    if brightspace_lms:
-        return await brightspace_lms.get_classlist()
-    async with httpx.AsyncClient() as client:
-        token_response = await client.post(
-            f"{BRIGHTSPACE_SIM_URL}/oauth2/token",
-            data={"grant_type": "password", "username": "teacher@evoke.local", "password": "sim-demo"}
-        )
-        sim_token = token_response.json().get("access_token") if token_response.status_code == 200 else None
-        if not sim_token:
-            return None
-        resp = await client.get(
-            f"{BRIGHTSPACE_SIM_URL}/d2l/api/le/1.x/1/classlist/",
-            headers={"Authorization": f"Bearer {sim_token}"}
-        )
-        return resp.json() if resp.status_code == 200 else None
-
+# _fetch_classlist() used to live here -- dead code with no callers even
+# before this pass, and superseded anyway by GET /api/admin/brightspace/roster
+# (the real classlist pull via the shared service connection).
 
 # Manual roster-import (/api/admin/roster*), team CRUD (/api/admin/teams*),
 # and playtest-user provisioning used to live here. Removed: Brightspace is
@@ -3378,23 +3678,29 @@ async def get_daily_objectives(user_id: str = Depends(require_self)):
 
 # ========== Phone pairing (BUILD_PLAN_2 §7) ==========
 @app.post("/api/companion/pair")
-async def companion_pair(token: str = Form(...)):
+async def companion_pair(response: Response, token: str = Form(...)):
     """Exchange a one-time QR pairing token (minted by the QR endpoint for
     the logged-in web user) for that user's identity — the phone is
-    registered without a login. Single-use, 10-minute expiry."""
+    registered without a login. Single-use, 10-minute expiry.
+
+    The token itself is the verified identity source here (server-minted,
+    single-use, short-lived, tied to one user_id at mint time) — same trust
+    tier as an OAuth callback code — so this is one of the few places
+    outside auth_session.py allowed to call issue_session directly."""
     row = db_fetch_one(
-        """SELECT p.user_id, u.display_name, u.email, p.used_at, p.created_at
+        """SELECT p.user_id, u.display_name, u.email, u.role, p.used_at, p.created_at
            FROM pairing_tokens p JOIN users u ON u.id = p.user_id WHERE p.token = %s::uuid""",
         (token,)
     )
     if not row:
         raise HTTPException(status_code=404, detail="Unknown pairing code — rescan from the Hub")
-    user_id, display_name, email, used_at, created_at = row
+    user_id, display_name, email, role, used_at, created_at = row
     if used_at is not None:
         raise HTTPException(status_code=410, detail="That QR was already used — rescan a fresh one from the Hub")
     if (datetime.datetime.now() - created_at).total_seconds() > 600:
         raise HTTPException(status_code=410, detail="That QR expired — rescan a fresh one from the Hub")
     db_execute("UPDATE pairing_tokens SET used_at = CURRENT_TIMESTAMP WHERE token = %s::uuid", (token,))
+    issue_session(response, str(user_id), role=role or "learner")
     return {"user_id": str(user_id), "display_name": display_name, "email": email}
 
 
@@ -3691,6 +3997,19 @@ async def equip_gear(user_id: str = Depends(require_self), keys: str = Form(...)
 # and 2's Dockerfile fix for the package-import issue introduced this
 # regression without anyone noticing until the SPA was actually loaded).
 _static_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "static")
+
+# Evoke Admin's own small static bundle (login form + mission sync/edit
+# dashboard, see static/admin/admin.js) -- a separate page from the
+# learner-facing SPA, not a route inside it, so it never touches
+# controller.js's Brightspace-gated boot path. Signs in via
+# POST /api/admin/login, independent of AUTH_PROVIDER entirely. Must be
+# mounted before the root "/" mount below -- Starlette matches mounts in
+# registration order, and a "/" mount matches every path, so it would
+# swallow "/admin/*" requests if it were registered first.
+_admin_static_dir = os.path.join(_static_dir, "admin")
+if os.path.exists(_admin_static_dir):
+    app.mount("/admin", StaticFiles(directory=_admin_static_dir, html=True), name="admin-static")
+
 if os.path.exists(_static_dir):
     app.mount("/", StaticFiles(directory=_static_dir, html=True), name="static")
 

@@ -113,9 +113,16 @@ class BrightspaceOAuthProvider(AuthProvider):
                 raise OAuthLoginError(
                     f"Brightspace token exchange failed: {token_resp.status_code} {token_resp.text}"
                 )
-            access_token = token_resp.json().get("access_token")
+            token_data = token_resp.json()
+            access_token = token_data.get("access_token")
             if not access_token:
                 raise OAuthLoginError("Brightspace token response had no access_token")
+            # Refresh tokens are enabled on the registered app -- capturing
+            # these is what lets a connection (student or the admin service
+            # connection) keep working indefinitely without anyone
+            # re-authenticating. expires_in is seconds-from-now, per RFC 6749.
+            refresh_token = token_data.get("refresh_token")
+            expires_in = token_data.get("expires_in", 3600)
 
             whoami_resp = await client.get(
                 f"{self.whoami_base}/d2l/api/lp/{self.whoami_version}/users/whoami",
@@ -150,10 +157,49 @@ class BrightspaceOAuthProvider(AuthProvider):
             # BrightspaceLTIProvider._map_lti_roles uses when a launch has none.
             "role": "learner",
             "team_name": team_name,
-            # Test-harness use only (see /api/test/brightspace/* in main.py) --
-            # the production login flow never reads this back out.
+            # Persisted by the caller (evoke_identities for a real student
+            # login, brightspace_service_connection for the admin-connect
+            # flow) so submissions/roster/grade calls keep working via
+            # refresh_token without a human ever logging in again.
             "access_token": access_token,
+            "refresh_token": refresh_token,
+            "expires_in": expires_in,
         }
+
+    async def refresh_access_token(self, refresh_token: str) -> dict:
+        """Exchanges a refresh token for a new access+refresh token pair --
+        RFC 6749's Refresh Token grant. Same token endpoint as the initial
+        exchange. Returns {"access_token", "refresh_token", "expires_in"};
+        raises OAuthLoginError if the refresh token itself is no longer
+        valid (revoked, or the app's refresh-token support was turned off
+        after this token was issued) -- callers should treat that as "the
+        connection needs to be re-established by a human," not retry."""
+        async with httpx.AsyncClient() as client:
+            token_resp = await client.post(
+                self.token_endpoint,
+                data={
+                    "grant_type": "refresh_token",
+                    "refresh_token": refresh_token,
+                    "client_id": self.client_id,
+                    "client_secret": self.client_secret,
+                },
+            )
+            if token_resp.status_code != 200:
+                raise OAuthLoginError(
+                    f"Brightspace token refresh failed: {token_resp.status_code} {token_resp.text}"
+                )
+            token_data = token_resp.json()
+            access_token = token_data.get("access_token")
+            if not access_token:
+                raise OAuthLoginError("Brightspace refresh response had no access_token")
+            return {
+                "access_token": access_token,
+                # D2L's refresh workflow issues a new refresh token alongside
+                # the new access token (single-use, per the docs) -- fall
+                # back to the old one only if the response omits it.
+                "refresh_token": token_data.get("refresh_token", refresh_token),
+                "expires_in": token_data.get("expires_in", 3600),
+            }
 
     async def _resolve_team_name(self, client: httpx.AsyncClient, access_token: str, brightspace_user_id: int):
         """Brightspace's own Groups feature is the source of truth for team
@@ -237,6 +283,95 @@ class BrightspaceOAuthProvider(AuthProvider):
             if resp.status_code not in (200, 201):
                 raise OAuthLoginError(f"Brightspace submission failed: {resp.status_code} {resp.text}")
             return resp.json() if resp.content else {"status": resp.status_code}
+
+    async def submit_dropbox_file(
+        self, access_token: str, folder_id: str, file_name: str, file_bytes: bytes
+    ) -> dict:
+        """Real evidence submission -- generalizes submit_test_file's
+        already-correct multipart/mixed encoding to a real filename/content
+        instead of fixed demo text. Called with the *submitting student's
+        own* access token (see evoke/workers.py's Brightspace Submission
+        Worker), not a shared service connection -- .../mysubmissions/
+        submits as whichever identity's token is used, so this is what
+        makes evidence attribute to the real student in Brightspace's
+        gradebook."""
+        if not self.org_unit_id:
+            raise OAuthLoginError("BRIGHTSPACE_ORG_UNIT_ID not configured")
+        boundary = "EvokeSubmissionBoundary123456"
+        json_part = '{"Text": "Submitted via EVOKE", "Html": null}'
+        body = (
+            f"--{boundary}\r\n"
+            f"Content-Type: application/json\r\n\r\n"
+            f"{json_part}\r\n"
+            f"--{boundary}\r\n"
+            f'Content-Disposition: form-data; name=""; filename="{file_name}"\r\n'
+            f"Content-Type: application/octet-stream\r\n\r\n"
+        ).encode("utf-8") + file_bytes + f"\r\n--{boundary}--\r\n".encode("utf-8")
+
+        async with httpx.AsyncClient() as client:
+            resp = await client.post(
+                f"{self.whoami_base}/d2l/api/le/{self.le_version}/{self.org_unit_id}"
+                f"/dropbox/folders/{folder_id}/submissions/mysubmissions/",
+                content=body,
+                headers={
+                    "Authorization": f"Bearer {access_token}",
+                    "Content-Type": f"multipart/mixed; boundary={boundary}",
+                },
+            )
+            if resp.status_code not in (200, 201):
+                raise OAuthLoginError(f"Brightspace submission failed: {resp.status_code} {resp.text}")
+            return resp.json() if resp.content else {"status": resp.status_code}
+
+    async def list_classlist(self, access_token: str) -> list:
+        """The real course roster. Requires enrollment:orgunit:read, which
+        (per docs.valence.desire2learn.com/res/enroll.html) needs an
+        instructor/TA-level Brightspace account -- a student's token will
+        403 here even though it's fine for dropbox reads. Called with the
+        one shared brightspace_service_connection token, not a per-student
+        one."""
+        if not self.org_unit_id:
+            raise OAuthLoginError("BRIGHTSPACE_ORG_UNIT_ID not configured")
+        async with httpx.AsyncClient() as client:
+            resp = await client.get(
+                f"{self.whoami_base}/d2l/api/le/{self.le_version}/{self.org_unit_id}/classlist/",
+                headers={"Authorization": f"Bearer {access_token}"},
+            )
+            if resp.status_code != 200:
+                raise OAuthLoginError(f"Brightspace classlist lookup failed: {resp.status_code} {resp.text}")
+            return resp.json()
+
+    async def list_grade_values(self, access_token: str, grade_item_id: str) -> list:
+        """Every student's grade value for one Grade Item -- a separate
+        resource from the dropbox folder/assignment itself (a DropboxFolder
+        carries its linked GradeItemId, captured at link time -- see
+        mission_brightspace_mapping.brightspace_grade_item_id). Requires
+        grades:gradevalues:read; same service-connection-token expectation
+        as list_classlist.
+
+        Confirmed live against a real graded submission (2026-07-20): this is
+        a paged Bookmark envelope, `{"Objects": [...], "Next": "<url-or-null>"}`,
+        not a bare list -- the caller previously iterated the raw dict itself,
+        which walked its string keys ("Objects", "Next") instead of the grade
+        rows, throwing AttributeError the first time this ran against real
+        data (see admin_sync_grades in main.py, which unwraps User/GradeValue
+        per item). Follows `Next` here so a roster large enough to paginate
+        doesn't silently lose students past the first page."""
+        if not self.org_unit_id:
+            raise OAuthLoginError("BRIGHTSPACE_ORG_UNIT_ID not configured")
+        objects: list = []
+        url = (
+            f"{self.whoami_base}/d2l/api/le/{self.le_version}/{self.org_unit_id}"
+            f"/grades/{grade_item_id}/values/"
+        )
+        async with httpx.AsyncClient() as client:
+            while url:
+                resp = await client.get(url, headers={"Authorization": f"Bearer {access_token}"})
+                if resp.status_code != 200:
+                    raise OAuthLoginError(f"Brightspace grade values lookup failed: {resp.status_code} {resp.text}")
+                page = resp.json()
+                objects.extend(page.get("Objects") or [])
+                url = page.get("Next") or None
+        return objects
 
 
 _PROVIDERS = {"brightspace": BrightspaceOAuthProvider}

@@ -80,6 +80,12 @@
   .sr-only{position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0,0,0,0);border:0;}
 
   .screen{display:none;flex-direction:column;min-height:100vh;position:relative;}
+  /* Home's `active` class alone would render it immediately on parse --
+     before seedFromBackend's async session check has resolved logged-in
+     vs. logged-out, so a real login would otherwise show a blink of Home
+     underneath the gate. Body keeps this class until that check resolves
+     either way (see controller.js's seedFromBackend). */
+  body.auth-pending .screen.active{display:none;}
   .screen.active{display:flex;}
   .screen::before{content:"";position:absolute;inset:0;pointer-events:none;
     background:radial-gradient(60% 40% at 80% 10%,rgba(0,150,136,0.06),transparent 70%),
@@ -759,7 +765,7 @@
   }
 </style>
 </head>
-<body>
+<body class="auth-pending">
 <!-- Shown only when the backend reports real login is required (AUTH_PROVIDER
      configured) and no session/cached identity exists yet -- see controller.js's
      seedFromBackend/showLoggedOutHome. Hidden by default so a dev-mode clone
@@ -837,7 +843,55 @@
       <p style="font-size:clamp(14px,1.4vw,16px);line-height:1.6;color:var(--teal-100);margin:0 0 14px;">The records were left by the agent before you: Alex. He saw the symptoms. Your mission is to uncover the causes.</p>
       <p style="font-size:clamp(14px,1.4vw,16px);line-height:1.6;color:var(--cyan-200);margin:0;">Review his recovered records, then begin your investigation.</p>
     </div>
-    <div style="display:flex;justify-content:center;"><button class="btn" style="min-width:min(320px,100%);" data-go="novel">Review the Records ▶<span class="key" aria-hidden="true"></span></button></div>
+    <div style="display:flex;justify-content:center;"><button class="btn" id="welcome-continue-btn" style="min-width:min(320px,100%);">Review the Records ▶<span class="key" aria-hidden="true"></span></button></div>
+  </main>
+</section>
+
+<!-- ===== ONBOARDING: B1llBot prologue + two forced-choice taps (Mission 1 only, shown once) ===== -->
+<section class="screen" data-screen="prologue" aria-label="B1llBot — Before You Start">
+  <header class="topbar"><div class="lockup brand-static"></div></header>
+  <main style="flex:1;padding:0 clamp(20px,6vw,80px) clamp(48px,10vh,110px);display:flex;flex-direction:column;justify-content:center;align-items:center;text-align:center;max-width:760px;margin:0 auto;width:100%;">
+    <img src="img/ui/7.png" alt="" aria-hidden="true" style="height:88px;width:auto;margin-bottom:16px;filter:drop-shadow(0 0 20px rgba(0,150,136,0.4));">
+    <p class="hud anim" style="font-size:clamp(11px,1.4vw,13px);margin:0 0 18px;">/// B1LLBOT · UNSCHEDULED TRANSMISSION ///</p>
+    <div class="panel anim" style="padding:clamp(22px,3vw,32px) clamp(24px,3.5vw,44px);margin-bottom:34px;text-align:left;">
+      <p style="font-family:var(--font-body);font-size:clamp(15px,1.6vw,18px);line-height:1.7;color:var(--teal-050);margin:0 0 14px;">psst — yeah, you. Before you start reading, one thing.</p>
+      <p style="font-family:var(--font-body);font-size:clamp(15px,1.6vw,18px);line-height:1.7;color:var(--teal-050);margin:0 0 14px;">This isn't just a story you scroll through and forget. By the end of it, you're going to be building something. A real thing. Some of it happens right here. Some of it happens out there — actual people, actual problems.</p>
+      <p style="font-family:var(--font-body);font-size:clamp(15px,1.6vw,18px);line-height:1.7;color:var(--cyan-200);margin:0;">I'll be around the whole time either way.</p>
+    </div>
+    <button class="btn" id="prologue-continue" style="min-width:min(320px,100%);">Okay. Go read. ▶<span class="key" aria-hidden="true"></span></button>
+  </main>
+</section>
+
+<section class="screen" data-screen="onboard-motive" aria-label="B1llBot — One Question">
+  <header class="topbar"><div class="lockup brand-static"></div></header>
+  <main style="flex:1;padding:0 clamp(20px,6vw,80px) clamp(48px,10vh,110px);display:flex;flex-direction:column;justify-content:center;align-items:center;text-align:center;max-width:640px;margin:0 auto;width:100%;">
+    <img src="img/ui/7.png" alt="" aria-hidden="true" style="height:72px;width:auto;margin-bottom:14px;filter:drop-shadow(0 0 20px rgba(0,150,136,0.4));">
+    <p class="hud" style="font-size:clamp(11px,1.4vw,13px);margin:0 0 16px;">/// B1LLBOT ///</p>
+    <div class="panel" style="padding:clamp(20px,3vw,28px) clamp(22px,3vw,36px);margin-bottom:26px;text-align:left;">
+      <p style="font-family:var(--font-body);font-size:clamp(15px,1.6vw,18px);line-height:1.7;color:var(--teal-050);margin:0 0 10px;">psst — before you head out. One question.</p>
+      <p style="font-family:var(--font-body);font-size:clamp(15px,1.6vw,18px);line-height:1.7;color:var(--cyan-200);margin:0;">No wrong answer, so don't overthink it — why are you actually doing this?</p>
+    </div>
+    <div id="onboard-motive-options" style="display:grid;gap:10px;width:100%;margin-bottom:22px;"></div>
+    <div id="onboard-motive-ack" class="panel" style="padding:16px 22px;margin-bottom:26px;display:none;text-align:left;">
+      <p style="font-family:var(--font-body);font-size:clamp(14px,1.5vw,16px);line-height:1.6;color:var(--teal-100);margin:0;">no wrong reason. Keel needs all of them anyway.</p>
+    </div>
+    <button class="btn" id="onboard-motive-continue" style="min-width:min(320px,100%);display:none;">Continue ▶<span class="key" aria-hidden="true"></span></button>
+  </main>
+</section>
+
+<section class="screen" data-screen="onboard-avatar" aria-label="B1llBot — Choose Your Look">
+  <header class="topbar"><div class="lockup brand-static"></div></header>
+  <main style="flex:1;padding:0 clamp(20px,6vw,80px) clamp(48px,10vh,110px);display:flex;flex-direction:column;justify-content:center;align-items:center;text-align:center;max-width:640px;margin:0 auto;width:100%;">
+    <img src="img/ui/7.png" alt="" aria-hidden="true" style="height:72px;width:auto;margin-bottom:14px;filter:drop-shadow(0 0 20px rgba(0,150,136,0.4));">
+    <p class="hud" style="font-size:clamp(11px,1.4vw,13px);margin:0 0 16px;">/// B1LLBOT ///</p>
+    <div class="panel" style="padding:clamp(20px,3vw,28px) clamp(22px,3vw,36px);margin-bottom:26px;text-align:left;">
+      <p style="font-family:var(--font-body);font-size:clamp(15px,1.6vw,18px);line-height:1.7;color:var(--teal-050);margin:0;">Last thing. How do you want to look while you're doing this?</p>
+    </div>
+    <div id="onboard-avatar-grid" style="display:grid;grid-template-columns:repeat(4,1fr);gap:12px;width:100%;margin-bottom:22px;" role="group" aria-label="Choose an avatar icon"></div>
+    <div id="onboard-avatar-ack" class="panel" style="padding:16px 22px;margin-bottom:26px;display:none;text-align:left;">
+      <p style="font-family:var(--font-body);font-size:clamp(14px,1.5vw,16px);line-height:1.6;color:var(--teal-100);margin:0;">good. That's you now.</p>
+    </div>
+    <button class="btn" id="onboard-avatar-continue" style="min-width:min(320px,100%);display:none;">Start Mission 1 ▶<span class="key" aria-hidden="true"></span></button>
   </main>
 </section>
 
@@ -1527,6 +1581,13 @@
       <span style="display:flex;align-items:center;gap:10px;color:var(--text-muted);font-family:var(--font-body);font-size:14px;"><span class="ms" aria-hidden="true" style="font-size:20px;color:var(--accent-energy,#ffa759);">military_tech</span>Badge Earned</span>
       <span id="recap-badge" style="font-family:var(--font-display);font-weight:700;font-size:14px;color:var(--teal-050);text-align:right;"></span>
     </div>
+    <div id="recap-grading" style="display:none;padding:14px 16px;border-radius:12px;box-shadow:inset 0 0 0 1px var(--border-ui);background:rgba(0,150,136,0.05);margin-bottom:18px;">
+      <div style="display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:8px;">
+        <span style="display:flex;align-items:center;gap:10px;color:var(--text-muted);font-family:var(--font-body);font-size:14px;"><span class="ms" aria-hidden="true" style="font-size:20px;color:var(--cyan-300);">grading</span>Instructor Grade</span>
+        <span id="recap-grade-value" style="font-family:var(--font-display);font-weight:700;font-size:16px;color:var(--teal-050);"></span>
+      </div>
+      <div id="recap-grade-feedback" style="font-family:var(--font-body);font-size:14px;line-height:1.55;color:var(--teal-100);"></div>
+    </div>
     <div style="display:flex;gap:12px;flex-wrap:wrap;">
       <button id="recap-reread" class="btn sec" type="button" style="flex:1;min-width:150px;height:50px;"><span class="ms" aria-hidden="true" style="font-size:18px;">auto_stories</span>Re-read Story</button>
       <button id="recap-close" class="btn" type="button" style="flex:1;min-width:150px;height:50px;">Close</button>
@@ -1558,6 +1619,6 @@
 
   <script src="submission-missions.js?b=4"></script>
   <script src="content.js?b=4"></script>
-  <script src="controller.js?b=32"></script>
+  <script src="controller.js?b=36"></script>
 </body>
 </html>

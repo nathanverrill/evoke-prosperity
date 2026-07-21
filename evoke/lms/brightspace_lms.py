@@ -12,14 +12,57 @@ Based on Brightspace API v1.96 (LP) and v1.62 (BAS)
 """
 
 import asyncio
+import base64
+import json
 import logging
 import os
+import uuid
 from datetime import datetime, timedelta
 from typing import Optional, Dict, Any
 import httpx
 import asyncpg
+import jwt as pyjwt
+from cryptography.hazmat.primitives import serialization
 
 logger = logging.getLogger(__name__)
+
+# kid for the one RSA key EVOKE signs client_credentials JWT assertions with.
+# Fixed rather than derived, since the JWKS route and the signer must agree on
+# it and there's only ever one active key.
+SERVICE_JWT_KID = "evoke-service-1"
+
+
+def _load_service_private_key():
+    """Loads the RSA private key used to sign Brightspace client_credentials
+    JWT assertions, from BRIGHTSPACE_SERVICE_PRIVATE_KEY_B64 (base64 PEM, an
+    env var rather than a file so it's never baked into the Docker image --
+    see the Dockerfile's COPY . ./evoke/ and the .dockerignore fix alongside
+    this). Returns None if unconfigured, same "not configured" convention
+    get_brightspace_lms() already uses for its other required env vars.
+    """
+    b64 = os.getenv("BRIGHTSPACE_SERVICE_PRIVATE_KEY_B64")
+    if not b64:
+        return None
+    pem_bytes = base64.b64decode(b64)
+    return serialization.load_pem_private_key(pem_bytes, password=None)
+
+
+def get_service_jwks() -> Dict[str, Any]:
+    """Public JWKS for the key above -- served at /.well-known/jwks.json so
+    Brightspace's Trusted-application client_credentials flow can verify the
+    JWT assertion get_service_account_token() signs. Empty keyset if the
+    private key isn't configured, rather than erroring: the route should
+    still respond (just with nothing to verify against) before setup.
+    """
+    private_key = _load_service_private_key()
+    if private_key is None:
+        return {"keys": []}
+    public_key = private_key.public_key()
+    jwk = json.loads(pyjwt.algorithms.RSAAlgorithm(pyjwt.algorithms.RSAAlgorithm.SHA256).to_jwk(public_key))
+    jwk["kid"] = SERVICE_JWT_KID
+    jwk["use"] = "sig"
+    jwk["alg"] = "RS256"
+    return {"keys": [jwk]}
 
 
 class BrightspaceLMS:
@@ -59,7 +102,17 @@ class BrightspaceLMS:
 
     async def get_service_account_token(self) -> str:
         """
-        OAuth 2.0 client credentials flow for server-to-server auth.
+        OAuth 2.0 client credentials flow for server-to-server auth, using a
+        signed JWT client assertion (RFC 7523) rather than a plain client
+        secret. Confirmed live against the real tenant: posting
+        client_id/client_secret to this endpoint returns
+        {"error":"invalid_request","error_description":"Missing
+        \"client_assertion\" parameter"} -- the Trusted application Brightspace
+        registers for server-to-server auth requires this, it isn't optional.
+        (docs.valence.desire2learn.com/basic/oauth2.html; the app_secret this
+        class was constructed with is unused for this grant -- trust is
+        established by Brightspace fetching our public key from
+        /.well-known/jwks.json, not a shared secret.)
 
         This retrieves a service account token to make API calls on behalf
         of the EVOKE application (not a specific user).
@@ -73,13 +126,42 @@ class BrightspaceLMS:
         if self.access_token and datetime.now() < self.token_expires_at:
             return self.access_token
 
-        logger.debug(f"Requesting service account token from {self.tenant_url}")
+        private_key = _load_service_private_key()
+        if private_key is None:
+            raise RuntimeError(
+                "BRIGHTSPACE_SERVICE_PRIVATE_KEY_B64 not configured -- "
+                "required to sign the client_credentials JWT assertion"
+            )
 
-        token_url = f"{self.tenant_url}/oauth2/token"
+        # Central Brightspace Auth Service token endpoint, NOT tenant-scoped
+        # -- the previous f"{self.tenant_url}/oauth2/token" doesn't exist on
+        # any tenant and 302-redirected to a 404 error page. Same endpoint
+        # already correctly used by the OAuth login flow's
+        # BRIGHTSPACE_OAUTH_TOKEN_URL.
+        token_url = "https://auth.brightspace.com/core/connect/token"
+
+        logger.debug(f"Requesting service account token from {token_url}")
+
+        now = int(datetime.now().timestamp())
+        assertion = pyjwt.encode(
+            {
+                "iss": self.app_key,
+                "sub": self.app_key,
+                "aud": token_url,
+                "iat": now,
+                "exp": now + 300,
+                "jti": str(uuid.uuid4()),
+            },
+            private_key,
+            algorithm="RS256",
+            headers={"kid": SERVICE_JWT_KID},
+        )
+
         payload = {
             "client_id": self.app_key,
-            "client_secret": self.app_secret,
             "grant_type": "client_credentials",
+            "client_assertion_type": "urn:ietf:params:oauth:client-assertion-type:jwt-bearer",
+            "client_assertion": assertion,
             "scope": "awards:_:_ courses:_:_",
         }
 
@@ -133,6 +215,8 @@ class BrightspaceLMS:
         file_name: str,
         file_content: bytes,
         submission_id: str = None,
+        brightspace_user_id: Optional[int] = None,
+        brightspace_assignment_id: Optional[str] = None,
     ) -> Optional[str]:
         """
         Submit evidence/file to Brightspace dropbox (assignment).
@@ -145,16 +229,24 @@ class BrightspaceLMS:
             file_name: Name of uploaded file
             file_content: File bytes
             submission_id: EVOKE submission ID for tracking
+            brightspace_user_id: Pre-resolved Brightspace user ID -- skips
+                get_brightspace_user_id's own (asyncpg) lookup when the
+                caller already has it. The BRIGHTSPACE SUBMISSION WORKER
+                (evoke/workers.py) runs off a sync psycopg2 pool, not
+                asyncpg, so it resolves this itself and passes it in rather
+                than this class needing two different DB clients.
+            brightspace_assignment_id: Same idea for _get_assignment_id's
+                lookup.
 
         Returns:
             Brightspace submission ID or None if failed
         """
-        bs_user_id = await self.get_brightspace_user_id(evoke_user_id)
+        bs_user_id = brightspace_user_id or await self.get_brightspace_user_id(evoke_user_id)
         if not bs_user_id:
             logger.warning(f"Cannot submit: no Brightspace ID for user {evoke_user_id}")
             return None
 
-        assignment_id = await self._get_assignment_id(mission_id)
+        assignment_id = brightspace_assignment_id or await self._get_assignment_id(mission_id)
         if not assignment_id:
             logger.warning(f"Cannot submit: no assignment ID for mission {mission_id}")
             return None

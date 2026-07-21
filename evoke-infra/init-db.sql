@@ -209,7 +209,32 @@ CREATE TABLE evoke_identities (
     minecraft_username VARCHAR(16),
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    -- This student's own real Brightspace OAuth tokens, captured at login --
+    -- submissions push to Brightspace's dropbox as this student (not a
+    -- shared service account), so evidence attributes to them in the real
+    -- gradebook. access_token alone goes stale in ~1h; refresh_token (the
+    -- registered app has refresh tokens enabled) lets the submission worker
+    -- mint a fresh one on demand without the student re-logging in.
+    brightspace_access_token TEXT,
+    brightspace_refresh_token TEXT,
+    brightspace_token_expires_at TIMESTAMP,
     UNIQUE(user_id, brightspace_user_id)
+);
+
+-- The one shared Brightspace connection for course-wide admin operations
+-- (roster, assignment pull, grade reads) -- established once by whoever
+-- clicks "Connect Brightspace" in /admin (needs to be an instructor/TA
+-- account for roster pulls specifically; dropbox reads/writes work even at
+-- student level). Always exactly one row -- refreshed indefinitely via
+-- brightspace_refresh_token rather than requiring a human to reconnect.
+CREATE TABLE brightspace_service_connection (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    brightspace_user_id INTEGER,
+    access_token TEXT NOT NULL,
+    refresh_token TEXT,
+    expires_at TIMESTAMP NOT NULL,
+    connected_by_admin_id UUID REFERENCES users(id),
+    connected_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
 -- Submissions (for tracking LMS assignment submissions)
@@ -258,13 +283,25 @@ CREATE TABLE badge_brightspace_mapping (
     UNIQUE(badge_id, campaign_id)
 );
 
--- Mission to Brightspace Assignment mapping
+-- Mission to Brightspace Assignment mapping. True 1:1 in both directions:
+-- UNIQUE(mission_id, campaign_id) stops one mission from having two mapping
+-- rows; UNIQUE(campaign_id, brightspace_assignment_id) stops two different
+-- missions from both claiming the same Brightspace assignment -- one Evoke
+-- mission is the container for exactly one Brightspace assignment (see
+-- evoke/main.py's admin_link_brightspace_assignment).
 CREATE TABLE mission_brightspace_mapping (
     mission_id UUID NOT NULL REFERENCES missions(id),
     brightspace_assignment_id VARCHAR(50) NOT NULL,
     campaign_id UUID NOT NULL REFERENCES campaigns(id),
+    -- The DropboxFolder's own GradeItemId (a separate resource from the
+    -- folder/assignment itself) -- captured at link time from the
+    -- assignments pull, since reading a grade needs this ID, not the
+    -- assignment ID (GET .../grades/{gradeItemId}/values/...). Null until
+    -- the linked assignment actually has a grade item attached in Brightspace.
+    brightspace_grade_item_id VARCHAR(50),
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    UNIQUE(mission_id, campaign_id)
+    UNIQUE(mission_id, campaign_id),
+    UNIQUE(campaign_id, brightspace_assignment_id)
 );
 
 -- Web Check-Ins (a reason to open the Operations Hub between missions --
