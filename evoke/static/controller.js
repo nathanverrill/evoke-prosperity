@@ -702,7 +702,7 @@
       dots.innerHTML='';
       if(multi){ for(var d=0;d<spreads.length;d++){ dots.appendChild(el('<span style="width:8px;height:8px;border-radius:50%;background:'+(d===spreadIdx?'var(--cyan-300)':'rgba(145,209,209,0.25)')+';box-shadow:'+(d===spreadIdx?'0 0 8px var(--cyan-300)':'none')+';"></span>')); } }
       var last = spreadIdx===spreads.length-1;
-      cont.innerHTML = last ? ((sessionReturn?'Back to Vault':'Continue to Mission Control')+' \u25b6<span class="key" aria-hidden="true"></span>') : 'Next \u25b6';
+      cont.innerHTML = last ? ((sessionReturn==='vault'?'Back to Vault':'Continue to Mission Control')+' \u25b6<span class="key" aria-hidden="true"></span>') : 'Next \u25b6';
       backBtn.textContent = spreadIdx===0 ? '\u25c0 Back' : '\u25c0 Prev';
       book.classList.remove('anim'); void book.offsetWidth; book.classList.add('anim');
     }
@@ -716,7 +716,7 @@
       }
       ph.style.display='';
       counter.textContent=''; dots.innerHTML='';
-      cont.innerHTML=(sessionReturn?'Back to Vault':'Continue to Mission Control')+' \u25b6<span class="key" aria-hidden="true"></span>';
+      cont.innerHTML=(sessionReturn==='vault'?'Back to Vault':'Continue to Mission Control')+' \u25b6<span class="key" aria-hidden="true"></span>';
       backBtn.textContent='\u25c0 Back';
     }
     renderNovel=function(){
@@ -769,10 +769,16 @@
     renderNovel();
   })();
 
-  /* ---- onboarding: B1llBot prologue + two forced-choice taps, Mission 1 only ----
+  /* ---- onboarding: B1llBot prologue, Mission 1 only ----
      Shown exactly once per browser (evoke-onboarding-seen), same localStorage-gate
      pattern as the Ops Hub guide (evoke-ops-guide-seen). Sequence: welcome ->
-     prologue -> novel (Chapter 1) -> onboard-motive -> onboard-avatar -> assignment.
+     prologue -> novel (Chapter 1) -> assignment. The forced-choice "motive" tap
+     and the avatar-icon picker that used to sit between novel and assignment were
+     removed (2026-07-21) -- motive was pure flavor, never read anywhere after
+     being stored; the avatar picker set the exact same localStorage key
+     ('evoke-avatar') the Profile screen's own picker already sets, with the same
+     safe 'person' default when unset, so removing the forced upfront step loses
+     no capability -- an agent can still set an avatar at any time from Profile.
      A returning user (or anyone re-reading Chapter 1 later, e.g. from Vault) skips
      straight to novel/missions as before -- this only intercepts the very first
      "Review the Records" click on Mission 1's welcome screen. */
@@ -786,60 +792,9 @@
     });
 
     document.getElementById('prologue-continue').addEventListener('click', function(){
-      novelReturn='onboard-motive';
-      go('novel');
-    });
-
-    // Screen 3 (redefined): a single forced-choice question about the player's
-    // own motivation -- replaces the script's original "One Truck" water/finance
-    // dilemma. No option is ever treated as fact about the player later (same
-    // design rule the original dilemma followed) -- stored only as flavor.
-    var MOTIVE_OPTIONS = [
-      { key:'volunteer', label:'Because somebody needs to fix this.' },
-      { key:'business',  label:'Because there’s real money to be made here.' },
-      { key:'later',     label:'Because it’ll matter later, even if not today.' },
-      { key:'unsure',     label:'Honestly? Not sure yet.' }
-    ];
-    (function(){
-      var wrap=document.getElementById('onboard-motive-options');
-      MOTIVE_OPTIONS.forEach(function(opt){
-        var b=el('<button type="button" class="btn" style="text-align:left;">'+opt.label+'</button>');
-        b.addEventListener('click', function(){
-          try{ localStorage.setItem('evoke-onboard-motive', opt.key); }catch(e){}
-          wrap.querySelectorAll('button').forEach(function(x){ x.disabled=true; x.style.opacity = x===b ? '1' : '0.45'; });
-          document.getElementById('onboard-motive-ack').style.display='block';
-          document.getElementById('onboard-motive-continue').style.display='inline-flex';
-        });
-        wrap.appendChild(b);
-      });
-    })();
-    document.getElementById('onboard-motive-continue').addEventListener('click', function(){
-      go('onboard-avatar');
-    });
-
-    // Screen 4 (redefined): pick an avatar icon -- same icon set + localStorage
-    // key ('evoke-avatar') the Profile screen's own picker uses, so this is the
-    // real avatar, not a separate onboarding-only choice. Kept in sync by hand
-    // with PF_AVATARS in the agent-profile block above -- update both if either
-    // changes.
-    var ONBOARD_AVATARS=['person','smart_toy','rocket_launch','bolt','shield','military_tech','psychology','water_drop'];
-    (function(){
-      var grid=document.getElementById('onboard-avatar-grid');
-      ONBOARD_AVATARS.forEach(function(ic){
-        var b=el('<button type="button" aria-label="Avatar '+ic+'" style="aspect-ratio:1;border-radius:16px;background:rgba(0,150,136,0.08);border:1px solid var(--line-soft, rgba(0,150,136,0.3));display:flex;align-items:center;justify-content:center;"><span class="ms" aria-hidden="true" style="font-size:30px;color:var(--cyan-300);">'+ic+'</span></button>');
-        b.addEventListener('click', function(){
-          try{ localStorage.removeItem('evoke-avatar-photo'); localStorage.setItem('evoke-avatar', ic); }catch(e){}
-          grid.querySelectorAll('button').forEach(function(x){ x.style.opacity = x===b ? '1' : '0.45'; x.style.borderColor = x===b ? 'var(--cyan-300)' : ''; });
-          document.getElementById('onboard-avatar-ack').style.display='block';
-          document.getElementById('onboard-avatar-continue').style.display='inline-flex';
-        });
-        grid.appendChild(b);
-      });
-    })();
-    document.getElementById('onboard-avatar-continue').addEventListener('click', function(){
       markSeen();
-      if(window.renderProfile2) window.renderProfile2();
-      go('assignment');
+      novelReturn='assignment';
+      go('novel');
     });
   })();
 
@@ -1847,13 +1802,17 @@
     go('companion');
   } else {
     // Prefer an existing hash (a shared/bookmarked/reloaded link) over
-    // ?screen=, so reloading mid-app doesn't bounce back to Home.
+    // ?screen=, so reloading mid-app doesn't bounce back to Ops Hub.
     // #mission/{n}/{screen} (see parseHash/syncHash) -- the mission number
     // actually drives activeMission here, so a reload or a shared link to
     // e.g. #mission/5/novel really reproduces mission 5's comic, not just
     // whatever's currently in progress.
+    // Default (no hash/query param -- i.e. a fresh login) is Ops Hub, not
+    // Home: that's where the actual mission/evidence/Field Kit work
+    // happens, and the ops-guide orientation modal (below) already exists
+    // specifically to onboard a first-time visitor there.
     var _parsed = parseHash();
-    var _boot = (VALID_SCREENS.indexOf(_parsed.screen) > -1) ? _parsed.screen : (_sp.get('screen') || 'home');
+    var _boot = (VALID_SCREENS.indexOf(_parsed.screen) > -1) ? _parsed.screen : (_sp.get('screen') || 'ops');
     go(_boot, false, _parsed.mission);
   }
   // Native browser Back/Forward: without this, go() only ever changed which
