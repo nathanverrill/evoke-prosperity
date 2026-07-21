@@ -43,23 +43,36 @@ def seed_database(db_url):
             (org_id, 'Demo School', campaign_id, 'brightspace')
         )
 
-        # Two default users, not four -- Player One is the primary
+        # Three default users, not four -- Player One is the primary
         # learner-facing default (what dev-login returns with no params);
-        # Admin is the operator identity, deliberately using the same email
-        # OpenWebUI's admin account uses (see openwebui-bootstrap.py) so
-        # it's recognizably the same person across both systems. There's no
-        # shared password auth between them (evoke's dev-login has no
-        # password concept at all) -- this is identity alignment, not SSO.
+        # Player Two exists so the team-evidence AND-gate
+        # (_complete_mission_for_user in main.py: shared team submission +
+        # EACH member's own reflection) is actually testable locally --
+        # that gate structurally needs two distinct people, and a solo dev
+        # can't simulate a teammate with one account. Admin is the operator
+        # identity, deliberately using the same email OpenWebUI's admin
+        # account uses (see openwebui-bootstrap.py) so it's recognizably the
+        # same person across both systems. There's no shared password auth
+        # between any of these (evoke's dev-login has no password concept at
+        # all) -- this is identity alignment, not SSO.
         player_one_id = uuid.uuid4()
         cur.execute(
             "INSERT INTO users (id, org_id, display_name, email, role) VALUES (%s, %s, %s, %s, %s) ON CONFLICT DO NOTHING",
             (player_one_id, org_id, 'Player One', 'player1@evoke.local', 'learner')
         )
-
-        # Add local auth identity
         cur.execute(
             "INSERT INTO auth_identities (user_id, provider, provider_subject) VALUES (%s, %s, %s) ON CONFLICT DO NOTHING",
             (player_one_id, 'local', 'player1@evoke.local')
+        )
+
+        player_two_id = uuid.uuid4()
+        cur.execute(
+            "INSERT INTO users (id, org_id, display_name, email, role) VALUES (%s, %s, %s, %s, %s) ON CONFLICT DO NOTHING",
+            (player_two_id, org_id, 'Player Two', 'player2@evoke.local', 'learner')
+        )
+        cur.execute(
+            "INSERT INTO auth_identities (user_id, provider, provider_subject) VALUES (%s, %s, %s) ON CONFLICT DO NOTHING",
+            (player_two_id, 'local', 'player2@evoke.local')
         )
 
         admin_id = uuid.uuid4()
@@ -83,6 +96,10 @@ def seed_database(db_url):
         cur.execute(
             "INSERT INTO team_members (team_id, user_id, role_label) VALUES (%s, %s, %s) ON CONFLICT DO NOTHING",
             (team_id, player_one_id, 'Leader')
+        )
+        cur.execute(
+            "INSERT INTO team_members (team_id, user_id, role_label) VALUES (%s, %s, %s) ON CONFLICT DO NOTHING",
+            (team_id, player_two_id, 'Member')
         )
 
         # Create badges (Superpowers)
@@ -229,7 +246,8 @@ def seed_database(db_url):
         print("✓ Database seeded successfully")
         print(f"  - Campaign: evoke-prosperity")
         print(f"  - Organization: Demo School")
-        print(f"  - Player One (learner): {player_one_id}")
+        print(f"  - Player One (learner, Demo Team Leader): {player_one_id}")
+        print(f"  - Player Two (learner, Demo Team Member): {player_two_id}")
         print(f"  - Admin: {admin_id}")
         print(f"  - Missions: synced from the LMS on EVOKE app startup, not seeded here")
         print(f"  - Quests: 16 created")

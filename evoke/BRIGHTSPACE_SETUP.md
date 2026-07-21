@@ -154,6 +154,72 @@ records outside EVOKE's own data.
 
 ---
 
+## Part 5 — Local dev accounts (no Brightspace needed)
+
+For everyday site work, most contributors don't need Brightspace at all —
+see "What actually talks to what" above: a fresh clone leaves
+`AUTH_PROVIDER` blank (`.env.example`'s own default), which keeps
+`quick-start.sh`'s auto-signed-in dev-login behavior instead of requiring
+real OAuth.
+
+**Two seeded accounts, not one** (`evoke-infra/seed.py`, idempotent — safe
+to re-run against an existing database). **Player One** and **Player Two**,
+both on the same "Demo Team". Two accounts exist specifically because the
+team-evidence AND-gate (`_complete_mission_for_user` in `main.py` — shared
+team submission *and* each member's own reflection) structurally needs two
+distinct people; one account can't simulate a teammate. Plus the existing
+**Admin** account (`admin@evoke.local`, `role='admin'`) for `/admin`.
+
+- **Switch which account this browser is using**: visit
+  `/?login=player1@evoke.local` or `/?login=player2@evoke.local` — the
+  SPA's existing playtest magic-link convention (`app.js`'s
+  `ensureLoggedIn`). Whichever one wins is sticky in that browser's
+  `localStorage` until you visit the other `?login=` link.
+- **Default with no `?login=`**: whichever learner row was created first
+  (Player One).
+- `POST /api/dev-login` (and this whole flow) 404s the moment
+  `AUTH_PROVIDER` is set to anything real — this tooling only exists in the
+  no-real-login state, same design as the rest of dev-login.
+
+### Resetting a dev account
+
+Repeated local testing leaves these two accounts holding real progress
+(evidence, XP, badges, chat) that isn't representative of a fresh player
+the next time you want to test onboarding or a mission-completion flow.
+`/admin`'s **Dev Users** card (visible only when `AUTH_PROVIDER` is unset —
+hidden entirely on a real Brightspace-connected deployment) resets one or
+both back to a clean slate:
+
+| Endpoint | What it does |
+|---|---|
+| `GET /api/admin/dev-users` | Both accounts' current state — XP, level, missions completed, submission count |
+| `POST /api/admin/dev-users/{email}/reset` | Wipes one account's progress |
+| `POST /api/admin/dev-users/reset-all` | Both at once — the common case before a team-evidence test run |
+
+**What a reset clears**: submissions, mission reflections, awards,
+notifications, checkins, the billbot chat log, quest completions/
+submissions, minigame scores, plus the two OpenSearch projections that
+accumulate from events rather than recomputing from Postgres
+(`player-profile`'s XP/level/badges, `learner-timeline`). Team-profile (the
+shared team-level XP/badge aggregate) gets rebuilt from whichever
+teammate's data remains, rather than trying to subtract the reset
+account's share from a running total.
+
+**What a reset leaves alone**: team assignment and account identity — no
+need to re-add the account to the Demo Team after every reset. MinIO
+objects referenced by cleared submissions are also left in place
+(orphaned, not deleted) — harmless in local dev, not worth the risk of
+guessing which keys are safe to delete when evidence objects can be shared
+across a team.
+
+**Hard-safelisted by email** (`player1@evoke.local` / `player2@evoke.local`
+only, `DEV_USER_EMAILS` in `main.py`) — the endpoint 400s on any other
+email, so it can never reach a real Brightspace-identified learner's data
+even if called by mistake with a real student's email. Verified live: a
+real learner's identifier 400s, an unauthenticated request 401s.
+
+---
+
 ## Quick diagnostic: submission looks stuck
 
 If a `submissions` row shows `status = 'brightspace_sync_failed'` and the

@@ -66,6 +66,7 @@
     loginScreen.style.display = "none";
     dashboard.style.display = "block";
     loadMissions();
+    loadDevUsersIfDevMode();
   }
 
   document.getElementById("login-form").addEventListener("submit", function (e) {
@@ -209,6 +210,68 @@
         errEl.textContent = "Roster pull failed: " + err.message +
           (err.status === 502 ? " — connected account may not be instructor/TA-level" : "");
       })
+      .then(function () { btn.disabled = false; });
+  });
+
+  // ---------- Dev Users ----------
+  // Only shown when no real login is configured (AUTH_PROVIDER unset) --
+  // these two accounts are a local-dev stand-in for a Brightspace-connected
+  // team, meaningless once a real tenant is wired up, so the card stays
+  // hidden rather than confusing an instructor who has real students.
+  function loadDevUsersIfDevMode() {
+    getJSON("/api/auth/config")
+      .then(function (cfg) {
+        if (cfg.login_required) return;
+        document.getElementById("dev-users-card").style.display = "block";
+        loadDevUsers();
+      })
+      .catch(function () {});
+  }
+
+  function loadDevUsers() {
+    return getJSON("/api/admin/dev-users").then(function (d) {
+      renderDevUsers(d.dev_users || []);
+    });
+  }
+
+  function renderDevUsers(users) {
+    var wrap = document.getElementById("dev-users-wrap");
+    wrap.innerHTML =
+      '<table><thead><tr><th>Account</th><th>Team</th><th>XP / Level</th><th>Missions</th><th>Submissions</th><th></th></tr></thead><tbody>' +
+      users.map(function (u) {
+        if (!u.exists) {
+          return '<tr><td>' + escapeHtml(u.email) + '</td><td colspan="4" class="empty-state">Not seeded yet -- run seed.py</td><td></td></tr>';
+        }
+        return '<tr>' +
+          '<td>' + escapeHtml(u.display_name) + ' <span class="empty-state">(' + escapeHtml(u.email) + ')</span></td>' +
+          '<td>' + escapeHtml(u.team_name || "—") + '</td>' +
+          '<td>' + u.xp + ' XP · Lv ' + u.level + '</td>' +
+          '<td>' + u.missions_completed + '</td>' +
+          '<td>' + u.submissions + '</td>' +
+          '<td><button data-reset-dev-user="' + escapeHtml(u.email) + '">Reset</button></td>' +
+        '</tr>';
+      }).join("") +
+      '</tbody></table>';
+
+    wrap.querySelectorAll("[data-reset-dev-user]").forEach(function (btn) {
+      btn.addEventListener("click", function () {
+        var email = btn.dataset.resetDevUser;
+        if (!confirm('Reset ' + email + '\'s progress? Evidence, reflections, XP, badges, and chat history all clear. Team assignment stays.')) return;
+        btn.disabled = true;
+        postJSON("/api/admin/dev-users/" + encodeURIComponent(email) + "/reset")
+          .then(loadDevUsers)
+          .catch(function (err) { alert("Reset failed: " + err.message); btn.disabled = false; });
+      });
+    });
+  }
+
+  document.getElementById("reset-all-dev-users-btn").addEventListener("click", function () {
+    if (!confirm("Reset both dev accounts' progress? Team assignment stays.")) return;
+    var btn = this;
+    btn.disabled = true;
+    postJSON("/api/admin/dev-users/reset-all")
+      .then(loadDevUsers)
+      .catch(function (err) { alert("Reset failed: " + err.message); })
       .then(function () { btn.disabled = false; });
   });
 

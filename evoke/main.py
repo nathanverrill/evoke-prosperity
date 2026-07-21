@@ -1621,6 +1621,151 @@ async def admin_update_mission(mission_id: str, body: MissionUpdateRequest, admi
         raise HTTPException(status_code=400, detail=str(e))
 
 
+# ========== Admin: Dev User Reset ==========
+# Two seeded local-dev learner accounts (evoke-infra/seed.py) exist so a
+# real Brightspace-connected cohort's shape -- a team of players plus an
+# admin -- is testable without a live tenant: the team-evidence AND-gate
+# (shared submission + each member's own reflection, _complete_mission_for_user
+# below) genuinely needs two distinct people, not one account playing both
+# parts. Hard-safelisted by email so this can never reach a real
+# Brightspace-identified learner's data, even if called with their email by
+# mistake -- these two rows only ever exist because seed.py created them.
+DEV_USER_EMAILS = {"player1@evoke.local", "player2@evoke.local"}
+
+
+def _recompute_team_profile(team_id: str):
+    """team-profile (workers.py's PROFILE WORKER) accumulates XP/badges
+    per-event with no per-member subtraction possible -- there's no "undo
+    this member's contribution" operation on a running total. Rebuilt here
+    from scratch by summing every current member's own player-profile doc
+    instead, which is exactly what the accumulation was supposed to add up
+    to in the first place."""
+    member_rows = db_fetch_all("SELECT user_id FROM team_members WHERE team_id = %s::uuid", (team_id,))
+    xp_total = 0
+    missions_completed = set()
+    quests_completed_count = 0
+    member_badges = {}
+    for (uid,) in member_rows:
+        uid = str(uid)
+        try:
+            profile = os_client.get(index="player-profile", id=uid)["_source"]
+        except Exception:
+            continue
+        xp_total += profile.get("xp", 0)
+        missions_completed.update(profile.get("missions_completed", []))
+        quests_completed_count += len(profile.get("quests_completed", []))
+        earned = {k: True for k, v in profile.get("badges", {}).items() if v.get("earned")}
+        if earned:
+            member_badges[uid] = earned
+    os_client.index(index="team-profile", id=team_id, body={
+        "team_id": team_id, "xp_total": xp_total,
+        "missions_completed": sorted(missions_completed),
+        "quests_completed_count": quests_completed_count,
+        "member_badges": member_badges,
+        "updated_at": datetime.datetime.now().isoformat(),
+    }, refresh=True)
+
+
+@app.get("/api/admin/dev-users")
+async def admin_list_dev_users(admin_id: str = Depends(get_current_admin)):
+    """The two seeded dev accounts, with just enough current state (XP,
+    missions completed, open submissions) for the admin dashboard's Reset
+    button to show what a reset would actually clear."""
+    out = []
+    for email in sorted(DEV_USER_EMAILS):
+        row = db_fetch_one("SELECT id, display_name FROM users WHERE email = %s", (email,))
+        if not row:
+            out.append({"email": email, "exists": False})
+            continue
+        user_id, display_name = str(row[0]), row[1]
+        try:
+            profile = os_client.get(index="player-profile", id=user_id)["_source"]
+        except Exception:
+            profile = {}
+        submission_count = db_fetch_one(
+            "SELECT COUNT(*) FROM submissions WHERE user_id = %s::uuid", (user_id,)
+        )[0]
+        team_row = db_fetch_one(
+            "SELECT t.name FROM team_members tm JOIN teams t ON t.id = tm.team_id WHERE tm.user_id = %s::uuid",
+            (user_id,)
+        )
+        out.append({
+            "email": email, "exists": True, "user_id": user_id, "display_name": display_name,
+            "team_name": team_row[0] if team_row else None,
+            "xp": profile.get("xp", 0), "level": profile.get("level", 1),
+            "missions_completed": len(profile.get("missions_completed", [])),
+            "submissions": submission_count,
+        })
+    return {"dev_users": out}
+
+
+async def _reset_dev_user(email: str) -> dict:
+    if email not in DEV_USER_EMAILS:
+        raise HTTPException(status_code=400, detail=f"Not a resettable dev user: {email}")
+    row = db_fetch_one("SELECT id FROM users WHERE email = %s", (email,))
+    if not row:
+        raise HTTPException(status_code=404, detail=f"Dev user {email} not found -- run seed.py first")
+    user_id = str(row[0])
+
+    # Every table a player's own activity could have written a row to.
+    # Team membership/identity itself is deliberately untouched -- a reset
+    # clears progress, not who this account is or which team it's on.
+    db_execute("DELETE FROM peer_insights_given WHERE from_user_id = %s::uuid OR target_user_id = %s::uuid", (user_id, user_id))
+    db_execute("DELETE FROM notifications WHERE user_id = %s::uuid", (user_id,))
+    db_execute("DELETE FROM awards WHERE user_id = %s::uuid", (user_id,))
+    db_execute("DELETE FROM mission_reflections WHERE user_id = %s::uuid", (user_id,))
+    # Shared team evidence, not just this user's own reflection -- if this
+    # account submitted the team's evidence for a mission, resetting it
+    # removes that mission's evidence for the whole team, same as it would
+    # in reality if the work simply hadn't happened yet.
+    db_execute("DELETE FROM submissions WHERE user_id = %s::uuid", (user_id,))
+    db_execute("DELETE FROM mc_quest_submissions WHERE user_id = %s::uuid", (user_id,))
+    db_execute("DELETE FROM mc_quest_completions WHERE user_id = %s::uuid", (user_id,))
+    db_execute("DELETE FROM mc_reward_grants WHERE user_id = %s::uuid", (user_id,))
+    db_execute("DELETE FROM billbot_chat_log WHERE user_id = %s::uuid", (user_id,))
+    db_execute("DELETE FROM minigame_scores WHERE user_id = %s::uuid", (user_id,))
+    db_execute("DELETE FROM checkins WHERE user_id = %s::uuid", (user_id,))
+
+    # OpenSearch: player-profile/learner-timeline accumulate from events and
+    # never get recomputed from Postgres -- clearing the rows above alone
+    # leaves XP/level/badges/timeline stale.
+    try:
+        os_client.delete(index="player-profile", id=user_id)
+    except Exception:
+        pass
+    try:
+        os_client.delete_by_query(index="learner-timeline", body={"query": {"term": {"learner_id": user_id}}})
+    except Exception:
+        pass
+
+    for (team_id,) in db_fetch_all("SELECT team_id FROM team_members WHERE user_id = %s::uuid", (user_id,)):
+        _recompute_team_profile(str(team_id))
+
+    return {"status": "reset", "email": email, "user_id": user_id}
+
+
+@app.post("/api/admin/dev-users/{email}/reset")
+async def admin_reset_dev_user(email: str, admin_id: str = Depends(get_current_admin)):
+    """Wipes one seeded dev-login learner's progress -- evidence, reflections,
+    XP, badges, chat, checkins, quest completions -- back to a fresh account,
+    so the same two accounts can be reused for repeated local testing without
+    a database rebuild. Team assignment and identity are left alone; only
+    activity is cleared."""
+    return await _reset_dev_user(email)
+
+
+@app.post("/api/admin/dev-users/reset-all")
+async def admin_reset_all_dev_users(admin_id: str = Depends(get_current_admin)):
+    """Both seeded dev accounts at once -- the common case when a
+    team-evidence test run (both members' submission + reflection) needs a
+    clean slate."""
+    results = []
+    for email in sorted(DEV_USER_EMAILS):
+        if db_fetch_one("SELECT id FROM users WHERE email = %s", (email,)):
+            results.append(await _reset_dev_user(email))
+    return {"results": results}
+
+
 # ========== Evidence Submission ==========
 def _get_user_team(user_id: str) -> Optional[str]:
     """A learner belongs to exactly one team (see the admin roster/team
