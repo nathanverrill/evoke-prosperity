@@ -11,6 +11,19 @@
   var CONTENT = window.EVOKE_CONTENT;
   if(!CONTENT){ console.error('EVOKE content missing (content.js failed to load)'); return; }
 
+  // Playtest kill-switch: false hides every Minecraft / Field Kit surface so
+  // a Brightspace-integration playtest exercises only login -> mission ->
+  // evidence -> graded feedback. Flip to true to restore the full experience.
+  // Covers: the Ops Hub Field Kit card + guide step (.mc-only in index.html),
+  // the minecraft/companion screens (go() redirects to Ops), and B1llBot's
+  // canned Minecraft reply below. The AI B1llBot persona lives in the
+  // OpenWebUI "billbot" model config, not here.
+  var MINECRAFT_ENABLED = false;
+  if(!MINECRAFT_ENABLED){
+    document.body.classList.add('no-minecraft');
+    CONTENT.billbot.replies = CONTENT.billbot.replies.filter(function(r){ return r.match.indexOf('minecraft')===-1; });
+  }
+
   // ----- backend bridge -----
   var STATE = { userId:null, displayName:null, profile:null, missionIds:[] };
   function getJSON(p){ return fetch(p).then(function(r){ if(!r.ok) throw new Error(p+' '+r.status); return r.json(); }); }
@@ -113,7 +126,7 @@
       }catch(e){}
       // real Minecraft server address — only override the design default when
       // the backend gives a genuine public host (ignore dev's localhost).
-      getJSON('/api/minecraft/connect-info').then(function(ci){
+      if(MINECRAFT_ENABLED) getJSON('/api/minecraft/connect-info').then(function(ci){
         var host = ci && (ci.server || ci.host || ci.address);
         if(host && !/^(localhost|127\.|0\.0\.0\.0)/.test(host)){ var el2=document.getElementById('mc-server'); if(el2) el2.textContent = host; }
       }).catch(function(){});
@@ -1726,6 +1739,9 @@
     else { history.pushState({screen:name, mission:mission}, '', newHash); }
   }
   function go(name, fromBack, missionNum){
+    // Playtest kill-switch: the minecraft/companion screens are unreachable
+    // (also blocks #minecraft / #companion deep links and stale history).
+    if(!MINECRAFT_ENABLED && (name==='minecraft' || name==='companion')) name='ops';
     if(MISSION_SCREENS.indexOf(name)>-1){ activeMission = missionNum || curMission(); }
     var activeEl = document.querySelector('.screen.active');
     var cur = activeEl ? activeEl.dataset.screen : null;
@@ -1778,7 +1794,9 @@
     novel:"Read the story close. It's how you'll really get Keel.",
     missions:"Choose your assignment. I've got your back.",
     story:"Heads up \u2014 this transmission matters. Listen for the truth.",
-    assignment:"Mission accepted! Your real mission is the fieldwork \u2014 the Minecraft quest is an optional bonus.",
+    assignment: MINECRAFT_ENABLED
+      ? "Mission accepted! Your real mission is the fieldwork \u2014 the Minecraft quest is an optional bonus."
+      : "Mission accepted! Gather your evidence in the field and report back when you're ready.",
     evidence:"Drop your evidence here when you're ready, Agent.",
     minecraft:"Earn and save money in Keel, then come back and reflect to finish.",
     reward:"YES! You did it, Agent. So proud of you.",

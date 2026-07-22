@@ -157,6 +157,11 @@
   .ops-ov-list{flex:1;display:flex;flex-direction:column;justify-content:space-evenly;}
   @media (max-width:1080px){.ops-bottom{grid-template-columns:1fr;}}
   @media (max-width:980px){.ops-top{grid-template-columns:1fr;}}
+  /* Playtest kill-switch (MINECRAFT_ENABLED in controller.js): hide every
+     Minecraft / Field Kit surface and reflow the Ops grid around the gap. */
+  body.no-minecraft .mc-only{display:none !important;}
+  body.no-minecraft .ops-bottom{grid-template-columns:1fr 1fr;}
+  @media (max-width:1080px){body.no-minecraft .ops-bottom{grid-template-columns:1fr;}}
   .ops-banner{position:relative;overflow:hidden;border-radius:16px;min-height:300px;display:flex;flex-direction:column;justify-content:space-between;padding:clamp(22px,3vw,34px);box-shadow:var(--elev-glass);}
   .ops-banner .bg{position:absolute;inset:0;background-size:cover;background-position:center;filter:brightness(0.45) saturate(1.05) contrast(1.05);z-index:-2;}
   .ops-banner .tint{position:absolute;inset:0;z-index:-1;background:linear-gradient(115deg,rgba(4,16,34,0.92),rgba(4,18,40,0.45)),linear-gradient(160deg,rgba(0,150,136,0.16),transparent 60%);}
@@ -1283,7 +1288,7 @@
         <h3 class="hud" style="font-size:12px;color:var(--cyan-300);margin:0 0 14px;">Investigation Overview</h3>
         <div id="ops-checklist" class="ops-ov-list"></div>
       </div>
-      <div class="glass" style="padding:clamp(18px,2.5vw,24px);display:flex;flex-direction:column;">
+      <div class="glass mc-only" style="padding:clamp(18px,2.5vw,24px);display:flex;flex-direction:column;">
         <h3 class="hud" style="font-size:12px;color:var(--cyan-300);margin:0 0 2px;">EVOKE Field Kit</h3>
         <div style="font-family:var(--font-mono);font-size:10.5px;color:var(--text-faint);letter-spacing:.06em;margin-bottom:12px;">// Your Basin, Your Pocket</div>
         <div style="display:flex;gap:12px;align-items:center;margin-bottom:14px;">
@@ -1341,7 +1346,7 @@
         <span class="ms" aria-hidden="true" style="font-size:22px;color:var(--cyan-300);flex:none;">checklist</span>
         <div><div style="font-family:var(--font-display);font-weight:700;font-size:14px;color:var(--cyan-100);margin-bottom:2px;">2. Do the field work in Investigation Overview</div><div style="font-family:var(--font-body);font-size:13.5px;line-height:1.5;color:var(--teal-050);">These are the real-world steps to carry out. This is where most of your work happens.</div></div>
       </div>
-      <div style="display:flex;gap:13px;align-items:flex-start;">
+      <div class="mc-only" style="display:flex;gap:13px;align-items:flex-start;">
         <span class="ms" aria-hidden="true" style="font-size:22px;color:var(--cyan-300);flex:none;">deployed_code</span>
         <div><div style="font-family:var(--font-display);font-weight:700;font-size:14px;color:var(--cyan-100);margin-bottom:2px;">Travel Light — Take Field Kit With You</div><div style="font-family:var(--font-body);font-size:13.5px;line-height:1.5;color:var(--teal-050);">Scan the QR code, or open it on your computer — B1llBot, your Notebook, and Keel itself, wherever the mission takes you next.</div></div>
       </div>
@@ -1598,6 +1603,6 @@
 
   <script src="submission-missions.js?b=4"></script>
   <script src="content.js?b=4"></script>
-  <script src="controller.js?b=36"></script>
+  <script src="controller.js?b=37"></script>
 </body>
 </html>
