@@ -227,3 +227,6 @@ docs/legacy/All NPC and World Prompts/.DS_Store
 # (git-lfs vs. S3-at-build vs. manual placement) still needed.
 evoke-infra/minecraft/world-seed/*
 !evoke-infra/minecraft/world-seed/README.md
+
+# Local Apex server snapshots (scripts/apex_backup.py) — never commit
+backups/
