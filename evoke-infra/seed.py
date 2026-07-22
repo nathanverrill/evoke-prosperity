@@ -36,12 +36,24 @@ def seed_database(db_url):
                 (campaign_id, 'evoke-prosperity', 'EVOKE Prosperity', 'A 6-week financial literacy and entrepreneurship curriculum')
             )
 
-        # Create organization
-        org_id = uuid.uuid4()
-        cur.execute(
-            "INSERT INTO organizations (id, name, active_campaign_id, lms_type) VALUES (%s, %s, %s, %s) ON CONFLICT DO NOTHING",
-            (org_id, 'Demo School', campaign_id, 'brightspace')
-        )
+        # Get or create organization -- same pattern as campaigns above, and
+        # for the same reason: org_id is used throughout the rest of this
+        # script, so ON CONFLICT DO NOTHING alone isn't enough now that
+        # organizations.name is actually unique (previously wasn't, which is
+        # why re-running this script used to silently multiply "Demo School"
+        # on every run -- fixed 2026-07-21). A skipped insert would leave
+        # org_id pointing at a row that was never created, breaking every
+        # INSERT below that references it.
+        cur.execute("SELECT id FROM organizations WHERE name = %s", ('Demo School',))
+        org_result = cur.fetchone()
+        if org_result:
+            org_id = org_result[0]
+        else:
+            org_id = uuid.uuid4()
+            cur.execute(
+                "INSERT INTO organizations (id, name, active_campaign_id, lms_type) VALUES (%s, %s, %s, %s)",
+                (org_id, 'Demo School', campaign_id, 'brightspace')
+            )
 
         # Three default users, not four -- Player One is the primary
         # learner-facing default (what dev-login returns with no params);
@@ -55,43 +67,60 @@ def seed_database(db_url):
         # same person across both systems. There's no shared password auth
         # between any of these (evoke's dev-login has no password concept at
         # all) -- this is identity alignment, not SSO.
-        player_one_id = uuid.uuid4()
-        cur.execute(
-            "INSERT INTO users (id, org_id, display_name, email, role) VALUES (%s, %s, %s, %s, %s) ON CONFLICT DO NOTHING",
-            (player_one_id, org_id, 'Player One', 'player1@evoke.local', 'learner')
-        )
+        # Upsert with RETURNING, not INSERT ... ON CONFLICT DO NOTHING plus a
+        # locally-generated id -- found live, 2026-07-21, right after fixing
+        # organizations' own duplication bug above: once org_id reliably
+        # resolves to the same real row every run, a re-run's user insert
+        # legitimately conflicts (the account already exists), and a bare
+        # ON CONFLICT DO NOTHING silently skips the row while this script
+        # keeps using the *unused* uuid.uuid4() it generated -- the very next
+        # auth_identities insert then references a user_id that was never
+        # actually written, a foreign-key violation that aborts the whole
+        # run. Previously masked entirely: every prior run created a brand
+        # new org, so these inserts always succeeded for real and the bug
+        # never had a chance to fire. RETURNING id makes the local variable
+        # correct in both the create and the already-exists case.
+        def upsert_user(display_name, email, role):
+            cur.execute(
+                """INSERT INTO users (id, org_id, display_name, email, role)
+                   VALUES (%s, %s, %s, %s, %s)
+                   ON CONFLICT (email, org_id) DO UPDATE SET display_name = EXCLUDED.display_name
+                   RETURNING id""",
+                (uuid.uuid4(), org_id, display_name, email, role)
+            )
+            return cur.fetchone()[0]
+
+        player_one_id = upsert_user('Player One', 'player1@evoke.local', 'learner')
         cur.execute(
             "INSERT INTO auth_identities (user_id, provider, provider_subject) VALUES (%s, %s, %s) ON CONFLICT DO NOTHING",
             (player_one_id, 'local', 'player1@evoke.local')
         )
 
-        player_two_id = uuid.uuid4()
-        cur.execute(
-            "INSERT INTO users (id, org_id, display_name, email, role) VALUES (%s, %s, %s, %s, %s) ON CONFLICT DO NOTHING",
-            (player_two_id, org_id, 'Player Two', 'player2@evoke.local', 'learner')
-        )
+        player_two_id = upsert_user('Player Two', 'player2@evoke.local', 'learner')
         cur.execute(
             "INSERT INTO auth_identities (user_id, provider, provider_subject) VALUES (%s, %s, %s) ON CONFLICT DO NOTHING",
             (player_two_id, 'local', 'player2@evoke.local')
         )
 
-        admin_id = uuid.uuid4()
-        cur.execute(
-            "INSERT INTO users (id, org_id, display_name, email, role) VALUES (%s, %s, %s, %s, %s) ON CONFLICT DO NOTHING",
-            (admin_id, org_id, 'Admin', 'admin@evoke.local', 'admin')
-        )
-
+        admin_id = upsert_user('Admin', 'admin@evoke.local', 'admin')
         cur.execute(
             "INSERT INTO auth_identities (user_id, provider, provider_subject) VALUES (%s, %s, %s) ON CONFLICT DO NOTHING",
             (admin_id, 'local', 'admin@evoke.local')
         )
 
-        # Create team
-        team_id = uuid.uuid4()
+        # Get or create team -- same RETURNING-based fix as the user upserts
+        # above, and for the same reason: team_id is used immediately below
+        # for team_members, so a silently-skipped insert (a real possibility
+        # now that org_id is stable across runs) would leave it pointing at
+        # a team that was never actually created. Same idiom identity.py's
+        # sync_team_membership already uses for this exact table.
         cur.execute(
-            "INSERT INTO teams (id, org_id, name) VALUES (%s, %s, %s) ON CONFLICT DO NOTHING",
-            (team_id, org_id, 'Demo Team')
+            """INSERT INTO teams (id, org_id, name) VALUES (%s, %s, %s)
+               ON CONFLICT (org_id, name) DO UPDATE SET name = teams.name
+               RETURNING id""",
+            (uuid.uuid4(), org_id, 'Demo Team')
         )
+        team_id = cur.fetchone()[0]
 
         cur.execute(
             "INSERT INTO team_members (team_id, user_id, role_label) VALUES (%s, %s, %s) ON CONFLICT DO NOTHING",

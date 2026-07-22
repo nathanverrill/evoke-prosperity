@@ -12,7 +12,7 @@ CREATE TABLE campaigns (
 -- Organizations
 CREATE TABLE organizations (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    name VARCHAR(255) NOT NULL,
+    name VARCHAR(255) UNIQUE NOT NULL,
     active_campaign_id UUID NOT NULL REFERENCES campaigns(id),
     lms_type VARCHAR(50) NOT NULL CHECK (lms_type IN ('brightspace', 'moodle')),
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
@@ -163,7 +163,12 @@ CREATE TABLE mc_reward_catalog (
     duration INTEGER,
     persistent BOOLEAN DEFAULT false,
     reward_tier VARCHAR(50),
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    -- Same missing-uniqueness bug as mc_quests above: seed.py's insert here
+    -- relies on ON CONFLICT DO NOTHING, which had nothing to conflict
+    -- against, so re-running seed.py silently multiplied the whole reward
+    -- catalog. Fixed both here and via idempotent startup DDL in main.py.
+    UNIQUE(campaign_id, tier, reward)
 );
 
 -- Minecraft Reward Grants
@@ -185,7 +190,15 @@ CREATE TABLE mc_quests (
     title VARCHAR(255) NOT NULL,
     description TEXT,
     kind VARCHAR(50) NOT NULL CHECK (kind IN ('mission_quest', 'side_quest')),
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    -- seed.py's quest INSERT relies on ON CONFLICT DO NOTHING to survive a
+    -- re-run without duplicating the catalog -- that clause needs a real
+    -- unique target to fire against, same reasoning as users(email, org_id)
+    -- and teams(org_id, name) above. Missing here originally, so re-running
+    -- seed.py against an existing volume silently tripled every quest
+    -- (found live 2026-07-21, fixed both here and via idempotent startup
+    -- DDL for already-deployed instances in main.py).
+    UNIQUE(campaign_id, title)
 );
 
 -- Minecraft Quest Completions

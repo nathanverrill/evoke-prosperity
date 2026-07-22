@@ -177,6 +177,38 @@ async def startup():
         # new user always 500'd. init-db.sql has it inline for fresh volumes;
         # this is the same fix for a volume that predates that.
         db_execute("CREATE UNIQUE INDEX IF NOT EXISTS users_email_org_unique ON users(email, org_id)")
+        # organizations had the exact same missing-uniqueness problem as
+        # users(email, org_id) above -- seed.py's org INSERT used
+        # ON CONFLICT DO NOTHING with nothing to conflict against, so every
+        # re-run of seed.py against an existing volume created a brand-new
+        # "Demo School" org (found live, 2026-07-21, alongside the mc_quests
+        # duplication below -- same root cause, different table, worse blast
+        # radius since users/teams/badges all cascade from org_id). Verified
+        # live before writing this: none of the junk orgs ever accumulated
+        # real submissions/awards/chat/etc. -- purely orphaned seed-script
+        # output -- so a clean delete loses nothing. Keeps whichever "Demo
+        # School" row has a real Brightspace-linked user under it (the org
+        # an actual deployment is using), or the oldest one if none do (a
+        # fresh dev clone where every org is equally a seed.py artifact).
+        junk_org_ids = [str(r[0]) for r in db_fetch_all("""
+            SELECT id FROM (
+                SELECT o.id, ROW_NUMBER() OVER (
+                    ORDER BY (EXISTS (
+                        SELECT 1 FROM evoke_identities ei JOIN users u ON u.id = ei.user_id
+                        WHERE u.org_id = o.id AND ei.brightspace_user_id IS NOT NULL
+                    )) DESC, o.created_at, o.id
+                ) AS rn
+                FROM organizations o
+            ) ranked WHERE rn > 1
+        """)]
+        if junk_org_ids:
+            db_execute("DELETE FROM team_members WHERE user_id IN (SELECT id FROM users WHERE org_id = ANY(%s::uuid[]))", (junk_org_ids,))
+            db_execute("DELETE FROM auth_identities WHERE user_id IN (SELECT id FROM users WHERE org_id = ANY(%s::uuid[]))", (junk_org_ids,))
+            db_execute("DELETE FROM evoke_identities WHERE user_id IN (SELECT id FROM users WHERE org_id = ANY(%s::uuid[]))", (junk_org_ids,))
+            db_execute("DELETE FROM teams WHERE org_id = ANY(%s::uuid[])", (junk_org_ids,))
+            db_execute("DELETE FROM users WHERE org_id = ANY(%s::uuid[])", (junk_org_ids,))
+            db_execute("DELETE FROM organizations WHERE id = ANY(%s::uuid[])", (junk_org_ids,))
+        db_execute("CREATE UNIQUE INDEX IF NOT EXISTS organizations_name_unique ON organizations(name)")
         # Team-evidence + individual-reflection model: submissions become the
         # team's shared artifact (team_id is the real completion key now,
         # user_id kept only for submitted-by attribution); mission_reflections
@@ -267,6 +299,69 @@ async def startup():
         db_execute("ALTER TABLE mc_quests DROP CONSTRAINT IF EXISTS mc_quests_kind_check")
         db_execute("""ALTER TABLE mc_quests ADD CONSTRAINT mc_quests_kind_check
                       CHECK (kind::text = ANY (ARRAY['mission_quest', 'side_quest', 'basin_archive']::text[]))""")
+
+        # seed.py's quest INSERT already reads "ON CONFLICT DO NOTHING", but
+        # mc_quests had no unique constraint for that clause to actually
+        # target -- a no-op guard that never fired, so every re-run of
+        # seed.py (a normal dev workflow, not a misuse) silently tripled the
+        # 16 curriculum quests on this volume (found live, 2026-07-21, while
+        # building the Field Tablet's quest log). Basin Archive rows above
+        # were already NOT EXISTS-guarded and never duplicated. Self-healing,
+        # not a one-off fix: dedupes on every startup (a no-op once actually
+        # clean), so any other volume with the same history heals the same
+        # way without a manual migration. Keeps the oldest row per
+        # (campaign_id, title) -- the one most likely still correctly linked
+        # via mission_id from its original seed.py run. Triggers pointing at
+        # a row about to be deleted are dropped first, not repointed: the
+        # startup loop above/below re-seeds exactly one correct trigger per
+        # real quest once the duplicate rows are gone, which is simpler and
+        # less error-prone than guessing which duplicate's trigger to keep.
+        db_execute("""
+            DELETE FROM mc_quest_triggers WHERE quest_id IN (
+                SELECT id FROM (
+                    SELECT id, ROW_NUMBER() OVER (
+                        PARTITION BY campaign_id, title ORDER BY created_at, id
+                    ) AS rn
+                    FROM mc_quests
+                ) ranked WHERE rn > 1
+            )
+        """)
+        db_execute("""
+            DELETE FROM mc_quests WHERE id IN (
+                SELECT id FROM (
+                    SELECT id, ROW_NUMBER() OVER (
+                        PARTITION BY campaign_id, title ORDER BY created_at, id
+                    ) AS rn
+                    FROM mc_quests
+                ) ranked WHERE rn > 1
+            )
+        """)
+        db_execute("""
+            CREATE UNIQUE INDEX IF NOT EXISTS idx_mc_quests_campaign_title
+            ON mc_quests(campaign_id, title)
+        """)
+
+        # Same bug, same fix, one table over: mc_reward_catalog's insert
+        # also relied on a toothless ON CONFLICT DO NOTHING, so re-running
+        # seed.py multiplied the whole reward catalog too (found live
+        # alongside the mc_quests case above). mc_reward_grants -- the only
+        # table that references a catalog row -- is empty on every volume
+        # this has been checked against, so this is a clean delete, no
+        # repointing needed.
+        db_execute("""
+            DELETE FROM mc_reward_catalog WHERE id IN (
+                SELECT id FROM (
+                    SELECT id, ROW_NUMBER() OVER (
+                        PARTITION BY campaign_id, tier, reward ORDER BY created_at, id
+                    ) AS rn
+                    FROM mc_reward_catalog
+                ) ranked WHERE rn > 1
+            )
+        """)
+        db_execute("""
+            CREATE UNIQUE INDEX IF NOT EXISTS idx_mc_reward_catalog_campaign_tier_reward
+            ON mc_reward_catalog(campaign_id, tier, reward)
+        """)
         for quest_title, objective in [
             ("Archive: The Overlook", "basinSeen"),
             ("Archive: Down into Keel", "keelVisited"),
