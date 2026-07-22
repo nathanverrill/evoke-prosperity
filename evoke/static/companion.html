@@ -562,45 +562,15 @@
       }
     }
 
-    // Field Quest Log: side_quest entries only (mc_quests also has
-    // mission_quest -- one per curriculum mission, most of which the
-    // student hasn't reached yet -- and basin_archive, which gets its own
-    // card below). Side quests are the casual, no-prerequisite goals
-    // (find treasure, mine ores, explore the map), shown trophy-case style
-    // like the desktop dossier (every quest visible, earned or not) --
-    // the phone previously had no quest view at all. Auto-completion is
-    // scoreboard-driven for whichever quests have a trigger wired
-    // (mc_quest_triggers); most don't yet, so an unchecked quest here
-    // isn't necessarily something to *do* on the tablet, it's showing
-    // what the Basin still has to report.
-    let questPollTimer = null;
-    async function loadQuests() {
-      try {
-        const [questsRes, profileRes] = await Promise.all([
-          fetch("/api/mc-quests").then(r => r.json()),
-          fetch(`/api/profile/player/${userId}`).then(r => r.json()),
-        ]);
-        const quests = (questsRes.quests || []).filter(q => q.kind === "side_quest");
-        if (!quests.length) return;
-        const completedAt = {};
-        (profileRes.quests_completed || []).forEach(q => { completedAt[q.quest_id] = q.completed_at; });
-        const doneCount = quests.filter(q => completedAt[q.id]).length;
-        document.getElementById("quests-progress").textContent = `${doneCount} of ${quests.length} quests complete`;
-        document.getElementById("quests-list").innerHTML = quests.map(q => {
-          const done = !!completedAt[q.id];
-          return `
-            <div style="padding:10px 0;border-top:1px solid rgba(0,0,0,0.08);${done ? "" : "opacity:0.55;"}">
-              <div style="font-weight:700;font-size:0.95em;">${done ? "✓" : "○"} ${escapeHtml(q.title)}</div>
-              ${q.description ? `<div style="font-size:0.9em;margin-top:2px;">${escapeHtml(q.description)}</div>` : ""}
-            </div>`;
-        }).join("");
-        document.getElementById("mc-quests-card").hidden = false;
-      } catch (e) {}
-    }
-    function startQuestPolling() {
-      loadQuests();
-      if (!questPollTimer) questPollTimer = setInterval(loadQuests, 20000);
-    }
+    // Field Quest Log: disabled for now (2026-07-22) -- the only 4 quests
+    // that pass the mission_quest/basin_archive filter (Find Hidden
+    // Treasure, Master Farmer, Mining Expert, Explorer's Log) have no
+    // mc_quest_triggers wired, so there's no real way to complete any of
+    // them in-world yet. mc-quests-card stays hidden (its default state);
+    // restore the fetch/render body here once a side_quest actually has a
+    // working trigger.
+    function loadQuests() {}
+    function startQuestPolling() {}
 
     // Billbot's Basin Archive: the hard-coded discovery chain
     // (main.py's BASIN_ARCHIVE). Locked entries show corrupted teasers;
