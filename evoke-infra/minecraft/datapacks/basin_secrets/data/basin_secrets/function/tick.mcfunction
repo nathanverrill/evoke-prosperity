@@ -4,11 +4,18 @@
 # A dropped diamond resting on a bone block charges up (crit particles +
 # fire-extinguish hiss), then takes a lightning strike. Pure spectacle --
 # no reward attached, same as the original.
-execute as @e[type=item,nbt={Item:{id:"minecraft:diamond"}}] at @s if block ~ ~-1 ~ minecraft:bone_block run scoreboard players add @s skelly 1
-execute as @e[type=item,nbt={Item:{id:"minecraft:diamond"}},scores={skelly=1..10}] at @s run particle minecraft:crit ~ ~ ~ 0.2 0.2 0.2 0.1 10
-execute as @e[type=item,nbt={Item:{id:"minecraft:diamond"}},scores={skelly=1..10}] at @s run playsound minecraft:block.fire.extinguish block @a[distance=..16]
-execute as @e[type=item,nbt={Item:{id:"minecraft:diamond"}},scores={skelly=11..},tag=!struck] at @s run summon minecraft:lightning_bolt ~ ~ ~
-execute as @e[type=item,nbt={Item:{id:"minecraft:diamond"}},scores={skelly=11..},tag=!struck] run tag @s add struck
+# No nbt= selectors here: an nbt= match serializes the FULL NBT of every
+# candidate entity per command, and five of those every 2 ticks froze a
+# tick for 60s and watchdog-crashed the live server (2026-07-22) when
+# item entities piled up. The block check runs first (cheap), and `if
+# items ... contents` compares one stack without serializing anything;
+# the follow-up lines select on the skelly score, which only diamonds
+# ever receive.
+execute as @e[type=item] at @s if block ~ ~-1 ~ minecraft:bone_block if items entity @s contents minecraft:diamond run scoreboard players add @s skelly 1
+execute as @e[type=item,scores={skelly=1..10}] at @s run particle minecraft:crit ~ ~ ~ 0.2 0.2 0.2 0.1 10
+execute as @e[type=item,scores={skelly=1..10}] at @s run playsound minecraft:block.fire.extinguish block @a[distance=..16]
+execute as @e[type=item,scores={skelly=11..},tag=!struck] at @s run summon minecraft:lightning_bolt ~ ~ ~
+execute as @e[type=item,scores={skelly=11..},tag=!struck] run tag @s add struck
 
 # --- Craig's balance-reset terminal (tunnel under the town hall) ---
 # Standing at the terminal wipes your mod-economy balance back to the $10
