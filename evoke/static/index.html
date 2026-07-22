@@ -160,6 +160,8 @@
   /* Playtest kill-switch (MINECRAFT_ENABLED in controller.js): hide every
      Minecraft / Field Kit surface and reflow the Ops grid around the gap. */
   body.no-minecraft .mc-only{display:none !important;}
+  /* the showcase img rules out-specify the UA's [hidden] display:none */
+  #ev-photo-preview[hidden]{display:none !important;}
   body.no-minecraft .ops-bottom{grid-template-columns:1fr 1fr;}
   @media (max-width:1080px){body.no-minecraft .ops-bottom{grid-template-columns:1fr;}}
   .ops-banner{position:relative;overflow:hidden;border-radius:16px;min-height:300px;display:flex;flex-direction:column;justify-content:space-between;padding:clamp(22px,3vw,34px);box-shadow:var(--elev-glass);}
@@ -1372,14 +1374,66 @@
   <main style="flex:1;padding:32px clamp(20px,5vw,56px) 90px;max-width:880px;margin:0 auto;width:100%;">
     <div style="display:flex;justify-content:center;margin-bottom:18px;"><span class="chip"><span class="ms" aria-hidden="true" style="font-size:16px;">cloud_upload</span>Real-World Mission</span></div>
     <h1 style="font-family:var(--font-display);font-weight:700;font-size:clamp(28px,5vw,44px);text-transform:uppercase;color:var(--cyan-500);text-shadow:0 0 24px rgba(0,150,136,0.3);text-align:center;margin:0 0 10px;">Submit Your Evidence</h1>
-    <p style="text-align:center;color:var(--teal-100);font-family:var(--font-body);font-size:16px;line-height:1.55;margin:0 auto 26px;max-width:600px;">Upload what you gathered in the field, then submit to complete your mission and unlock what happens next.</p>
+    <p style="text-align:center;color:var(--teal-100);font-family:var(--font-body);font-size:16px;line-height:1.55;margin:0 auto 26px;max-width:600px;">Take or choose one photo of what you gathered in the field, describe what you observed, and file it. Your Field Evidence goes to your teacher for grading.</p>
     <div class="glass" id="ev-cache" style="padding:clamp(22px,3.5vw,30px);margin-bottom:26px;"></div>
-    <div style="display:flex;align-items:center;justify-content:space-between;gap:14px;flex-wrap:wrap;">
-      <button class="btn sec back-step" type="button">◀ Back</button>
-      <button class="btn" id="ev-submit">Complete Mission ▶<span class="key" aria-hidden="true"></span></button>
+
+    <div id="ev-form">
+      <div class="glass" style="padding:clamp(22px,3.5vw,30px);margin-bottom:22px;">
+        <div style="display:flex;align-items:center;gap:12px;margin-bottom:14px;"><span class="ms" aria-hidden="true" style="font-size:24px;color:var(--cyan-300);">photo_camera</span><h2 class="hud" style="font-size:12px;margin:0;color:var(--cyan-300);">Your Evidence Photo</h2></div>
+        <div id="ev-photo-drop" style="border-radius:12px;background:rgba(0,150,136,0.05);box-shadow:inset 0 0 0 1px var(--border-ui);padding:18px;text-align:center;margin-bottom:12px;">
+          <img id="ev-photo-preview" hidden alt="Your evidence photo" style="max-width:100%;max-height:320px;border-radius:10px;display:block;margin:0 auto;">
+          <p id="ev-photo-placeholder" style="font-family:var(--font-body);font-size:14px;color:var(--text-faint);margin:10px 0;">No photo yet — capture one piece of evidence that represents what you learned during this mission.</p>
+        </div>
+        <input type="file" id="ev-photo-camera" accept="image/*" capture="environment" class="sr-only" aria-hidden="true" tabindex="-1">
+        <input type="file" id="ev-photo-choose" accept="image/*" class="sr-only" aria-hidden="true" tabindex="-1">
+        <div style="display:flex;gap:12px;flex-wrap:wrap;">
+          <button type="button" id="ev-take-photo" class="btn sec" style="flex:1;min-width:140px;"><span class="ms" aria-hidden="true" style="font-size:17px;vertical-align:middle;">photo_camera</span>&nbsp;Take Photo</button>
+          <button type="button" id="ev-choose-photo" class="btn sec" style="flex:1;min-width:140px;"><span class="ms" aria-hidden="true" style="font-size:17px;vertical-align:middle;">image</span>&nbsp;Choose Photo</button>
+        </div>
+      </div>
+
+      <div class="glass" style="padding:clamp(22px,3.5vw,30px);margin-bottom:22px;">
+        <div style="display:flex;align-items:center;gap:12px;margin-bottom:10px;"><span class="ms" aria-hidden="true" style="font-size:24px;color:var(--cyan-300);">history_edu</span><h2 class="hud" style="font-size:12px;margin:0;color:var(--cyan-300);">Your Observation</h2></div>
+        <p style="font-family:var(--font-body);font-size:14px;line-height:1.55;color:var(--teal-100);margin:0 0 14px;">What did you notice? What surprised you? How did this change your understanding of the people, systems, or financial realities behind this challenge?</p>
+        <label class="sr-only" for="ev-observation">Your observation</label>
+        <textarea id="ev-observation" class="ev-textarea" style="min-height:120px;" placeholder="Describe your evidence and explain why it matters."></textarea>
+      </div>
+
+      <p id="ev-status" role="status" style="font-family:var(--font-mono);font-size:12px;color:var(--accent-energy,#ffb877);text-align:right;min-height:16px;margin:0 0 10px;"></p>
+      <div style="display:flex;align-items:center;justify-content:space-between;gap:14px;flex-wrap:wrap;">
+        <button class="btn sec back-step" type="button">◀ Back</button>
+        <button class="btn" id="ev-submit">Submit Field Report ▶<span class="key" aria-hidden="true"></span></button>
+      </div>
+    </div>
+
+    <div id="ev-filed" hidden>
+      <div class="glass" style="padding:clamp(26px,4vw,36px);text-align:center;margin-bottom:22px;">
+        <span class="ms" aria-hidden="true" style="font-size:44px;color:var(--green-400);filter:drop-shadow(0 0 12px rgba(0,212,146,0.5));">check_circle</span>
+        <div style="font-family:var(--font-display);font-weight:800;font-size:22px;color:var(--text-heading);margin:12px 0 6px;">Field Evidence Filed</div>
+        <p id="ev-filed-date" class="hud" style="font-size:11px;color:var(--text-faint);margin:0 0 16px;"></p>
+        <p id="ev-filed-observation" style="font-family:var(--font-body);font-size:15px;line-height:1.6;color:var(--teal-050);margin:0 auto 18px;max-width:560px;"></p>
+        <a id="ev-filed-pdf" href="#" target="_blank" rel="noopener" class="btn sec" style="display:inline-block;text-decoration:none;">View Field Evidence PDF&nbsp;<span class="ms" aria-hidden="true" style="font-size:16px;vertical-align:middle;">open_in_new</span></a>
+      </div>
+      <div style="display:flex;justify-content:center;"><button class="btn" data-go="ops" type="button">Back to Operations Hub ▶<span class="key" aria-hidden="true"></span></button></div>
     </div>
   </main>
 </section>
+
+<!-- Evidence submit confirmation (same weight as a real Brightspace submit) -->
+<div class="ops-modal" id="ev-confirm" role="dialog" aria-modal="true" aria-labelledby="ev-confirm-title">
+  <div class="sheet">
+    <div style="display:flex;align-items:flex-start;gap:14px;margin-bottom:8px;">
+      <span style="width:44px;height:44px;flex:none;border-radius:12px;display:flex;align-items:center;justify-content:center;color:var(--cyan-200);background:linear-gradient(135deg,rgba(0,150,136,0.26),rgba(0,150,137,0.15));box-shadow:inset 0 0 0 1px var(--border-ui);"><span class="ms" aria-hidden="true" style="font-size:24px;">cloud_upload</span></span>
+      <h2 id="ev-confirm-title" style="font-family:var(--font-display);font-weight:800;font-size:22px;color:var(--text-heading);margin:0;flex:1;line-height:1.15;">Submit your Field Report?</h2>
+    </div>
+    <p style="font-family:var(--font-body);font-size:14px;line-height:1.55;color:var(--teal-100);margin:0 0 20px;">This will be graded and can't be changed after you submit — same as submitting on Brightspace.</p>
+    <p id="ev-confirm-status" role="status" style="font-family:var(--font-mono);font-size:12px;color:var(--accent-energy,#ffb877);min-height:16px;margin:0 0 12px;"></p>
+    <div style="display:flex;gap:12px;flex-wrap:wrap;">
+      <button id="ev-confirm-back" class="btn sec" type="button" style="flex:1;min-width:120px;">Go Back</button>
+      <button id="ev-confirm-submit" class="btn" type="button" style="flex:1;min-width:120px;">Submit ▶</button>
+    </div>
+  </div>
+</div>
 
 <!-- ===== MISSION SUBMISSION (individual task + team discussion + team product) ===== -->
 <section class="screen" data-screen="submission" aria-label="Mission Submission" style="flex-direction:column;">
@@ -1603,6 +1657,6 @@
 
   <script src="submission-missions.js?b=4"></script>
   <script src="content.js?b=5"></script>
-  <script src="controller.js?b=37"></script>
+  <script src="controller.js?b=38"></script>
 </body>
 </html>

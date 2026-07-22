@@ -864,52 +864,88 @@
     var ev=document.getElementById('ev-cache');
     ev.innerHTML='<div style="display:flex;align-items:center;gap:12px;margin-bottom:14px;"><span class="ms" aria-hidden="true" style="font-size:24px;color:var(--cyan-300);">cloud_upload</span><h2 class="hud" style="font-size:12px;margin:0;color:var(--cyan-300);">'+a.evidence.title+'</h2></div>'+
       '<p style="font-family:var(--font-body);font-size:15px;color:var(--teal-050);margin:0 0 18px;">'+a.evidence.intro+'</p>'+
-      '<div class="ev-reqs">'+a.evidence.reqs.map(function(it){return '<div style="display:flex;gap:12px;align-items:flex-start;"><span class="ms" aria-hidden="true" style="font-size:20px;color:var(--cyan-300);flex:none;">task_alt</span><span style="font-family:var(--font-body);font-size:14px;line-height:1.55;color:var(--teal-100);">'+it+'</span></div>';}).join('')+'</div>'+
-      '<div class="ev-divider"></div>'+
-      '<label class="ev-label" for="ev-statement">'+(a.evidence.fieldLabel||'Your Challenge Statement')+'</label>'+
-      '<textarea id="ev-statement" class="ev-textarea" placeholder="'+(a.evidence.fieldPlaceholder||'As a team, describe the community issue you\'ll address through your Evokation \u2014 and the financial realities shaping it.')+'"></textarea>'+
-      '<span class="ev-label">Attach your fieldwork</span>'+
-      '<div id="ev-drop" class="ev-drop" role="button" tabindex="0" aria-label="Upload files. Drag and drop here, or activate to browse your device.">'+
-        '<span class="ms" aria-hidden="true">cloud_upload</span>'+
-        '<div class="ev-drop-title">Drag &amp; drop files here</div>'+
-        '<div class="ev-drop-sub">or <span class="ev-browse">browse from your device</span></div>'+
-        '<div class="ev-drop-hint">Notes, interviews, photos, sketches, recordings, maps &middot; PDF, DOCX, JPG, PNG, MP3</div>'+
-      '</div>'+
-      '<input id="ev-file" type="file" multiple class="sr-only" aria-hidden="true" tabindex="-1">'+
-      '<ul id="ev-files" class="ev-files" aria-label="Attached files"></ul>';
-
-    /* evidence cache \u2014 file upload mockup */
-    (function(){
-      var drop=document.getElementById('ev-drop'),
-          input=document.getElementById('ev-file'),
-          list=document.getElementById('ev-files');
-      function fmtSize(b){ if(b>=1048576) return (b/1048576).toFixed(1)+' MB'; if(b>=1024) return Math.round(b/1024)+' KB'; return b+' B'; }
-      function iconFor(name){ var e=(name.split('.').pop()||'').toLowerCase();
-        if(['jpg','jpeg','png','gif','webp','heic'].indexOf(e)>=0) return 'image';
-        if(['mp3','wav','m4a','aac'].indexOf(e)>=0) return 'graphic_eq';
-        if(['mp4','mov','webm'].indexOf(e)>=0) return 'movie';
-        if(['pdf'].indexOf(e)>=0) return 'picture_as_pdf';
-        return 'description'; }
-      function addFile(name,size){
-        var row=el('<li class="ev-filerow"><span class="fi"><span class="ms" aria-hidden="true">'+iconFor(name)+'</span></span>'+
-          '<span class="fmeta"><span class="fname">'+name+'</span><span class="fsize">'+fmtSize(size)+' \u00b7 Uploaded</span></span>'+
-          '<span class="fdone" title="Uploaded"><span class="ms" aria-hidden="true">check_circle</span></span>'+
-          '<button type="button" class="ev-fileremove" aria-label="Remove '+name+'"><span class="ms" aria-hidden="true">close</span></button></li>');
-        row.querySelector('.ev-fileremove').addEventListener('click',function(){ row.remove(); });
-        list.appendChild(row);
-      }
-      function handle(files){ Array.prototype.forEach.call(files,function(f){ addFile(f.name, f.size||0); }); }
-      drop.addEventListener('click',function(){ input.click(); });
-      drop.addEventListener('keydown',function(e){ if(e.key==='Enter'||e.key===' '){ e.preventDefault(); input.click(); } });
-      input.addEventListener('change',function(){ if(input.files&&input.files.length) handle(input.files); input.value=''; });
-      ['dragenter','dragover'].forEach(function(ev){ drop.addEventListener(ev,function(e){ e.preventDefault(); drop.classList.add('drag'); }); });
-      ['dragleave','drop'].forEach(function(ev){ drop.addEventListener(ev,function(e){ e.preventDefault(); drop.classList.remove('drag'); }); });
-      drop.addEventListener('drop',function(e){ if(e.dataTransfer&&e.dataTransfer.files&&e.dataTransfer.files.length) handle(e.dataTransfer.files); });
-    })();
+      '<div class="ev-reqs">'+a.evidence.reqs.map(function(it){return '<div style="display:flex;gap:12px;align-items:flex-start;"><span class="ms" aria-hidden="true" style="font-size:20px;color:var(--cyan-300);flex:none;">task_alt</span><span style="font-family:var(--font-body);font-size:14px;line-height:1.55;color:var(--teal-100);">'+it+'</span></div>';}).join('')+'</div>';
+    // The statement box + drag-drop list that used to follow here were a
+    // visual mockup (files never uploaded). The real individual
+    // photo+observation flow is the static #ev-form markup on the evidence
+    // screen, wired by the evidence module below.
   };
   renderAssignment();
   document.getElementById('as-ops').addEventListener('click',function(){ go('ops'); });
-  document.getElementById('ev-submit').addEventListener('click',function(){ if(curMission()===2){ var os=document.getElementById('ev-statement'); if(os&&os.value.trim()){ try{localStorage.setItem('evoke-origin',os.value.trim());}catch(e){} } } if(window.evokeBackendSubmit) window.evokeBackendSubmit(curMission()); if(window.opsMarkSubmitted) window.opsMarkSubmitted(curMission()); go('reward'); });
+  /* ---- evidence: individual photo + observation Field Report ----
+     Same flow and endpoint as the phone Field Kit (/api/mission-field-report):
+     the backend builds the EVOKE Field Evidence PDF from the photo +
+     observation and submits it as kind='individual_evidence', which the
+     Brightspace worker pushes to the student's own dropbox. Deliberately no
+     team steps here -- when a mission is a group activity, the Evidence
+     Cache text above the form carries the instructions (e.g. "each of you
+     submit the same file with your own observation"). */
+  (function(){
+    var photoFile=null;
+    var form=document.getElementById('ev-form'), filedBox=document.getElementById('ev-filed');
+    var preview=document.getElementById('ev-photo-preview'), placeholder=document.getElementById('ev-photo-placeholder');
+    var obs=document.getElementById('ev-observation'), status=document.getElementById('ev-status');
+    var confirmModal=document.getElementById('ev-confirm'), confirmStatus=document.getElementById('ev-confirm-status');
+    var confirmSubmit=document.getElementById('ev-confirm-submit');
+    function evMissionNo(){ return activeMission||curMission(); }
+    function backendMissionId(){ return STATE.missionIds[evMissionNo()-1]||null; }
+    function pickPhoto(file){
+      if(!file || !/^image\//.test(file.type)) return;
+      photoFile=file;
+      var rd=new FileReader();
+      rd.onload=function(){ preview.src=rd.result; preview.hidden=false; placeholder.hidden=true; };
+      rd.readAsDataURL(file);
+    }
+    document.getElementById('ev-take-photo').addEventListener('click',function(){ document.getElementById('ev-photo-camera').click(); });
+    document.getElementById('ev-choose-photo').addEventListener('click',function(){ document.getElementById('ev-photo-choose').click(); });
+    document.getElementById('ev-photo-camera').addEventListener('change',function(e){ pickPhoto(e.target.files[0]); });
+    document.getElementById('ev-photo-choose').addEventListener('change',function(e){ pickPhoto(e.target.files[0]); });
+    function showForm(){ form.hidden=false; filedBox.hidden=true; }
+    function showFiled(r){
+      form.hidden=true; filedBox.hidden=false;
+      document.getElementById('ev-filed-observation').textContent=r.observation||'';
+      var d=''; try{ if(r.filed_at) d=new Date(r.filed_at).toLocaleString(undefined,{month:'short',day:'numeric',hour:'numeric',minute:'2-digit'}); }catch(e){}
+      document.getElementById('ev-filed-date').textContent=d?('Filed '+d):'Filed';
+      document.getElementById('ev-filed-pdf').href=r.pdf_url||'#';
+    }
+    function closeConfirm(){ confirmModal.classList.remove('open'); }
+    // Called by go() every time the screen opens: reset the form, then flip
+    // to the filed state if this mission's report is already in.
+    window.renderEvidence=function(){
+      photoFile=null; preview.hidden=true; preview.removeAttribute('src'); placeholder.hidden=false;
+      obs.value=''; status.textContent=''; confirmStatus.textContent=''; closeConfirm();
+      showForm();
+      var mid=backendMissionId();
+      if(!mid) return;
+      fetch('/api/mission-field-report/'+mid).then(function(r){ return r.ok?r.json():null; })
+        .then(function(r){ if(r&&r.filed) showFiled(r); })
+        .catch(function(){});
+    };
+    document.getElementById('ev-submit').addEventListener('click',function(){
+      if(!photoFile){ status.textContent='Take or choose a photo first.'; return; }
+      if(!obs.value.trim()){ status.textContent='Describe your evidence before filing.'; return; }
+      if(!backendMissionId()){ status.textContent='No active mission to file against.'; return; }
+      status.textContent=''; confirmStatus.textContent='';
+      confirmModal.classList.add('open');
+    });
+    document.getElementById('ev-confirm-back').addEventListener('click',closeConfirm);
+    confirmSubmit.addEventListener('click',function(){
+      var mid=backendMissionId(); if(!mid) return;
+      var no=evMissionNo();
+      confirmStatus.textContent='Filing…'; confirmSubmit.disabled=true;
+      var fd=new FormData();
+      fd.append('mission_id', mid); fd.append('photo', photoFile); fd.append('observation', obs.value.trim());
+      fetch('/api/mission-field-report',{method:'POST',body:fd})
+        .then(function(r){ return r.json().then(function(d){ if(!r.ok) throw new Error((d&&d.detail)||'Couldn’t file that'); return d; }); })
+        .then(function(){
+          confirmSubmit.disabled=false; closeConfirm();
+          if(window.opsMarkSubmitted) window.opsMarkSubmitted(no);
+          go('reward');
+        })
+        .catch(function(e){ confirmSubmit.disabled=false; confirmStatus.textContent=(e&&e.message)||'Couldn’t file that — try again.'; });
+    });
+    document.addEventListener('keydown',function(e){ if(e.key==='Escape'&&confirmModal.classList.contains('open')) closeConfirm(); });
+  })();
 
   /* ---- operations hub ---- */
   (function(){
@@ -1742,6 +1778,10 @@
     // Playtest kill-switch: the minecraft/companion screens are unreachable
     // (also blocks #minecraft / #companion deep links and stale history).
     if(!MINECRAFT_ENABLED && (name==='minecraft' || name==='companion')) name='ops';
+    // Individual-evidence model: the team submission screen is retired.
+    // Every route into it (Ops "Submit My Findings", deep links, history)
+    // lands on the simple photo+observation evidence screen instead.
+    if(name==='submission') name='evidence';
     if(MISSION_SCREENS.indexOf(name)>-1){ activeMission = missionNum || curMission(); }
     var activeEl = document.querySelector('.screen.active');
     var cur = activeEl ? activeEl.dataset.screen : null;
@@ -1753,10 +1793,10 @@
     if(name==='progress' && window.renderProgress) window.renderProgress();
     if(name==='vault' && typeof renderVault==='function') renderVault();
     if(name==='story') renderTransmission();
-    if(name==='assignment') renderAssignment();
+    if(name==='assignment'||name==='evidence') renderAssignment(); // evidence needs its ev-cache prompt text for the active mission
     if(name==='missions') renderMissions(currentWeek);
     if(name==='ops' && window.renderOps) window.renderOps(curMission());
-    if(name==='submission' && window.renderSubmission) window.renderSubmission();
+    if(name==='evidence' && window.renderEvidence) window.renderEvidence();
     if(name==='team' && window.renderTeam) window.renderTeam();
     if(name==='ops' && window.openOpsGuide){ var seen; try{ seen=localStorage.getItem('evoke-ops-guide-seen')==='1'; }catch(e){ seen=false; } if(!seen) setTimeout(window.openOpsGuide, 350); }
     if(name==='missions' && window.openMissionsGuide){ var mSeen; try{ mSeen=localStorage.getItem('evoke-missions-guide-seen')==='1'; }catch(e){ mSeen=false; } if(!mSeen) setTimeout(window.openMissionsGuide, 350); }
