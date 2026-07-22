@@ -16,11 +16,27 @@ if [ ! -f .env ]; then
     cp .env.example .env
 fi
 
-# Start infrastructure
+# Start infrastructure. The AI stack (ollama/CUDA, open-webui, litellm,
+# presidio) and the Minecraft server are opt-in compose profiles -- they're
+# multi-GB pulls that have filled contributor disks. Enable them with
+# EVOKE_PROFILES=ai,minecraft in the root .env. Without them the core stack
+# runs fine (B1llBot uses canned replies; Minecraft features stay dormant).
+EVOKE_PROFILES=$(grep -E '^EVOKE_PROFILES=' .env 2>/dev/null | cut -d= -f2)
 echo ""
-echo "🟦 Starting infrastructure (postgres, redpanda, opensearch, minio, minecraft)..."
+if [ -n "$EVOKE_PROFILES" ]; then
+    echo "🟦 Starting infrastructure (core + profiles: $EVOKE_PROFILES)..."
+else
+    echo "🟦 Starting core infrastructure (postgres, redpanda, opensearch, minio)..."
+    echo "   (AI + Minecraft stacks are opt-in: set EVOKE_PROFILES=ai,minecraft in .env)"
+fi
 cd evoke-infra
-docker compose up -d
+# --build: the minecraft image is built locally; a plain `up` after pulling
+# new commits keeps running the stale image.
+if [ -n "$EVOKE_PROFILES" ]; then
+    COMPOSE_PROFILES="$EVOKE_PROFILES" docker compose up -d --build
+else
+    docker compose up -d --build
+fi
 echo "⏳ Waiting for services to be healthy..."
 sleep 30
 
@@ -50,7 +66,11 @@ cd ../evoke
 # no matter how it was set at the root. Kept in sync on every run so editing
 # the root .env is still the one place to change things.
 cp ../.env .env
-docker compose up -d
+# --build matters here: pulling a commit that adds Python deps (reportlab,
+# qrcode, bcrypt, ...) with a plain `up -d` reuses the old image and the
+# web container crash-loops on ModuleNotFoundError. Layer caching makes
+# this a no-op when requirements.txt hasn't changed.
+docker compose up -d --build
 
 echo "⏳ Waiting for services to start..."
 sleep 15

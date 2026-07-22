@@ -55,7 +55,11 @@ def issue_session(response: Response, user_id: str, role: str = "learner") -> No
 
 
 def clear_session(response: Response) -> None:
-    response.delete_cookie(SESSION_COOKIE)
+    # Must mirror issue_session's attributes: Safari (and the cookie spec)
+    # only match an existing cookie for deletion when path/secure/samesite
+    # line up. A bare delete_cookie() left the session cookie alive in
+    # Safari -- "Log Out" appeared to do nothing (found live, 2026-07-22).
+    response.delete_cookie(SESSION_COOKIE, httponly=True, secure=True, samesite="Lax")
 
 
 def _read_session(request: Request) -> dict:

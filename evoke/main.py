@@ -424,6 +424,12 @@ async def startup():
         # fresh install has a sensible grouping without any admin work.
         db_execute("ALTER TABLE missions ADD COLUMN IF NOT EXISTS stage INTEGER")
         db_execute("UPDATE missions SET stage = week WHERE stage IS NULL")
+        # objective_md was added to init-db.sql (2026-07-21) but never to
+        # this idempotent block -- init-db.sql only runs on a brand-new
+        # Postgres volume, so any pre-existing dev DB threw
+        # `column "objective_md" does not exist` on every /api/missions
+        # call (surfacing as a blank page) after pulling that change.
+        db_execute("ALTER TABLE missions ADD COLUMN IF NOT EXISTS objective_md TEXT")
         db_execute("""CREATE TABLE IF NOT EXISTS daily_reflections (
             id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
             user_id UUID NOT NULL REFERENCES users(id),
@@ -986,13 +992,24 @@ async def auth_brightspace_callback(request: Request, code: str = None, state: s
 async def validate_session(user_id: str = Depends(get_current_user)):
     """Validates the real session cookie (see auth_session.py) -- replaces
     the old version, which accepted any non-empty string as a valid
-    session. 401s via get_current_user if there's no valid session."""
+    session. 401s via get_current_user if there's no valid session.
+
+    A correctly-signed cookie whose user row is GONE (e.g. the DB was
+    reset while a browser kept its cookie) used to return status=valid
+    with null fields -- the SPA then booted as a ghost user and every
+    downstream call 404'd, rendering a blank page that Log Out couldn't
+    fix. Treat it as no session: 401 and clear the cookie so the client
+    falls through to its normal logged-out/re-login path."""
     row = db_fetch_one("SELECT display_name, email FROM users WHERE id = %s::uuid", (user_id,))
+    if not row:
+        resp = JSONResponse(status_code=401, content={"detail": "Session user no longer exists -- log in again"})
+        clear_session(resp)
+        return resp
     return {
         "status": "valid",
         "user_id": user_id,
-        "display_name": row[0] if row else None,
-        "email": row[1] if row else None,
+        "display_name": row[0],
+        "email": row[1],
     }
 
 @app.post("/api/session/logout")

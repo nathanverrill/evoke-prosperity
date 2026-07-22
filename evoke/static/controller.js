@@ -86,6 +86,21 @@
     }
   }
 
+  // Every startup failure used to render the same blank dark page --
+  // missing DB column, empty mission catalog, orphaned session, crashed
+  // backend all looked identical and were undiagnosable without docker
+  // logs (field report, 2026-07-22). This banner names the failure and
+  // says what to check, right on the page.
+  function showBootError(title, detail){
+    var d=document.createElement('div');
+    d.setAttribute('role','alert');
+    d.style.cssText='position:fixed;top:18px;left:50%;transform:translateX(-50%);z-index:9999;max-width:640px;width:calc(100% - 40px);padding:16px 40px 16px 20px;border-radius:12px;background:#2a1520;box-shadow:0 0 0 1px #b0413e,0 12px 30px rgba(0,0,0,0.5);color:#ffd7d7;font-family:var(--font-mono,monospace);font-size:13px;line-height:1.5;';
+    d.innerHTML='<strong style="display:block;color:#ff9b9b;margin-bottom:4px;">'+title+'</strong>'+detail
+      +'<button type="button" style="position:absolute;top:8px;right:10px;background:none;border:none;color:#ff9b9b;cursor:pointer;font-size:16px;" aria-label="Dismiss">&times;</button>';
+    d.querySelector('button').addEventListener('click',function(){ d.remove(); });
+    document.body.appendChild(d);
+  }
+
   function seedFromBackend(){
     // A page reload's identity now comes from the httponly session cookie
     // itself (see evoke/auth_session.py) via /api/session/validate -- no
@@ -98,11 +113,21 @@
       return getJSON('/api/session/validate').then(function(d){
         STATE.userId = d.user_id; STATE.displayName = d.display_name;
         return Promise.all([
-          getJSON('/api/missions?user_id='+STATE.userId).catch(function(){ return {missions:[]}; }),
+          // null (not {missions:[]}) on failure, so "the catalog fetch
+          // errored" and "the catalog is genuinely empty" stay
+          // distinguishable for the boot diagnostics below.
+          getJSON('/api/missions?user_id='+STATE.userId).catch(function(){ return null; }),
           getJSON('/api/profile/player/'+STATE.userId).catch(function(){ return null; })
         ]);
       }).then(function(res){
       var missions = (res[0] && res[0].missions) || [];
+      if(!res[0]){
+        showBootError('Mission catalog failed to load',
+          'The /api/missions call errored. Usually the backend or its database: run <code>docker compose logs web</code> in evoke/ — a missing DB column or unhealthy Postgres surfaces there as a 500.');
+      } else if(!missions.length){
+        showBootError('Mission catalog is empty',
+          'The database has no missions (common after <code>docker compose down -v</code>). Run <code>python3 seed.py</code> in evoke-infra/ — it seeds the full catalog when empty and is safe to re-run.');
+      }
       STATE.profile = res[1];
       STATE.missionIds = missions.map(function(m){ return m.id; });
       var done = {};
@@ -158,7 +183,14 @@
   }
 
   // ----- the designer's screen logic, verbatim, booted after seeding -----
-  seedFromBackend().then(function(){
+  // The catch matters: an unexpected boot rejection used to skip the entire
+  // .then, leaving body.auth-pending set forever -- i.e. a permanently
+  // blank page with no clue why. Now the app still reveals itself and the
+  // failure is named on screen.
+  seedFromBackend().catch(function(e){
+    showBootError('EVOKE couldn’t start',
+      ((e && e.message) ? e.message + '. ' : '') + 'Check that the backend is running and healthy: <code>docker compose logs web</code> in evoke/.');
+  }).then(function(){
   // Auth is now resolved one way or the other -- reveal whichever of
   // Home / the logged-out gate applies (see the auth-pending CSS rule
   // in index.html, which kept both hidden until this point).

@@ -154,7 +154,17 @@ services:
   # OLLAMA_BASE_URL in your .env to point at it instead
   # (http://host.docker.internal:11434) and this service is simply unused
   # -- still safe to leave running, or comment it out.
+  # ---- Optional heavy stacks -------------------------------------------
+  # Everything from here through `minecraft` is opt-in via compose profiles
+  # (COMPOSE_PROFILES=ai,minecraft — set EVOKE_PROFILES in the root .env for
+  # quick-start.sh, or COMPOSE_PROFILES in evoke-infra/.env for raw compose).
+  # The AI images are multi-GB (ollama ships NVIDIA CUDA libraries a Mac
+  # can't even use) and have filled disks / corrupted layer pulls on
+  # contributor machines; the core stack (postgres/redpanda/opensearch/
+  # minio) must come up light without them. Without the ai profile, B1llBot
+  # falls back to its canned keyword replies -- the app runs fine.
   ollama:
+    profiles: ["ai"]
     image: ollama/ollama:latest
     networks:
       - evoke-infra-network
@@ -176,6 +186,7 @@ services:
   # pulled just re-checks and exits immediately; Ollama itself skips
   # re-downloading a model it already has.
   ollama-pull:
+    profiles: ["ai"]
     image: ollama/ollama:latest
     networks:
       - evoke-infra-network
@@ -189,6 +200,7 @@ services:
     restart: "no"
 
   open-webui:
+    profiles: ["ai"]
     image: ghcr.io/open-webui/open-webui:main
     networks:
       - evoke-infra-network
@@ -209,6 +221,7 @@ services:
   # litellm's "presidio" guardrail below. No student data leaves the
   # network for this check.
   presidio-analyzer:
+    profiles: ["ai"]
     image: mcr.microsoft.com/presidio-analyzer:latest
     networks:
       - evoke-infra-network
@@ -216,6 +229,7 @@ services:
       GRPC_PORT: "5001"
 
   presidio-anonymizer:
+    profiles: ["ai"]
     image: mcr.microsoft.com/presidio-anonymizer:latest
     networks:
       - evoke-infra-network
@@ -224,6 +238,7 @@ services:
   # app points here instead of straight at open-webui. Phase 0 is pure
   # pass-through routing; Phase 1 turns on the guardrails in config.yaml.
   litellm:
+    profiles: ["ai"]
     image: docker.litellm.ai/berriai/litellm:latest
     networks:
       - evoke-infra-network
@@ -257,6 +272,7 @@ services:
       start_period: 20s
 
   minecraft:
+    profiles: ["minecraft"]
     build:
       context: ./minecraft
       dockerfile: Dockerfile

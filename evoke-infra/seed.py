@@ -4,6 +4,8 @@ Seed script for EVOKE Prosperity database
 Populates with campaigns, missions, quests, users, and test data
 """
 
+import json
+import os
 import psycopg2
 import psycopg2.extras
 import sys
@@ -148,12 +150,46 @@ def seed_database(db_url):
             )
             badge_ids[key] = badge_id
 
-        # Missions are no longer seeded here -- the LMS (brightspace-sim) is
-        # the system of record for the mission catalog, and EVOKE syncs its
-        # missions table from it on startup (see main.py's
-        # sync_missions_from_lms, keyed by lms_assignment_ref). Run this
-        # script AFTER starting the EVOKE app at least once, or the quest
-        # links below will warn and fall back to unlinked (mission_id=NULL).
+        # Missions: seeded from the committed fixture (seed-data/
+        # missions.json, exported 2026-07-22 from the hand-populated live
+        # catalog -- the docx-transcribed briefs, objectives, and evidence
+        # requirements) whenever this campaign has none. This is what makes
+        # a fresh clone or a `docker compose down -v` reset recoverable in
+        # local mode: the old startup auto-sync (sync_missions_from_lms)
+        # was removed from main.py, and the only other repopulate path
+        # (/admin Pull -> Link) needs a live Brightspace OAuth connection.
+        # A DB that already has missions -- e.g. one whose refs were
+        # relinked to real Brightspace assignment ids via /admin -- is left
+        # completely untouched. Seeded missions are released immediately:
+        # this path is local bootstrap, where an unreleased (invisible)
+        # catalog would be indistinguishable from the empty one it exists
+        # to prevent.
+        # Columns referenced below that postdate older Postgres volumes
+        # (init-db.sql only runs on a brand-new volume): add them here too,
+        # idempotently, so seeding doesn't depend on the app having booted
+        # its own migration block first.
+        cur.execute("ALTER TABLE missions ADD COLUMN IF NOT EXISTS objective_md TEXT")
+        cur.execute("ALTER TABLE missions ADD COLUMN IF NOT EXISTS stage INTEGER")
+        cur.execute("SELECT COUNT(*) FROM missions WHERE campaign_id = %s", (campaign_id,))
+        if cur.fetchone()[0] == 0:
+            fixture_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'seed-data', 'missions.json')
+            with open(fixture_path) as f:
+                mission_rows = json.load(f)
+            for m in mission_rows:
+                cur.execute(
+                    """INSERT INTO missions (id, campaign_id, lms_assignment_ref, week, sequence,
+                                             title, arc, superpower, primary_skill, secondary_skill,
+                                             pfl_domain, pbl_description, mission_brief_md,
+                                             evidence_requirements_md, objective_md, stage, released_at)
+                       VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, NOW())""",
+                    (uuid.uuid4(), campaign_id, m['lms_assignment_ref'], m['week'], m['sequence'],
+                     m['title'], m['arc'], m['superpower'], m['primary_skill'], m['secondary_skill'],
+                     m['pfl_domain'], m['pbl_description'], m['mission_brief_md'],
+                     m['evidence_requirements_md'], m['objective_md'], m.get('stage'))
+                )
+            print(f"  Seeded {len(mission_rows)} missions from seed-data/missions.json (all released)")
+        else:
+            print("  Missions already present -- leaving the existing catalog untouched")
         #
         # NOTE on the mission_id lookups below: the previous version of this
         # script built an in-memory mission_key -> mission_id map from its
@@ -172,7 +208,7 @@ def seed_database(db_url):
             )
             row = cur.fetchone()
             if not row:
-                print(f"  ! No mission synced yet for {lms_ref} -- quest will link to no mission until the EVOKE app has run its startup sync")
+                print(f"  ! No mission with lms_assignment_ref={lms_ref} -- quest will link to no mission (refs may have been relinked to real Brightspace ids via /admin)")
             return row[0] if row else None
 
         # Create Minecraft quests (one per mission + side quests)
@@ -297,7 +333,7 @@ def seed_database(db_url):
         print(f"  - Player One (learner, Demo Team Leader): {player_one_id}")
         print(f"  - Player Two (learner, Demo Team Member): {player_two_id}")
         print(f"  - Admin: {admin_id}")
-        print(f"  - Missions: synced from the LMS on EVOKE app startup, not seeded here")
+        print(f"  - Missions: seeded from seed-data/missions.json when the catalog is empty; existing catalogs are never touched")
         print(f"  - Quests: 16 created")
         print(f"  - Minecraft: unlinked -- connect a real client and evoke-minecraft-bridge will auto-link the first player to Player One")
 

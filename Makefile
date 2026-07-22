@@ -20,7 +20,7 @@ start: start-infra wait-infra start-app
 
 start-infra:
 	@echo "🚀 Starting infrastructure..."
-	cd evoke-infra && docker compose up -d
+	cd evoke-infra && docker compose up -d --build
 	@echo "⏳ Waiting for infrastructure to be healthy..."
 
 wait-infra:
@@ -46,7 +46,7 @@ wait-infra:
 
 start-app:
 	@echo "🚀 Starting EVOKE app..."
-	cd evoke && docker compose up -d
+	cd evoke && docker compose up -d --build
 	@echo "⏳ Waiting for app to start..."
 	@until curl -fs http://localhost:8000/api/health > /dev/null 2>&1; do \
 		echo "  Waiting for app..."; \
