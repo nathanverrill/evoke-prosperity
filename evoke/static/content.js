@@ -53,11 +53,13 @@ window.EVOKE_CONTENT = {
     // Graphic-novel pages (Step 2 of the journey)
     novel: {
       chapter:"Chapter 1 \u00b7 The Thirst of Keel",
+      // July 2026 redraw (s01e01-04, from evoke-prosperity-files/
+      // july22_graphic_novel); the older c1-c4.jpg art stays on disk unused.
       pages:[
-        { img:"img/content/c1.jpg" },
-        { img:"img/content/c2.jpg" }
-        ,{ img:"img/content/c3.jpg" }
-        ,{ img:"img/content/c4.jpg" }
+        { img:"img/content/s01e01.jpg" },
+        { img:"img/content/s01e02.jpg" },
+        { img:"img/content/s01e03.jpg" },
+        { img:"img/content/s01e04.jpg" }
       ]
     },
         novel_m3: {
