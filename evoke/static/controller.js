@@ -533,7 +533,7 @@
         '</div>'+
         actionHTML;
       var btn = card.querySelector('button.btn');
-      if(status==='current') btn.addEventListener('click',function(){ if(devOn()){ try{localStorage.setItem('evoke-dev-mission',String(idx+1));}catch(e){} } go('story'); });
+      if(status==='current') btn.addEventListener('click',function(){ if(devOn()){ try{localStorage.setItem('evoke-dev-mission',String(idx+1));}catch(e){} } go('novel'); });
       mc.appendChild(card);
     });
   }
@@ -702,7 +702,7 @@
       dots.innerHTML='';
       if(multi){ for(var d=0;d<spreads.length;d++){ dots.appendChild(el('<span style="width:8px;height:8px;border-radius:50%;background:'+(d===spreadIdx?'var(--cyan-300)':'rgba(145,209,209,0.25)')+';box-shadow:'+(d===spreadIdx?'0 0 8px var(--cyan-300)':'none')+';"></span>')); } }
       var last = spreadIdx===spreads.length-1;
-      cont.innerHTML = last ? ((sessionReturn==='vault'?'Back to Vault':'Continue to Mission Control')+' \u25b6<span class="key" aria-hidden="true"></span>') : 'Next \u25b6';
+      cont.innerHTML = last ? ((sessionReturn==='vault'?'Back to Vault':'Continue the Story')+' \u25b6<span class="key" aria-hidden="true"></span>') : 'Next \u25b6';
       backBtn.textContent = spreadIdx===0 ? '\u25c0 Back' : '\u25c0 Prev';
       book.classList.remove('anim'); void book.offsetWidth; book.classList.add('anim');
     }
@@ -733,7 +733,7 @@
       if(pages.length){ if(ph) ph.style.display='none'; book.style.display=''; showSpread(0); }
       else { showEmptyNovel(); }
     };
-    cont.addEventListener('click',function(){ if(spreadIdx<spreads.length-1) showSpread(spreadIdx+1); else if(sessionReturn){ var t=sessionReturn; sessionReturn=null; go(t); } else go('missions'); });
+    cont.addEventListener('click',function(){ if(spreadIdx<spreads.length-1) showSpread(spreadIdx+1); else if(sessionReturn){ var t=sessionReturn; sessionReturn=null; go(t); } else go('story'); });
     backBtn.addEventListener('click',function(){ if(spreadIdx>0) showSpread(spreadIdx-1); else go(currentWeek===0 ? 'welcome' : 'home'); });
     function openZoom(pIdx){
       zoomIdx = pIdx;
@@ -772,8 +772,12 @@
   /* ---- onboarding: B1llBot prologue, Mission 1 only ----
      Shown exactly once per browser (evoke-onboarding-seen), same localStorage-gate
      pattern as the Ops Hub guide (evoke-ops-guide-seen). Sequence: welcome ->
-     prologue -> novel (Chapter 1) -> assignment. The forced-choice "motive" tap
-     and the avatar-icon picker that used to sit between novel and assignment were
+     prologue -> novel (Chapter 1) -> story -> assignment, the same canonical
+     novel->story->assignment chain every other entry point now uses (2026-07-22)
+     -- novel's own "Continue" defaults to 'story' when no sessionReturn is set,
+     so this block doesn't need to (and no longer does) force a skip to
+     'assignment' the way it used to. The forced-choice "motive" tap and the
+     avatar-icon picker that used to sit between novel and assignment were
      removed (2026-07-21) -- motive was pure flavor, never read anywhere after
      being stored; the avatar picker set the exact same localStorage key
      ('evoke-avatar') the Profile screen's own picker already sets, with the same
@@ -793,7 +797,6 @@
 
     document.getElementById('prologue-continue').addEventListener('click', function(){
       markSeen();
-      novelReturn='assignment';
       go('novel');
     });
   })();
@@ -1071,6 +1074,19 @@
       var helpBtn=document.getElementById('ops-help'); if(helpBtn) helpBtn.addEventListener('click',openGuide);
       var x=document.getElementById('ops-guide-x'); if(x) x.addEventListener('click',closeGuide);
       var ok=document.getElementById('ops-guide-ok'); if(ok) ok.addEventListener('click',closeGuide);
+      if(guide){ guide.addEventListener('click',function(e){ if(e.target===guide) closeGuide(); }); }
+      document.addEventListener('keydown',function(e){ if(e.key==='Escape' && guide && guide.classList.contains('open')) closeGuide(); });
+    })();
+    // Mission Control first-visit overlay — same auto-open-once pattern as
+    // the Ops Hub guide just above, gated by its own localStorage key so
+    // dismissing one doesn't dismiss the other.
+    (function(){
+      var guide=document.getElementById('missions-guide');
+      function openGuide(){ if(guide){ guide.classList.add('open'); var ok=document.getElementById('missions-guide-ok'); if(ok) ok.focus(); } }
+      function closeGuide(){ if(guide){ guide.classList.remove('open'); try{ localStorage.setItem('evoke-missions-guide-seen','1'); }catch(e){} } }
+      window.openMissionsGuide=openGuide;
+      var x=document.getElementById('missions-guide-x'); if(x) x.addEventListener('click',closeGuide);
+      var ok=document.getElementById('missions-guide-ok'); if(ok) ok.addEventListener('click',closeGuide);
       if(guide){ guide.addEventListener('click',function(e){ if(e.target===guide) closeGuide(); }); }
       document.addEventListener('keydown',function(e){ if(e.key==='Escape' && guide && guide.classList.contains('open')) closeGuide(); });
     })();
@@ -1727,6 +1743,7 @@
     if(name==='submission' && window.renderSubmission) window.renderSubmission();
     if(name==='team' && window.renderTeam) window.renderTeam();
     if(name==='ops' && window.openOpsGuide){ var seen; try{ seen=localStorage.getItem('evoke-ops-guide-seen')==='1'; }catch(e){ seen=false; } if(!seen) setTimeout(window.openOpsGuide, 350); }
+    if(name==='missions' && window.openMissionsGuide){ var mSeen; try{ mSeen=localStorage.getItem('evoke-missions-guide-seen')==='1'; }catch(e){ mSeen=false; } if(!mSeen) setTimeout(window.openMissionsGuide, 350); }
     if((name==='minecraft' || name==='companion') && window.renderMinecraftWeek) window.renderMinecraftWeek();
     if(name==='profile' && window.renderProfile2) window.renderProfile2();
     if(window.syncAllXP) window.syncAllXP();
@@ -1802,17 +1819,18 @@
     go('companion');
   } else {
     // Prefer an existing hash (a shared/bookmarked/reloaded link) over
-    // ?screen=, so reloading mid-app doesn't bounce back to Ops Hub.
+    // ?screen=, so reloading mid-app doesn't bounce back to Mission Control.
     // #mission/{n}/{screen} (see parseHash/syncHash) -- the mission number
     // actually drives activeMission here, so a reload or a shared link to
     // e.g. #mission/5/novel really reproduces mission 5's comic, not just
     // whatever's currently in progress.
-    // Default (no hash/query param -- i.e. a fresh login) is Ops Hub, not
-    // Home: that's where the actual mission/evidence/Field Kit work
-    // happens, and the ops-guide orientation modal (below) already exists
-    // specifically to onboard a first-time visitor there.
+    // Default (no hash/query param -- i.e. a fresh login) is Mission Control:
+    // a student landing from Brightspace should see the mission list and get
+    // steered into Mission 1 (the missions-guide overlay below), not drop
+    // straight into Ops Hub's per-mission workspace before they've even
+    // picked up their first assignment.
     var _parsed = parseHash();
-    var _boot = (VALID_SCREENS.indexOf(_parsed.screen) > -1) ? _parsed.screen : (_sp.get('screen') || 'ops');
+    var _boot = (VALID_SCREENS.indexOf(_parsed.screen) > -1) ? _parsed.screen : (_sp.get('screen') || 'missions');
     go(_boot, false, _parsed.mission);
   }
   // Native browser Back/Forward: without this, go() only ever changed which

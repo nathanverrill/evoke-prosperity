@@ -872,6 +872,23 @@
   </main>
 </section>
 
+<!-- Mission Control first-visit overlay: get started with Mission 1 -->
+<div class="ops-modal" id="missions-guide" role="dialog" aria-modal="true" aria-labelledby="missions-guide-title">
+  <div class="sheet">
+    <div style="display:flex;align-items:flex-start;gap:14px;margin-bottom:8px;">
+      <span style="width:44px;height:44px;flex:none;border-radius:12px;display:flex;align-items:center;justify-content:center;color:var(--cyan-200);background:linear-gradient(135deg,rgba(0,150,136,0.26),rgba(0,150,137,0.15));box-shadow:inset 0 0 0 1px var(--border-ui);"><span class="ms" aria-hidden="true" style="font-size:24px;">rocket_launch</span></span>
+      <h2 id="missions-guide-title" style="font-family:var(--font-display);font-weight:800;font-size:22px;color:var(--text-heading);margin:0;flex:1;line-height:1.15;">Welcome to Mission Control</h2>
+      <button id="missions-guide-x" type="button" aria-label="Close" style="border:none;background:none;color:var(--text-faint);cursor:pointer;flex:none;"><span class="ms" aria-hidden="true" style="font-size:24px;">close</span></button>
+    </div>
+    <p style="font-family:var(--font-body);font-size:14px;line-height:1.55;color:var(--teal-100);margin:0 0 18px;">This is where every mission gets deployed, Agent. Your first assignment is ready and waiting below.</p>
+    <div style="display:flex;gap:13px;align-items:flex-start;padding:14px 16px;border-radius:12px;background:rgba(0,150,136,0.08);box-shadow:inset 0 0 0 1px var(--border-glass);margin-bottom:20px;">
+      <span class="ms" aria-hidden="true" style="font-size:22px;color:var(--cyan-300);flex:none;">flag</span>
+      <div><div style="font-family:var(--font-display);font-weight:700;font-size:14px;color:var(--cyan-100);margin-bottom:2px;">Start with Mission 1</div><div style="font-family:var(--font-body);font-size:13.5px;line-height:1.5;color:var(--teal-050);">Tap <strong style="color:var(--cyan-100);">Begin Mission</strong> on the first card to read its story and get your assignment.</div></div>
+    </div>
+    <button id="missions-guide-ok" class="btn" type="button" style="width:100%;">Let's go ▶<span class="key" aria-hidden="true"></span></button>
+  </div>
+</div>
+
 <!-- ===== TEAM (info + communication) — B1llBot "holo-comms" layout ===== -->
 <section class="screen bb-room" data-screen="team" aria-label="Your Team">
   <header class="topbar">
