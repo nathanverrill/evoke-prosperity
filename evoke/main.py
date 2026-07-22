@@ -382,6 +382,40 @@ async def startup():
                 (objective, quest_title)
             )
 
+        # Replace the 4 placeholder side quests (Find Hidden Treasure,
+        # Master Farmer, Mining Expert, Explorer's Log -- never had a
+        # mc_quest_triggers row, so nothing could ever check one off) with
+        # the real Keel Mine expedition line (2026-07-22): explore + descend
+        # already exist as Basin Archive entries above, this is the
+        # mine-it-sell-it-earn-it chain that follows. Catalog only for
+        # now -- no mc_quest_triggers yet, same disabled-until-real
+        # Field Quest Log state as before; the "sell ores" step in
+        # particular has no in-world sell mechanic to trigger off yet
+        # (only the Halyard arena's spider-eye sell plate exists today).
+        # Guarded by zero completions/submissions so this never deletes a
+        # quest some real learner actually finished.
+        db_execute("""
+            DELETE FROM mc_quests WHERE title IN
+                ('Find Hidden Treasure', 'Master Farmer', 'Mining Expert', 'Explorer''s Log')
+            AND NOT EXISTS (SELECT 1 FROM mc_quest_completions c WHERE c.quest_id = mc_quests.id)
+            AND NOT EXISTS (SELECT 1 FROM mc_quest_submissions s WHERE s.quest_id = mc_quests.id)
+        """)
+        for quest_title, description in [
+            ("Speak with B1llBot", "Find B1llBot in Keel and say hello."),
+            ("Enter the Keel Mine", "Step through the Keel Mine entrance."),
+            ("Mine 32 Coal", "Mine 32 coal ore in the Keel Mine."),
+            ("Mine 16 Iron Ore", "Mine 16 iron ore in the Keel Mine."),
+            ("Return to town", "Carry your haul back to Keel."),
+            ("Sell your ores at the Marketplace", "Trade your coal and iron for coins at the Marketplace."),
+            ("Earn your first coins", "Walk away from the Marketplace with money in your pocket."),
+        ]:
+            db_execute(
+                """INSERT INTO mc_quests (campaign_id, title, description, kind)
+                   SELECT id, %s, %s, 'side_quest' FROM campaigns WHERE key = 'evoke-prosperity'
+                   AND NOT EXISTS (SELECT 1 FROM mc_quests WHERE title = %s)""",
+                (quest_title, description, quest_title)
+            )
+
         # Wave 3 (BUILD_PLAN_2.md): admin-configurable stages, daily
         # reflections (Words of Wisdom), phone pairing tokens, and the
         # two-channel Minecraft link codes.

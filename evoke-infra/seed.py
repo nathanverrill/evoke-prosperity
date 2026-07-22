@@ -189,11 +189,16 @@ def seed_database(db_url):
             ('mission-10', 'The Vault', 'Allocate resources between your build and the shared network', 'mission_quest'),
             ('mission-11', 'Pitch Hall', 'Stage your build in the newly-unlocked Oasis', 'mission_quest'),
             ('mission-12', 'Network Node', 'Connect your build to the growing network map', 'mission_quest'),
-            # Side quests
-            (None, 'Find Hidden Treasure', 'Locate 5 hidden chests in the Basin', 'side_quest'),
-            (None, 'Master Farmer', 'Harvest crops from all biomes', 'side_quest'),
-            (None, 'Mining Expert', 'Collect rare ores and materials', 'side_quest'),
-            (None, "Explorer's Log", 'Map out the entire Basin', 'side_quest'),
+            # Side quests: the Keel Mine expedition line (2026-07-22).
+            # "Explore" and "Descend to Keel" aren't repeated here -- they're
+            # the existing Basin Archive entries seeded further down.
+            (None, 'Speak with B1llBot', 'Find B1llBot in Keel and say hello.', 'side_quest'),
+            (None, 'Enter the Keel Mine', 'Step through the Keel Mine entrance.', 'side_quest'),
+            (None, 'Mine 32 Coal', 'Mine 32 coal ore in the Keel Mine.', 'side_quest'),
+            (None, 'Mine 16 Iron Ore', 'Mine 16 iron ore in the Keel Mine.', 'side_quest'),
+            (None, 'Return to town', 'Carry your haul back to Keel.', 'side_quest'),
+            (None, 'Sell your ores at the Marketplace', 'Trade your coal and iron for coins at the Marketplace.', 'side_quest'),
+            (None, 'Earn your first coins', 'Walk away from the Marketplace with money in your pocket.', 'side_quest'),
         ]
 
         for lms_ref, title, description, kind in quest_data:
